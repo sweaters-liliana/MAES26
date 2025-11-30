@@ -5,14 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control de Producción - Cirineo 2025</title>
     
+    <!-- React y ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     
+    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
+    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- d3 para el gráfico de ejemplo -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     
     <style>
         .custom-scrollbar::-webkit-scrollbar { height: 10px; width: 10px; }
@@ -22,9 +29,6 @@
         
         input[type=number]::-webkit-inner-spin-button, 
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-        
-        .machine-col { min-width: 100px; width: 100px; }
-        .machine-col.expanded { min-width: 180px; width: 180px; }
         
         /* Animación de carga */
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -40,9 +44,10 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, collection, doc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
 
-        // --- CONFIG FIREBASE ---
+        // --- FIREBASE SETUP ---
+        // Usamos la misma configuración y aseguramos la autenticación anónima para que los operadores puedan escribir
         const firebaseConfig = {
             apiKey: "AIzaSyBqHgV4vDat1-VmZfKbiPg7nuiX-ROcexw",
             authDomain: "cirineo-cec21.firebaseapp.com",
@@ -59,6 +64,7 @@
 
         // --- CONSTANTES ---
         const ROLES = { ADMIN: 'admin', COMMENTATOR: 'commentator', OBSERVER: 'observer', OPERATOR: 'operator' };
+        const VIEWER_ROLES = [ROLES.ADMIN, ROLES.COMMENTATOR];
         
         const USERS = {
             '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN },
@@ -89,51 +95,535 @@
             { id: 'm8',  name: 'MAQ 8',  type: 'SANTONI TOP2', diam: 13, needles: 1152 },
         ];
 
-        // --- HELPER: FECHAS E IDs ---
-        // Generamos IDs seguros (sin espacios ni acentos) y Etiquetas legibles
+        // --- HELPER: CALENDARIO ---
         const generateCalendar = () => {
-            // Nombres de días sin acentos para IDs
             const days = ['DOMINGO', 'LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO'];
             const rows = [];
-            
             const addDate = (y, m, d, monthName) => {
                 const date = new Date(y, m, d);
                 const dayName = days[date.getDay()];
-                // ID seguro para la DB (ej: lunes_17_feb)
                 const id = `${dayName.toLowerCase()}_${d}_${monthName.toLowerCase()}`;
-                // Etiqueta bonita para la tabla (ej: LUNES 17 FEB)
                 const label = `${dayName} ${d} ${monthName}`;
                 rows.push({ id, label });
             };
-
-            // Febrero 2025 (Ejemplo parcial)
             for (let i = 10; i <= 28; i++) addDate(2025, 1, i, 'FEB');
-            // Marzo 2025 (Ejemplo parcial)
             for (let i = 1; i <= 20; i++) addDate(2025, 2, i, 'MAR');
-            
             return rows;
         };
 
         const ALL_ROWS = generateCalendar();
-        // Definimos semana actual aproximada para el ejemplo (indices 2 al 8)
-        const CURRENT_WEEK_ROWS = ALL_ROWS.slice(2, 9); 
+        const CURRENT_WEEK_ROWS = ALL_ROWS.slice(2, 9); // Ejemplo de semana
 
-        // --- FUNCIONES LÓGICAS ---
-        const calculateProduction = (targetQty, timeMin, hours, actualQty) => {
-            if (!targetQty || !timeMin || !hours) return { targetPieces: 0, percentage: 0 };
-            const totalMinutes = hours * 60;
-            const targetPieces = Math.round(totalMinutes / timeMin);
-            const percentage = targetPieces > 0 ? Math.min(100, (actualQty / targetPieces) * 100) : 0;
-            return { targetPieces, percentage: parseFloat(percentage.toFixed(1)) };
+        // --- COMPONENTE: Icono de Máquina ---
+        const MachineIconImage = () => (
+            <div className="w-8 h-8 opacity-80 rounded-full bg-blue-100 flex items-center justify-center p-1">
+                <i data-lucide="cog" className="w-full h-full object-contain text-blue-700"></i>
+            </div>
+        );
+
+        // --- COMPONENTE: Modal de Cálculos Locales (Admin/Comentador) ---
+        const AdminCalcModal = ({ machine, rowLabel, currentValue, onClose }) => {
+            const [timeMin, setTimeMin] = useState(0);
+            const [timeSec, setTimeSec] = useState(0);
+            const [hours, setHours] = useState(12);
+            const [viewingQty, setViewingQty] = useState(currentValue || 0);
+            
+            const { targetPieces, efficiency } = useMemo(() => {
+                const timePerPieceInMinutes = Number(timeMin) + (Number(timeSec) / 60);
+                const totalMinutes = Number(hours) * 60;
+                
+                const target = timePerPieceInMinutes > 0 ? Math.round(totalMinutes / timePerPieceInMinutes) : 0;
+                const eff = target > 0 ? (Number(viewingQty) / target) * 100 : 0;
+                
+                return { targetPieces: target, efficiency: parseFloat(eff.toFixed(1)) };
+            }, [timeMin, timeSec, hours, viewingQty]);
+
+            return (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="bg-blue-600 p-4 text-white flex justify-between items-center shrink-0">
+                            <h3 className="font-bold text-lg">Análisis Local de Producción</h3>
+                            <button onClick={onClose}><i data-lucide="x" className="w-6 h-6"></i></button>
+                        </div>
+                        
+                        <div className="p-6 space-y-6">
+                            <div className="text-center">
+                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">{rowLabel}</span>
+                                <h2 className="text-4xl font-black text-blue-700 mt-1">{machine.name}</h2>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 border-b pb-4">
+                                <div><h4 className="font-bold text-slate-700 mb-2">1. Definir Capacidad (Meta)</h4></div>
+                                <div><h4 className="font-bold text-slate-700 mb-2">2. Producción a Analizar</h4></div>
+                                
+                                <div className="space-y-3 bg-slate-50 p-3 rounded-xl border">
+                                    <label className="block"><span className="text-xs font-bold text-slate-500">TIEMPO / PIEZA (Min)</span>
+                                        <input type="number" value={timeMin} onChange={(e) => setTimeMin(Number(e.target.value))} className="w-full text-center text-2xl p-2 border rounded-lg focus:border-blue-500" min="0" />
+                                    </label>
+                                    <label className="block"><span className="text-xs font-bold text-slate-500">TIEMPO / PIEZA (Seg)</span>
+                                        <input type="number" value={timeSec} onChange={(e) => setTimeSec(Number(e.target.value))} className="w-full text-center text-2xl p-2 border rounded-lg focus:border-blue-500" min="0" max="59" />
+                                    </label>
+                                    <label className="block"><span className="text-xs font-bold text-slate-500">HORAS TURNO</span>
+                                        <select value={hours} onChange={(e) => setHours(Number(e.target.value))} className="w-full p-2 border rounded-lg focus:border-blue-500 bg-white">
+                                            <option value={12}>12 Horas</option>
+                                            <option value={24}>24 Horas</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                
+                                <div className="space-y-3 bg-slate-50 p-3 rounded-xl border">
+                                    <label className="block"><span className="text-xs font-bold text-slate-500">CANTIDAD PRODUCIDA (Local)</span>
+                                        <input type="number" value={viewingQty} onChange={(e) => setViewingQty(Number(e.target.value))} className="w-full text-center text-5xl font-black p-2 border rounded-lg text-green-700 focus:border-green-500" min="0" />
+                                        <p className="text-xs text-slate-400 mt-1">Valor inicial de la DB: {currentValue || 0}</p>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-between items-center bg-blue-50 p-4 rounded-xl shadow-inner">
+                                <div className="text-left">
+                                    <p className="text-sm font-bold text-blue-700">META CALCULADA</p>
+                                    <span className="text-4xl font-black text-blue-900">{targetPieces.toLocaleString()} pzas</span>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-sm font-bold text-blue-700">EFICIENCIA (%)</p>
+                                    <span className={`text-4xl font-black ${efficiency>=100?'text-green-600': efficiency>70?'text-yellow-600':'text-red-600'}`}>{efficiency}%</span>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            );
         };
 
-        // --- COMPONENTES ---
+        // --- COMPONENTE: Modal de Notas (Admin/Comentador) ---
+        const NotesModal = ({ user, machine, rowLabel, rowId, currentNote, onClose, onSave }) => {
+            const [note, setNote] = useState(currentNote || '');
+            const [isSaving, setIsSaving] = useState(false);
 
-        const MachineIconImage = () => (
-            <img src="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.png" 
-                 className="w-full h-full object-contain opacity-80" alt="icon" 
-                 onError={(e) => e.target.style.display = 'none'} />
-        );
+            const handleSubmit = async () => {
+                setIsSaving(true);
+                try {
+                    await onSave(rowId, machine.id, note);
+                    onClose();
+                } catch (e) {
+                    alert("Error guardando nota. Revisa la consola.");
+                    setIsSaving(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                        <div className="bg-purple-600 p-4 text-white flex justify-between items-center shrink-0">
+                            <h3 className="font-bold text-lg flex items-center gap-2"><i data-lucide="message-square" className="w-5 h-5"></i> Notas de {machine.name}</h3>
+                            <button onClick={onClose}><i data-lucide="x" className="w-6 h-6"></i></button>
+                        </div>
+                        <div className="p-6 flex-1 overflow-y-auto">
+                            <p className="text-sm font-bold text-slate-500 uppercase mb-4">{rowLabel}</p>
+                            <textarea 
+                                value={note} 
+                                onChange={(e) => setNote(e.target.value)}
+                                placeholder="Escribe tus observaciones aquí..."
+                                className="w-full h-40 p-3 border rounded-lg focus:border-purple-500 outline-none resize-none"
+                            ></textarea>
+                            {currentNote && <p className="mt-2 text-xs text-slate-500">Última nota: {currentNote.length > 50 ? currentNote.substring(0, 50) + '...' : currentNote}</p>}
+                        </div>
+                        <div className="p-4 bg-slate-50 border-t flex justify-end shrink-0">
+                            <button onClick={handleSubmit} disabled={isSaving} className="px-6 py-2 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 flex items-center gap-2">
+                                {isSaving ? 'Guardando...' : "Guardar Nota"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- COMPONENTE: Modal de Ingreso de Producción (Operador) ---
+        const ProductionInputModal = ({ machine, rowLabel, rowId, currentValue, onClose, onSave }) => {
+            const [val, setVal] = useState(currentValue === 0 ? '' : currentValue);
+            const [isSaving, setIsSaving] = useState(false);
+            const inputRef = useRef(null);
+
+            useEffect(() => { if(inputRef.current) inputRef.current.focus(); }, []);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (isSaving || (!val && val !== 0) || Number(val) < 0) return;
+
+                setIsSaving(true);
+                try {
+                    await onSave(rowId, machine.id, Number(val));
+                    onClose();
+                } catch (error) {
+                    console.error("Error al guardar en Firebase:", error);
+                    alert("¡ERROR DE GUARDADO! La base de datos rechazó la solicitud. Revisa la Consola.");
+                    setIsSaving(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="bg-green-600 p-4 text-white flex justify-between items-center">
+                            <h3 className="font-bold">Ingreso de Producción Real</h3>
+                            <button onClick={onClose} disabled={isSaving}><i data-lucide="x" className="w-6 h-6"></i></button>
+                        </div>
+                        <form onSubmit={handleSubmit} className="p-8 flex flex-col gap-6 items-center">
+                            <div className="text-center">
+                                <p className="text-sm font-bold text-slate-400 uppercase tracking-wide">{rowLabel}</p>
+                                <h2 className="text-4xl font-black text-green-700 mt-1">{machine.name}</h2>
+                            </div>
+                            
+                            <input 
+                                ref={inputRef} 
+                                type="number" 
+                                value={val} 
+                                onChange={(e) => setVal(e.target.value)}
+                                placeholder="0" 
+                                className="w-full text-center text-6xl font-black text-slate-800 border-b-4 border-green-500 focus:border-green-700 outline-none bg-transparent" 
+                                disabled={isSaving}
+                            />
+                            
+                            <button 
+                                type="submit" 
+                                disabled={isSaving}
+                                className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2
+                                    ${isSaving ? 'bg-slate-400 cursor-not-allowed text-white' : 'bg-green-600 hover:bg-green-700 text-white'}
+                                `}
+                            >
+                                {isSaving ? (
+                                    <><i data-lucide="loader-2" className="spinner w-6 h-6"></i> Guardando...</>
+                                ) : (
+                                    "Guardar Producción"
+                                )}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- DASHBOARD VIEW (ADMIN/COMMENTATOR) ---
+        const DashboardView = ({ user, data, handleSaveNote, machineIds, rows }) => {
+            const [expandedMachine, setExpandedMachine] = useState(null);
+            const [activeTab, setActiveTab] = useState('data');
+            const [calcModal, setCalcModal] = useState(null);
+            const [notesModal, setNotesModal] = useState(null);
+
+            const tabClasses = (tab) => `px-4 py-2 text-sm font-bold transition-colors rounded-t-lg ${
+                activeTab === tab ? 'bg-white text-blue-700 border-t border-x' : 'text-slate-500 hover:text-slate-700'
+            }`;
+
+            // Función de cálculo simple (ejemplo para el modal, aquí se muestra el uso de la DB)
+            const calculateSimpleTotal = (machineId) => {
+                return rows.reduce((total, row) => total + (data[row.id]?.[machineId]?.actual || 0), 0);
+            };
+
+            const DashboardTable = () => (
+                <div className="overflow-x-auto custom-scrollbar pb-2 pt-1">
+                    <table className="w-full border-collapse">
+                        <thead>
+                            <tr className="bg-slate-50 border-b">
+                                <th className="sticky left-0 z-10 bg-slate-50 p-3 min-w-[140px] border-r text-left shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-xs font-bold text-slate-400">FECHA</th>
+                                {machineIds.map(mId => {
+                                    const m = MACHINES.find(mach => mach.id === mId);
+                                    const isExpanded = expandedMachine === mId;
+                                    return (
+                                        <th key={mId} className={`p-0 border-r align-top transition-all min-w-[120px]`}>
+                                            <button onClick={() => setExpandedMachine(isExpanded ? null : mId)} className={`w-full h-full p-2 flex flex-col items-center gap-1 text-center ${isExpanded ? 'bg-blue-50' : 'hover:bg-slate-100'}`}>
+                                                <MachineIconImage />
+                                                <span className="text-sm font-bold text-blue-800">{m.name.replace('MAQ ','')}</span>
+                                                {isExpanded && <span className="text-[10px] text-slate-500 leading-tight">{m.type}</span>}
+                                            </button>
+                                        </th>
+                                    );
+                                })}
+                                <th className="sticky right-0 bg-slate-50 p-3 min-w-[80px] border-l shadow-[-2px_0_5px_rgba(0,0,0,0.05)] text-center text-xs font-bold text-slate-500">TOTAL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map((rowObj, idx) => {
+                                const { id: rowId, label: rowLabel } = rowObj;
+                                const rowData = data[rowId] || {};
+                                const totalRow = machineIds.reduce((acc, mId) => acc + (rowData[mId]?.actual || 0), 0);
+
+                                return (
+                                    <tr key={rowId} className={`border-b border-slate-100 ${idx%2===0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                                        <td className="sticky left-0 z-10 bg-inherit p-2 border-r font-medium text-sm text-slate-600 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">{rowLabel}</td>
+                                        {machineIds.map(mId => {
+                                            const m = MACHINES.find(mach => mach.id === mId);
+                                            const mData = rowData[mId] || {};
+                                            const actualQty = mData.actual || 0;
+                                            const note = mData.notes;
+                                            const isExpanded = expandedMachine === mId;
+
+                                            return (
+                                                <td key={mId} className={`p-0 border-r relative transition-all ${isExpanded ? 'bg-blue-50/20' : ''}`}>
+                                                    <div className="flex flex-col items-center justify-between h-full min-h-[60px] p-2">
+                                                        <div className="flex justify-between w-full">
+                                                            <button 
+                                                                onClick={() => setCalcModal({ machineId: mId, rowId, rowLabel, val: actualQty })}
+                                                                className={`font-black text-2xl p-1 rounded hover:bg-black/10 transition-colors ${actualQty > 0 ? 'text-blue-900' : 'text-slate-300'}`}
+                                                            >
+                                                                {actualQty > 0 ? actualQty : '-'}
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => setNotesModal({ machineId: mId, rowId, rowLabel, note })}
+                                                                className={`p-1 rounded ${note ? 'text-purple-600 hover:text-purple-800' : 'text-slate-400 hover:text-purple-600'}`}
+                                                                title={note ? `Nota: ${note}` : 'Dejar Nota'}
+                                                            >
+                                                                <i data-lucide={note ? 'message-circle' : 'message-circle-plus'} className="w-4 h-4"></i>
+                                                            </button>
+                                                        </div>
+                                                        {isExpanded && (
+                                                            <div className="text-[10px] mt-1 text-slate-500">
+                                                                <p>Total: {calculateSimpleTotal(mId)} pzas</p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            );
+                                        })}
+                                        <td className="sticky right-0 bg-slate-50 border-l p-2 text-center font-black text-blue-600 shadow-[-2px_0_5px_rgba(0,0,0,0.05)]">{totalRow.toLocaleString()}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            );
+
+            // Componente de Gráfico (Placeholder)
+            const GraphView = () => (
+                <div className="p-8 bg-white h-full flex items-center justify-center flex-col">
+                    <i data-lucide="bar-chart-3" className="w-12 h-12 text-blue-400 mb-4"></i>
+                    <p className="text-xl font-bold text-slate-600">Gráfico de Producción por Día</p>
+                    <p className="text-sm text-slate-400">Aquí se mostraría la visualización de los datos (e.g., barras o líneas) con D3.js.</p>
+                </div>
+            );
+
+            // Componente de Calendario (Placeholder)
+            const CalendarView = () => (
+                <div className="p-8 bg-white h-full flex items-center justify-center flex-col">
+                    <i data-lucide="calendar" className="w-12 h-12 text-green-400 mb-4"></i>
+                    <p className="text-xl font-bold text-slate-600">Vista de Calendario</p>
+                    <p className="text-sm text-slate-400">Se podría mostrar un calendario mensual con los totales de producción diarios.</p>
+                </div>
+            );
+
+            return (
+                <div className="h-full flex flex-col">
+                    {calcModal && <AdminCalcModal 
+                        machine={MACHINES.find(m => m.id === calcModal.machineId)} 
+                        rowLabel={calcModal.rowLabel}
+                        currentValue={calcModal.val}
+                        onClose={() => setCalcModal(null)}
+                    />}
+                    
+                    {notesModal && <NotesModal 
+                        user={user}
+                        machine={MACHINES.find(m => m.id === notesModal.machineId)} 
+                        rowLabel={notesModal.rowLabel}
+                        rowId={notesModal.rowId}
+                        currentNote={notesModal.note}
+                        onClose={() => setNotesModal(null)}
+                        onSave={handleSaveNote}
+                    />}
+
+                    <div className="p-2 border-b bg-slate-100 flex gap-2">
+                        <button onClick={() => setActiveTab('data')} className={tabClasses('data')}><i data-lucide="table" className="w-4 h-4 inline mr-1"></i> Tabla de Datos</button>
+                        <button onClick={() => setActiveTab('graph')} className={tabClasses('graph')}><i data-lucide="bar-chart-3" className="w-4 h-4 inline mr-1"></i> Gráfico</button>
+                        <button onClick={() => setActiveTab('calendar')} className={tabClasses('calendar')}><i data-lucide="calendar" className="w-4 h-4 inline mr-1"></i> Calendario</button>
+                    </div>
+
+                    <div className="flex-1 overflow-auto bg-white rounded-b-xl shadow border">
+                        {activeTab === 'data' && <DashboardTable />}
+                        {activeTab === 'graph' && <GraphView />}
+                        {activeTab === 'calendar' && <CalendarView />}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- OPERATOR VIEW (OPERATOR) ---
+        const OperatorView = ({ user, data, handleSaveActual, machineIds, rows }) => {
+            const [prodModal, setProdModal] = useState(null);
+
+            return (
+                <div className="h-full flex flex-col p-4">
+                    {prodModal && <ProductionInputModal 
+                        machine={MACHINES.find(m => m.id === prodModal.machineId)}
+                        rowLabel={prodModal.rowLabel}
+                        rowId={prodModal.rowId}
+                        currentValue={prodModal.val}
+                        onClose={() => setProdModal(null)}
+                        onSave={handleSaveActual}
+                    />}
+                    
+                    <h2 className="text-2xl font-bold text-slate-800 mb-4">Ingreso Rápido de Producción</h2>
+                    <p className="text-sm text-slate-500 mb-6">Seleccione el día y la máquina para ingresar la cantidad producida.</p>
+
+                    <div className="flex-1 overflow-auto bg-white rounded-xl shadow border">
+                        <div className="overflow-x-auto custom-scrollbar">
+                            <table className="w-full border-collapse">
+                                <thead>
+                                    <tr className="bg-green-50/50 border-b">
+                                        <th className="sticky left-0 z-10 bg-green-50/50 p-3 min-w-[140px] border-r text-left shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-xs font-bold text-green-700">FECHA</th>
+                                        {machineIds.map(mId => {
+                                            const m = MACHINES.find(mach => mach.id === mId);
+                                            return (
+                                                <th key={mId} className={`p-2 border-r text-center`}>
+                                                    <div className="flex flex-col items-center gap-1">
+                                                        <MachineIconImage />
+                                                        <span className="text-sm font-bold text-green-800">{m.name.replace('MAQ ','')}</span>
+                                                    </div>
+                                                </th>
+                                            );
+                                        })}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {rows.map((rowObj, idx) => {
+                                        const { id: rowId, label: rowLabel } = rowObj;
+                                        const rowData = data[rowId] || {};
+
+                                        return (
+                                            <tr key={rowId} className={`border-b border-slate-100 ${idx%2===0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                                                <td className="sticky left-0 z-10 bg-inherit p-2 border-r font-medium text-sm text-slate-600 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">{rowLabel}</td>
+                                                {machineIds.map(mId => {
+                                                    const mData = rowData[mId] || {};
+                                                    const actualQty = mData.actual || 0;
+
+                                                    return (
+                                                        <td key={mId} className={`p-0 border-r relative`}>
+                                                            <button 
+                                                                onClick={() => setProdModal({ machineId: mId, rowId, rowLabel, val: actualQty })}
+                                                                className={`w-full h-full min-h-[50px] font-bold text-xl p-2 hover:bg-black/5 transition-colors ${actualQty > 0 ? 'text-green-800' : 'text-slate-300'}`}
+                                                            >
+                                                                {actualQty > 0 ? actualQty.toLocaleString() : 'INGRESAR'}
+                                                            </button>
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- APP PRINCIPAL ---
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [data, setData] = useState({});
+            const [loading, setLoading] = useState(true);
+            const [showAllDays, setShowAllDays] = useState(false);
+
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
+
+            useEffect(() => {
+                const unsubAuth = onAuthStateChanged(auth, (u) => {
+                    if (u) {
+                        // El Operador y Admin usan la misma colección de datos
+                        const collectionRef = collection(db, 'produccion_2025');
+                        const unsubDb = onSnapshot(collectionRef, (snap) => {
+                            const d = {};
+                            snap.forEach(doc => d[doc.id] = doc.data());
+                            setData(d);
+                            setLoading(false);
+                        }, (error) => {
+                            console.error("Error al escuchar cambios de Firestore:", error);
+                            alert("Error de conexión con la base de datos. Revise su conexión o permisos.");
+                            setLoading(false);
+                        });
+                        return () => unsubDb();
+                    } else {
+                        // Forzar el inicio de sesión anónimo si no hay usuario
+                        signInAnonymously(auth).then(cred => {
+                            console.log("Sesión anónima iniciada para Operadores:", cred.user.uid);
+                        }).catch(e => {
+                            console.error("Fallo al iniciar sesión anónima:", e);
+                        });
+                    }
+                });
+                return () => unsubAuth();
+            }, []);
+
+            // FUNCIÓN DE GUARDADO PARA OPERADORES (Guarda CANTIDAD ACTUAL)
+            const handleSaveActual = async (rowId, machineId, value) => {
+                const docRef = doc(db, 'produccion_2025', rowId);
+                let update = { [`${machineId}.actual`]: value };
+
+                try {
+                    await setDoc(docRef, update, { merge: true });
+                    console.log(`[SAVE ACTUAL] Cantidad ${value} guardada para ${machineId} en ${rowId}`);
+                } catch (error) {
+                    console.error("[SAVE ACTUAL ERROR] Falló la escritura en Firebase.", error);
+                    throw error;
+                }
+            };
+
+            // FUNCIÓN DE GUARDADO PARA ADMIN/COMMENTATOR (Guarda NOTAS)
+            const handleSaveNote = async (rowId, machineId, value) => {
+                const docRef = doc(db, 'produccion_2025', rowId);
+                let update = { [`${machineId}.notes`]: value };
+
+                try {
+                    await setDoc(docRef, update, { merge: true });
+                    console.log(`[SAVE NOTE] Nota guardada para ${machineId} en ${rowId}`);
+                } catch (error) {
+                    console.error("[SAVE NOTE ERROR] Falló la escritura de la nota.", error);
+                    throw error;
+                }
+            };
+
+
+            if (!user) return <LoginScreen setAuthenticatedUser={setUser} />;
+            if (loading) return <div className="h-screen flex items-center justify-center"><i data-lucide="loader-2" className="animate-spin w-10 h-10 text-blue-600"></i><span className="ml-3 font-medium">Cargando datos...</span></div>;
+
+            const rowsToShow = (user.role === ROLES.ADMIN && showAllDays) ? ALL_ROWS : CURRENT_WEEK_ROWS;
+            const isViewer = VIEWER_ROLES.includes(user.role);
+
+            // Determinar qué vista mostrar según el rol
+            const CurrentView = isViewer ? DashboardView : OperatorView;
+            
+            return (
+                <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
+                    <header className="bg-white shadow-md border-b p-3 flex justify-between items-center z-20 shrink-0">
+                        <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg text-white shadow-lg ${isViewer ? 'bg-blue-600' : 'bg-green-600'}`}><i data-lucide={isViewer ? "factory" : "gauge"} className="w-5 h-5"></i></div>
+                            <div>
+                                <h1 className="font-bold text-slate-800 leading-tight">Control Cirineo 2025</h1>
+                                <p className="text-xs text-slate-500">
+                                    Usuario: {user.name} ({user.role}) | 
+                                    <button onClick={() => setShowAllDays(!showAllDays)} className="ml-2 text-blue-500 font-bold hover:underline">
+                                        {showAllDays ? 'Ver Semana' : 'Ver Mes'}
+                                    </button>
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={() => setUser(null)} className="bg-red-50 text-red-500 p-2 rounded-lg hover:bg-red-100" title="Cerrar Sesión"><i data-lucide="log-out" className="w-4 h-4"></i></button>
+                        </div>
+                    </header>
+                    <main className="flex-1 overflow-hidden p-2">
+                        <CurrentView 
+                            user={user}
+                            data={data} 
+                            handleSaveActual={handleSaveActual}
+                            handleSaveNote={handleSaveNote}
+                            machineIds={MACHINES.map(m => m.id)}
+                            rows={rowsToShow}
+                        />
+                    </main>
+                </div>
+            );
+        };
 
         const LoginScreen = ({ setAuthenticatedUser }) => {
             const [pin, setPin] = useState('');
@@ -143,7 +633,7 @@
                 e.preventDefault();
                 const user = USERS[pin];
                 if (user) setAuthenticatedUser(user);
-                else setError('PIN incorrecto (Prueba 3333 para Op)');
+                else setError('PIN incorrecto (Prueba 1111 Admin, 3333 Operador)');
             };
 
             return (
@@ -164,402 +654,9 @@
             );
         };
 
-        // --- MODAL DE REGISTRO DE PRODUCCIÓN (CON FEEDBACK Y ASYNC) ---
-        const ProductionInputModal = ({ user, machine, rowLabel, rowId, currentValue, onClose, onSave }) => {
-            const [val, setVal] = useState(currentValue === 0 ? '' : currentValue);
-            const [isSaving, setIsSaving] = useState(false);
-            const inputRef = useRef(null);
-
-            useEffect(() => { if(inputRef.current) inputRef.current.focus(); }, []);
-
-            const handleSubmit = async (e) => {
-                e.preventDefault();
-                
-                if (isSaving) return; // Evitar doble clic
-                if (!val || Number(val) < 0) {
-                     alert("Por favor, ingresa una cantidad válida.");
-                     return;
-                }
-
-                setIsSaving(true); // Mostrar loading
-                try {
-                    // Pasamos el objeto 'user' para la traza de debug en la función de guardado
-                    await onSave(user, rowId, machine.id, 'actual', Number(val));
-                    onClose(); // Solo si tiene éxito cerramos
-                } catch (error) {
-                    // ESTE BLOQUE SE EJECUTA SI FIREBASE RECHAZA LA ESCRITURA
-                    console.error("Error al guardar en Firebase:", error);
-                    alert("¡ERROR DE GUARDADO! La base de datos rechazó la solicitud. Revisa la Consola del Desarrollador (F12) para ver el mensaje exacto de Firebase.");
-                    setIsSaving(false); // Permitir reintentar
-                }
-            };
-
-            return (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="bg-slate-800 p-4 text-white flex justify-between items-center">
-                            <h3 className="font-bold">Producción Real</h3>
-                            <button onClick={onClose} disabled={isSaving}><i data-lucide="x" className="w-6 h-6"></i></button>
-                        </div>
-                        <form onSubmit={handleSubmit} className="p-8 flex flex-col gap-6 items-center">
-                            <div className="text-center">
-                                <p className="text-sm font-bold text-slate-400 uppercase tracking-wide">{rowLabel}</p>
-                                <h2 className="text-4xl font-black text-blue-700 mt-1">{machine.name}</h2>
-                            </div>
-                            
-                            <input 
-                                ref={inputRef} 
-                                type="number" 
-                                value={val} 
-                                onChange={(e) => setVal(e.target.value)}
-                                placeholder="0" 
-                                className="w-full text-center text-6xl font-black text-slate-800 border-b-4 border-blue-500 focus:border-blue-700 outline-none bg-transparent" 
-                                disabled={isSaving}
-                            />
-                            
-                            <button 
-                                type="submit" 
-                                disabled={isSaving}
-                                className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2
-                                    ${isSaving ? 'bg-slate-400 cursor-not-allowed text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}
-                                `}
-                            >
-                                {isSaving ? (
-                                    <><i data-lucide="loader-2" className="spinner w-6 h-6"></i> Guardando...</>
-                                ) : (
-                                    "Guardar Producción"
-                                )}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- MODAL PLANIFICACIÓN (ADMIN) ---
-        const PlanningModal = ({ machine, rowLabel, rowId, currentData, onClose, onSave }) => {
-            const [model, setModel] = useState(currentData?.plan_model || '');
-            const [targetQty, setTargetQty] = useState(currentData?.plan_target_qty || '');
-            const [timeMin, setTimeMin] = useState(currentData?.plan_time_min || '');
-            const [hours, setHours] = useState(currentData?.plan_hours || 12);
-            const [selectedClones, setSelectedClones] = useState([]);
-            const [isCloneExpanded, setIsCloneExpanded] = useState(false);
-            const [isSaving, setIsSaving] = useState(false);
-
-            const toggleMachineClone = (mId) => {
-                if (selectedClones.includes(mId)) setSelectedClones(prev => prev.filter(id => id !== mId));
-                else setSelectedClones(prev => [...prev, mId]);
-            };
-
-            const selectAllClones = () => {
-                if (selectedClones.length === MACHINES.length - 1) setSelectedClones([]);
-                else setSelectedClones(MACHINES.filter(m => m.id !== machine.id).map(m => m.id));
-            };
-
-            const handleSave = async () => {
-                setIsSaving(true);
-                const data = {
-                    plan_model: model || null,
-                    plan_target_qty: Number(targetQty) || null,
-                    plan_time_min: Number(timeMin) || null,
-                    plan_hours: Number(hours) || null,
-                };
-                try {
-                    await onSave(rowId, machine.id, data, selectedClones);
-                    onClose();
-                } catch (e) {
-                    alert("Error guardando plan. Revisa la consola.");
-                    setIsSaving(false);
-                }
-            };
-
-            const { targetPieces } = calculateProduction(Number(targetQty), Number(timeMin), Number(hours), 0);
-
-            return (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 bg-blue-600 text-white flex justify-between items-center rounded-t-xl shrink-0">
-                            <h3 className="text-lg font-bold flex items-center gap-2"><i data-lucide="calendar-clock" className="w-5 h-5"></i> Planificar: {machine.name}</h3>
-                            <button onClick={onClose}><i data-lucide="x" className="w-6 h-6"></i></button>
-                        </div>
-                        <div className="p-5 overflow-y-auto custom-scrollbar">
-                            <div className="text-center mb-4">
-                                <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase">{rowLabel}</span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4 mb-4">
-                                <label className="block"><span className="text-xs font-bold text-slate-500">MODELO</span><input type="text" value={model} onChange={(e) => setModel(e.target.value)} className="w-full p-2 border rounded" /></label>
-                                <label className="block"><span className="text-xs font-bold text-slate-500">TOTAL PEDIDO</span><input type="number" value={targetQty} onChange={(e) => setTargetQty(e.target.value)} className="w-full p-2 border rounded" /></label>
-                                <label className="block"><span className="text-xs font-bold text-slate-500">MINUTOS/PIEZA</span><input type="number" value={timeMin} onChange={(e) => setTimeMin(e.target.value)} className="w-full p-2 border rounded" /></label>
-                                <label className="block"><span className="text-xs font-bold text-slate-500">HORAS TURNO</span>
-                                    <select value={hours} onChange={(e) => setHours(e.target.value)} className="w-full p-2 border rounded">
-                                        <option value={12}>12 Horas</option>
-                                        <option value={24}>24 Horas</option>
-                                    </select>
-                                </label>
-                            </div>
-                            <div className="bg-slate-100 p-3 rounded-lg mb-4 flex justify-between items-center">
-                                <span className="text-sm font-medium">Capacidad Diaria:</span>
-                                <span className="text-xl font-black text-blue-700">{targetPieces.toLocaleString()} pzas</span>
-                            </div>
-                            <div className="border-t pt-3">
-                                <button onClick={() => setIsCloneExpanded(!isCloneExpanded)} className="flex items-center justify-between w-full text-slate-700 font-bold text-sm hover:bg-slate-50 p-2 rounded">
-                                    <span className="flex items-center gap-2"><i data-lucide="copy" className="w-4 h-4 text-purple-600"></i> Replicar a otras máquinas</span>
-                                    <i data-lucide={isCloneExpanded ? "chevron-up" : "chevron-down"} className="w-4 h-4"></i>
-                                </button>
-                                {isCloneExpanded && (
-                                    <div className="mt-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                                        <div className="flex justify-between items-center mb-2 pb-2 border-b"><span className="text-xs text-slate-500">Seleccionar máquinas:</span><button onClick={selectAllClones} className="text-xs text-blue-600 font-bold">Todas</button></div>
-                                        <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto custom-scrollbar">
-                                            {MACHINES.filter(m => m.id !== machine.id).map(m => (
-                                                <label key={m.id} className={`flex items-center gap-2 p-1 rounded text-xs ${selectedClones.includes(m.id) ? 'bg-purple-100' : 'hover:bg-slate-200'}`}>
-                                                    <input type="checkbox" checked={selectedClones.includes(m.id)} onChange={() => toggleMachineClone(m.id)} className="rounded text-purple-600" /> {m.name.replace('MAQ ','')}
-                                                </label>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div className="p-4 bg-slate-50 border-t rounded-b-xl flex justify-end gap-3 shrink-0">
-                            <button onClick={onClose} disabled={isSaving} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg">Cancelar</button>
-                            <button onClick={handleSave} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2">
-                                {isSaving ? 'Guardando...' : `Guardar ${selectedClones.length > 0 ? '(+' + selectedClones.length + ')' : ''}`}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- APP PRINCIPAL ---
-        const App = () => {
-            const [user, setUser] = useState(null);
-            const [data, setData] = useState({});
-            const [loading, setLoading] = useState(true);
-            const [expandedMachine, setExpandedMachine] = useState(null);
-            const [showAllDays, setShowAllDays] = useState(false);
-            const [dayClipboard, setDayClipboard] = useState(null);
-
-            const [planModal, setPlanModal] = useState(null);
-            const [prodModal, setProdModal] = useState(null);
-
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
-
-            useEffect(() => {
-                const unsubAuth = onAuthStateChanged(auth, (u) => {
-                    if (u) {
-                        const unsubDb = onSnapshot(collection(db, 'produccion_2025'), (snap) => {
-                            const d = {};
-                            snap.forEach(doc => d[doc.id] = doc.data());
-                            setData(d);
-                            setLoading(false);
-                        });
-                        return () => unsubDb();
-                    } else {
-                        signInAnonymously(auth);
-                    }
-                });
-                return () => unsubAuth();
-            }, []);
-
-            // FUNCIÓN PRINCIPAL DE GUARDADO (OPERADORES Y ADMIN)
-            const handleSaveData = async (activeUser, rowId, machineId, field, value) => {
-                try {
-                    // *** LOG DE DEBUG CRÍTICO ***
-                    console.log(`[DB SAVE INTENTO] Usuario: ${activeUser.name} (${activeUser.role}). Documento: ${rowId}. Campo: ${machineId}.${field} = ${value}.`);
-                    
-                    const docRef = doc(db, 'produccion_2025', rowId);
-                    let update = { [`${machineId}.${field}`]: value };
-
-                    if (field === 'actual' || field.startsWith('plan_')) {
-                        const mData = data[rowId]?.[machineId] || {};
-                        const plan = {
-                            tgt: field === 'plan_target_qty' ? value : mData.plan_target_qty,
-                            min: field === 'plan_time_min' ? value : mData.plan_time_min,
-                            hrs: field === 'plan_hours' ? value : mData.plan_hours,
-                            act: field === 'actual' ? value : mData.actual
-                        };
-                        const res = calculateProduction(plan.tgt, plan.min, plan.hrs, plan.act);
-                        update[`${machineId}.calculated_target`] = res.targetPieces;
-                        update[`${machineId}.percentage`] = res.percentage;
-                    }
-                    
-                    await setDoc(docRef, update, { merge: true });
-                    console.log("[DB SAVE EXITO] ¡Datos guardados correctamente!");
-                    
-                } catch (error) {
-                    console.error("[DB SAVE ERROR] ¡FALLO LA ESCRITURA EN FIREBASE!", error);
-                    throw error; // Lanzamos el error para que la modal lo capture y muestre la alerta
-                }
-            };
-
-            const handleSavePlan = async (rowId, machineId, planData, cloneToIds = []) => {
-                const docRef = doc(db, 'produccion_2025', rowId);
-                const updates = {};
-                const targets = [machineId, ...cloneToIds];
-
-                targets.forEach(mId => {
-                    const currentM = data[rowId]?.[mId] || {};
-                    const actualQty = currentM.actual || 0;
-                    const res = calculateProduction(planData.plan_target_qty, planData.plan_time_min, planData.plan_hours, actualQty);
-                    updates[mId] = {
-                        ...currentM, ...planData, actual: actualQty,
-                        calculated_target: res.targetPieces, percentage: res.percentage
-                    };
-                });
-                await setDoc(docRef, updates, { merge: true });
-            };
-
-            const copyDay = (rowId) => data[rowId] ? setDayClipboard({ id: rowId, data: data[rowId] }) : alert("Sin datos");
-            
-            const pasteDay = async (targetRowId) => {
-                if (!dayClipboard || !confirm(`¿Pegar planificación del día ${dayClipboard.id}?`)) return;
-                const sourceData = dayClipboard.data;
-                const targetDataCurrent = data[targetRowId] || {};
-                const updates = {};
-                MACHINES.forEach(m => {
-                    const sourceM = sourceData[m.id];
-                    const targetM = targetDataCurrent[m.id] || {};
-                    if (sourceM) {
-                        const actualQty = targetM.actual || 0;
-                        const res = calculateProduction(sourceM.plan_target_qty, sourceM.plan_time_min, sourceM.plan_hours, actualQty);
-                        updates[m.id] = {
-                            ...targetM, 
-                            plan_model: sourceM.plan_model, plan_target_qty: sourceM.plan_target_qty,
-                            plan_time_min: sourceM.plan_time_min, plan_hours: sourceM.plan_hours,
-                            actual: actualQty, calculated_target: res.targetPieces, percentage: res.percentage
-                        };
-                    }
-                });
-                await setDoc(doc(db, 'produccion_2025', targetRowId), updates, { merge: true });
-                setDayClipboard(null);
-            };
-
-            if (!user) return <LoginScreen setAuthenticatedUser={setUser} />;
-            if (loading) return <div className="h-screen flex items-center justify-center"><i data-lucide="loader-2" className="animate-spin w-10 h-10 text-blue-600"></i></div>;
-
-            const rowsToShow = (user.role === ROLES.ADMIN && showAllDays) ? ALL_ROWS : CURRENT_WEEK_ROWS;
-
-            return (
-                <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
-                    {planModal && <PlanningModal 
-                        machine={MACHINES.find(m => m.id === planModal.machineId)} 
-                        rowLabel={planModal.rowLabel}
-                        rowId={planModal.rowId} 
-                        currentData={data[planModal.rowId]?.[planModal.machineId]} 
-                        onClose={() => setPlanModal(null)} 
-                        onSave={handleSavePlan} 
-                    />}
-                    
-                    {prodModal && <ProductionInputModal 
-                        user={user} // Pasamos el usuario a la modal
-                        machine={MACHINES.find(m => m.id === prodModal.machineId)}
-                        rowLabel={prodModal.rowLabel}
-                        rowId={prodModal.rowId}
-                        currentValue={prodModal.val}
-                        onClose={() => setProdModal(null)}
-                        onSave={handleSaveData}
-                    />}
-
-                    <header className="bg-white shadow-sm border-b p-3 flex justify-between items-center z-20">
-                        <div className="flex items-center gap-3">
-                            <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-2 rounded-lg text-white shadow-lg"><i data-lucide="factory" className="w-5 h-5"></i></div>
-                            <div><h1 className="font-bold text-slate-800 leading-tight">Control Cirineo 2025</h1><p className="text-xs text-slate-500">Usuario: {user.name} ({user.role})</p></div>
-                        </div>
-                        <div className="flex gap-2">
-                            {user.role === ROLES.ADMIN && (
-                                <button onClick={() => setShowAllDays(!showAllDays)} className={`px-3 py-1 text-xs font-bold rounded-full border transition ${showAllDays ? 'bg-blue-100 text-blue-700' : 'bg-white'}`}>
-                                    {showAllDays ? 'Ver Mes' : 'Ver Semana'}
-                                </button>
-                            )}
-                            <button onClick={() => setUser(null)} className="bg-red-50 text-red-500 p-2 rounded-lg hover:bg-red-100"><i data-lucide="log-out" className="w-4 h-4"></i></button>
-                        </div>
-                    </header>
-
-                    <main className="flex-1 overflow-auto p-2">
-                        <div className="bg-white rounded-xl shadow border overflow-hidden">
-                            <div className="overflow-x-auto custom-scrollbar pb-2">
-                                <table className="w-full border-collapse">
-                                    <thead>
-                                        <tr className="bg-slate-50 border-b">
-                                            <th className="sticky left-0 z-10 bg-slate-50 p-3 min-w-[140px] border-r text-left shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-xs font-bold text-slate-400">FECHA</th>
-                                            {MACHINES.map(m => (
-                                                <th key={m.id} className={`p-0 border-r align-top transition-all ${expandedMachine === m.id ? 'min-w-[180px]' : 'min-w-[100px]'}`}>
-                                                    <button onClick={() => setExpandedMachine(expandedMachine === m.id ? null : m.id)} className={`w-full h-full p-2 flex flex-col items-center gap-1 ${expandedMachine === m.id ? 'bg-blue-50' : 'hover:bg-slate-100'}`}>
-                                                        <div className="w-8 h-8"><MachineIconImage /></div>
-                                                        <span className="text-sm font-bold text-blue-800">{m.name.replace('MAQ ','')}</span>
-                                                        {expandedMachine === m.id && <span className="text-[10px] text-slate-500 leading-tight">{m.type}<br/>{m.needles}ag</span>}
-                                                    </button>
-                                                </th>
-                                            ))}
-                                            <th className="sticky right-0 bg-slate-50 p-3 min-w-[80px] border-l shadow-[-2px_0_5px_rgba(0,0,0,0.05)] text-center text-xs font-bold text-slate-500">TOTAL</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {rowsToShow.map((rowObj, idx) => {
-                                            const { id: rowId, label: rowLabel } = rowObj;
-                                            const rowData = data[rowId] || {};
-                                            const totalRow = MACHINES.reduce((acc, m) => acc + (rowData[m.id]?.actual || 0), 0);
-                                            const isReadOnly = user.role === ROLES.OBSERVER;
-
-                                            return (
-                                                <tr key={rowId} className={`border-b border-slate-100 group ${idx%2===0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-                                                    <td className="sticky left-0 z-10 bg-inherit p-2 border-r font-medium text-sm text-slate-600 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                                                        <div className="flex flex-col justify-between h-full min-h-[50px]">
-                                                            <span>{rowLabel}</span>
-                                                            {user.role === ROLES.ADMIN && (
-                                                                <div className="flex gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                    {dayClipboard?.id === rowId ? <span className="text-[10px] bg-green-100 text-green-700 px-1 rounded">Copiado</span> : <button onClick={() => copyDay(rowId)} title="Copiar"><i data-lucide="copy" className="w-3 h-3 text-slate-400 hover:text-blue-600"></i></button>}
-                                                                    {dayClipboard && dayClipboard.id !== rowId && <button onClick={() => pasteDay(rowId)} title="Pegar"><i data-lucide="clipboard-paste" className="w-3 h-3 text-orange-500 animate-pulse"></i></button>}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                    {MACHINES.map(m => {
-                                                        const mData = rowData[m.id] || {};
-                                                        const isExpanded = expandedMachine === m.id;
-                                                        const canEdit = !isReadOnly && user.role !== ROLES.OBSERVER;
-                                                        const pct = mData.percentage || 0;
-
-                                                        return (
-                                                            <td key={m.id} className={`p-0 border-r relative transition-all ${isExpanded ? 'bg-blue-50/20' : ''}`}>
-                                                                <div className="flex flex-col h-full min-h-[60px]">
-                                                                    {(isExpanded || user.role !== ROLES.OPERATOR) && (
-                                                                        <div className="flex justify-between items-start p-1 text-[10px] bg-slate-50/50 min-h-[24px]">
-                                                                            <div className="flex flex-col leading-none">
-                                                                                <span className="font-bold text-slate-700">{mData.plan_model || '-'}</span>
-                                                                                {isExpanded && <span className="text-slate-400">Obj: {mData.calculated_target || 0}</span>}
-                                                                            </div>
-                                                                            {mData.plan_model && <span className={`font-black px-1 rounded ${pct>=100?'bg-green-200 text-green-800': pct>70?'bg-orange-100 text-orange-700':'bg-red-100 text-red-700'}`}>{pct}%</span>}
-                                                                            {user.role === ROLES.ADMIN && <button onClick={() => setPlanModal({machineId: m.id, rowId, rowLabel})} className="text-blue-400 hover:text-blue-700 ml-1"><i data-lucide="edit-3" className="w-3 h-3"></i></button>}
-                                                                        </div>
-                                                                    )}
-                                                                    <button 
-                                                                        onClick={() => canEdit && setProdModal({machineId: m.id, rowId, rowLabel, val: mData.actual || 0})}
-                                                                        disabled={!canEdit}
-                                                                        className={`flex-1 w-full text-center font-bold text-lg hover:bg-black/5 transition-colors ${mData.actual > 0 ? 'text-blue-900' : 'text-slate-300'}`}
-                                                                    >
-                                                                        {mData.actual > 0 ? mData.actual : (canEdit ? '-' : '')}
-                                                                    </button>
-                                                                </div>
-                                                            </td>
-                                                        );
-                                                    })}
-                                                    <td className="sticky right-0 bg-slate-50 border-l p-2 text-center font-black text-blue-600 shadow-[-2px_0_5px_rgba(0,0,0,0.05)]">{totalRow.toLocaleString()}</td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </main>
-                </div>
-            );
-        };
-
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
 </body>
 </html>
+
