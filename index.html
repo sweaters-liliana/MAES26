@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -20,12 +19,23 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <style>
+        /* Estilos de la tabla y scrollbar */
         .custom-scrollbar::-webkit-scrollbar { height: 8px; width: 8px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         input[type=number]::-webkit-inner-spin-button, 
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        /* Definición de anchos para la cabecera responsiva */
+        .machine-col {
+            min-width: 100px; /* Ancho por defecto (contraído) */
+            width: 100px;
+        }
+        .machine-col.expanded {
+            min-width: 180px; /* Ancho expandido para mostrar detalles */
+            width: 180px;
+        }
     </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -38,10 +48,10 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, collection, doc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useCallback } = React;
 
         // ==========================================
-        // 1. TU CONFIGURACIÓN (YA INTEGRADA)
+        // CONFIGURACIÓN E INICIALIZACIÓN DE FIREBASE
         // ==========================================
         const firebaseConfig = {
             apiKey: "AIzaSyBqHgV4vDat1-VmZfKbiPg7nuiX-ROcexw",
@@ -53,13 +63,30 @@
             measurementId: "G-B7YLM78RVW"
         };
 
-        // Inicializar Firebase
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
         // ==========================================
-        // DATOS DE MÁQUINAS
+        // ROLES Y USUARIOS
+        // ==========================================
+        const ROLES = {
+            ADMIN: 'admin', // Marco: Planificación, Lectura/Escritura total
+            COMMENTATOR: 'commentator', // Prisciliano: Lectura total, Comentarios R/W
+            OBSERVER: 'observer', // Susana: Lectura solo semana actual
+            OPERATOR: 'operator', // Operadores: Solo Escritura en producción real
+            GUEST: 'guest',
+        };
+
+        const USERS = {
+            '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, id: 'marco' },
+            '0000': { name: 'Prisciliano Espinoza', role: ROLES.COMMENTATOR, id: 'prisciliano' },
+            '2222': { name: 'Susana', role: ROLES.OBSERVER, id: 'susana' },
+            '3333': { name: 'Operadores', role: ROLES.OPERATOR, id: 'operadores' },
+        };
+        
+        // ==========================================
+        // DATOS DE MÁQUINAS Y FILAS
         // ==========================================
         const MACHINES = [
             { id: 'm35', name: 'MAQ 35', type: 'SANTONI SM8 TOP 2V', diam: 16, needles: 1440, gauge: 28 },
@@ -89,53 +116,323 @@
             'JUEVES 20', 'VIERNES 21'
         ];
 
-        // Componente Icono Máquina
-        const SantoniMachineIcon = ({ className }) => (
-            <svg viewBox="0 0 100 120" className={className} fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="20" y="90" width="60" height="20" rx="2" fill="#e2e8f0" stroke="#475569" />
-                <path d="M25 90 L25 110 M75 90 L75 110" stroke="#94a3b8" />
-                <path d="M30 90 L30 40 Q50 35 70 40 L70 90" fill="#f8fafc" stroke="#334155" />
-                <path d="M30 40 Q50 45 70 40" fill="none" stroke="#334155" />
-                <line x1="35" y1="50" x2="65" y2="50" stroke="#cbd5e1" strokeWidth="1" />
-                <line x1="35" y1="60" x2="65" y2="60" stroke="#cbd5e1" strokeWidth="1" />
-                <line x1="35" y1="70" x2="65" y2="70" stroke="#cbd5e1" strokeWidth="1" />
-                <line x1="35" y1="80" x2="65" y2="80" stroke="#cbd5e1" strokeWidth="1" />
-                <line x1="50" y1="40" x2="50" y2="10" stroke="#475569" strokeWidth="2" />
-                <line x1="50" y1="10" x2="20" y2="20" stroke="#64748b" />
-                <line x1="50" y1="10" x2="80" y2="20" stroke="#64748b" />
-                <circle cx="20" cy="20" r="3" fill="#3b82f6" stroke="none" />
-                <circle cx="80" cy="20" r="3" fill="#3b82f6" stroke="none" />
-                <path d="M20 23 L35 45" stroke="#3b82f6" strokeWidth="0.5" strokeDasharray="2 2" />
-                <path d="M80 23 L65 45" stroke="#3b82f6" strokeWidth="0.5" strokeDasharray="2 2" />
-            </svg>
-        );
+        // Definimos la "Semana Actual" para el observador (simplificación)
+        const CURRENT_WEEK_DATES = INITIAL_ROWS.slice(0, 5); // MIERCOLES 12 a MARTES 18
+
+        // ==========================================
+        // CÁLCULO DE PRODUCCIÓN (FUNCIÓN CENTRAL)
+        // ==========================================
+
+        /**
+         * Calcula el objetivo de piezas y el porcentaje de cumplimiento.
+         * @param {number} targetQty - Cantidad total a tejer del modelo (e.g., 2500).
+         * @param {number} timeMin - Tiempo por pieza en minutos (e.g., 6).
+         * @param {number} hours - Horas planeadas de trabajo (e.g., 12 o 24).
+         * @param {number} actualQty - Producción real (e.g., 500).
+         * @returns {object} { targetPieces, percentage }
+         */
+        const calculateProduction = (targetQty, timeMin, hours, actualQty) => {
+            if (!targetQty || !timeMin || !hours || targetQty <= 0 || timeMin <= 0 || hours <= 0) {
+                return { targetPieces: 0, percentage: 0 };
+            }
+            
+            // 1. Horas a Minutos
+            const totalMinutes = hours * 60;
+            
+            // 2. Producción máxima de la máquina en esas horas
+            // targetQty: 2500 (total a producir)
+            // timeMin: 6 min/pieza
+            // totalMinutes: 1440 min (24h)
+            
+            // Producción total posible en las horas planeadas
+            const piecesPossible = totalMinutes / timeMin;
+            
+            // El objetivo diario es el MÍNIMO entre lo que la máquina PUEDE producir y lo que QUEDA del pedido.
+            // Para el cálculo simple, usaremos el total de piezas / (días restantes * horas planeadas / 24)
+            // Ya que no tenemos el contexto de "días restantes", usaremos la fórmula de piezas posibles por día planeado.
+            const targetPieces = Math.round(piecesPossible); // Objetivo diario basado en el tiempo.
+
+            // Porcentaje de cumplimiento
+            const percentage = targetPieces > 0 
+                ? Math.min(100, (actualQty / targetPieces) * 100) 
+                : 0;
+
+            return { targetPieces: targetPieces, percentage: parseFloat(percentage.toFixed(1)) };
+        };
+
+        // ==========================================
+        // COMPONENTES DE UI
+        // ==========================================
+
+        const MachineIconImage = ({ className }) => {
+            const [hasError, setHasError] = useState(false);
+            const imageUrl = "https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.png";
+            
+            if (hasError) {
+                return (
+                    <div className="w-full h-full flex items-center justify-center bg-gray-200 rounded-lg text-xs text-gray-500 font-semibold p-1">
+                        <i data-lucide="alert-circle" className="w-4 h-4 mr-1"></i> IMG
+                    </div>
+                );
+            }
+
+            return (
+                <img 
+                    src={imageUrl} 
+                    alt="Icono de Máquina Santoni" 
+                    className={className + " object-contain"}
+                    onError={() => setHasError(true)}
+                />
+            );
+        };
+        
+        const MachineHeader = ({ machine, isExpanded, onClick }) => {
+            return (
+                <th 
+                    key={machine.id} 
+                    className={`machine-col ${isExpanded ? 'expanded' : ''} p-0 border-r border-slate-100 align-top group transition-[width] duration-300 ease-in-out`}
+                >
+                    <button 
+                        onClick={() => onClick(machine.id)}
+                        className={`w-full h-full flex flex-col items-center gap-1 p-2 transition-colors duration-200 ${isExpanded ? 'bg-blue-50 hover:bg-blue-100' : 'bg-slate-50 hover:bg-slate-100'} focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-md`}
+                    >
+                        {/* 1. Icono */}
+                        <div className="w-8 h-8 md:w-10 md:h-10 transform group-hover:scale-110 transition-transform duration-300">
+                            <MachineIconImage className="w-full h-full text-slate-700" />
+                        </div>
+                        
+                        {/* 2. Nombre de Máquina */}
+                        <span className="font-bold text-blue-700 text-sm whitespace-nowrap">
+                            {machine.name.replace('MAQ ', '')}
+                        </span>
+                        
+                        {/* 3. Detalles (Solo visibles si está expandido) */}
+                        <div className={`text-[10px] text-slate-500 font-normal leading-tight text-center overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-24 opacity-100 pt-1' : 'max-h-0 opacity-0'}`}>
+                            {machine.type.replace('SANTONI', '')}<br/>
+                            {machine.diam}" - {machine.needles}ag<br/>
+                            G{machine.gauge}
+                            <i data-lucide="chevrons-up" className="w-3 h-3 text-red-400 mt-1"></i>
+                        </div>
+                        
+                        {/* 4. Indicador de Expansión/Contracción (flecha) */}
+                        {!isExpanded && (
+                             <i data-lucide="chevrons-down" className="w-3 h-3 text-green-400 mt-1"></i>
+                        )}
+                        
+                    </button>
+                </th>
+            );
+        };
+        
+        const LoginScreen = ({ setAuthenticatedUser }) => {
+            const [pin, setPin] = useState('');
+            const [error, setError] = useState('');
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                setError('');
+                const user = USERS[pin];
+
+                if (user) {
+                    setAuthenticatedUser(user);
+                    // Limpiar PIN después de un login exitoso (seguridad)
+                    setPin(''); 
+                } else {
+                    setError('PIN incorrecto. Inténtalo de nuevo.');
+                }
+            };
+
+            return (
+                <div className="flex items-center justify-center h-screen bg-slate-50">
+                    <div className="w-full max-w-sm p-6 bg-white rounded-xl shadow-2xl border border-slate-200">
+                        <div className="flex flex-col items-center mb-6">
+                            <div className="bg-blue-600 p-3 rounded-xl text-white mb-3 shadow-lg">
+                                <i data-lucide="lock" className="w-8 h-8"></i>
+                            </div>
+                            <h2 className="text-2xl font-bold text-slate-800">Acceso Cirineo Producción</h2>
+                            <p className="text-sm text-slate-500">Introduce tu PIN de seguridad</p>
+                        </div>
+                        <form onSubmit={handleLogin} className="space-y-4">
+                            <div>
+                                <input
+                                    type="password"
+                                    placeholder="----"
+                                    maxLength="4"
+                                    value={pin}
+                                    onChange={(e) => setPin(e.target.value)}
+                                    className="w-full p-4 text-center text-3xl font-mono tracking-widest border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:ring-blue-500 transition duration-150"
+                                    required
+                                />
+                                {error && (
+                                    <p className="mt-2 text-sm text-red-600 font-medium text-center">{error}</p>
+                                )}
+                            </div>
+                            <button
+                                type="submit"
+                                className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition duration-200 shadow-md shadow-blue-300 disabled:opacity-50"
+                                disabled={pin.length !== 4}
+                            >
+                                Ingresar
+                            </button>
+                        </form>
+                        <div className="mt-6 pt-4 border-t text-xs text-slate-400 text-center">
+                            PINs de prueba: 1111 (Admin), 3333 (Operador)
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const PlanningModal = ({ machine, rowId, currentData, onClose, onSave }) => {
+            const [model, setModel] = useState(currentData?.plan_model || '');
+            const [targetQty, setTargetQty] = useState(currentData?.plan_target_qty || '');
+            const [timeMin, setTimeMin] = useState(currentData?.plan_time_min || '');
+            const [hours, setHours] = useState(currentData?.plan_hours || 12); // Default 12h
+
+            const handleSave = () => {
+                const data = {
+                    plan_model: model || null,
+                    plan_target_qty: Number(targetQty) || null,
+                    plan_time_min: Number(timeMin) || null,
+                    plan_hours: Number(hours) || null,
+                };
+                onSave(rowId, machine.id, data);
+                onClose();
+            };
+
+            const { targetPieces, percentage } = calculateProduction(
+                Number(targetQty), 
+                Number(timeMin), 
+                Number(hours), 
+                currentData?.actual || 0
+            );
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+                    <div 
+                        className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all duration-300 scale-100"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="p-5 border-b flex justify-between items-center bg-blue-600 text-white">
+                            <h3 className="text-xl font-bold">Planificación: {machine.name} - {rowId}</h3>
+                            <button onClick={onClose} className="p-1 rounded-full hover:bg-blue-700 transition"><i data-lucide="x" className="w-5 h-5"></i></button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            
+                            <div className="grid grid-cols-2 gap-4">
+                                <label className="block">
+                                    <span className="text-sm font-medium text-slate-700">Modelo (Ej: B001 M)</span>
+                                    <input
+                                        type="text"
+                                        value={model}
+                                        onChange={(e) => setModel(e.target.value)}
+                                        className="mt-1 w-full p-2 border border-slate-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className="text-sm font-medium text-slate-700">Cantidad Total Pedido</span>
+                                    <input
+                                        type="number"
+                                        value={targetQty}
+                                        onChange={(e) => setTargetQty(e.target.value)}
+                                        className="mt-1 w-full p-2 border border-slate-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </label>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <label className="block">
+                                    <span className="text-sm font-medium text-slate-700">Tiempo por pieza (min)</span>
+                                    <input
+                                        type="number"
+                                        value={timeMin}
+                                        onChange={(e) => setTimeMin(e.target.value)}
+                                        className="mt-1 w-full p-2 border border-slate-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className="text-sm font-medium text-slate-700">Horas de trabajo (12/24)</span>
+                                    <select
+                                        value={hours}
+                                        onChange={(e) => setHours(e.target.value)}
+                                        className="mt-1 w-full p-2 border border-slate-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                                    >
+                                        <option value={12}>12 horas</option>
+                                        <option value={24}>24 horas</option>
+                                    </select>
+                                </label>
+                            </div>
+                            
+                            <div className="border-t pt-4 mt-4 space-y-2">
+                                <p className="font-bold text-slate-800">Cálculos Diarios:</p>
+                                <div className="flex justify-between p-3 bg-slate-50 rounded-lg">
+                                    <span className="font-medium text-slate-600">Objetivo de Piezas (Día)</span>
+                                    <span className="font-black text-green-700 text-lg">{targetPieces.toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between p-3 bg-slate-50 rounded-lg">
+                                    <span className="font-medium text-slate-600">Producción Actual</span>
+                                    <span className="font-black text-blue-700 text-lg">{currentData?.actual?.toLocaleString() || 0}</span>
+                                </div>
+                                <div className="flex justify-between p-3 bg-slate-200 rounded-lg">
+                                    <span className="font-bold text-slate-800">Cumplimiento (%)</span>
+                                    <span 
+                                        className={`font-black text-xl ${percentage >= 100 ? 'text-green-600' : percentage > 70 ? 'text-orange-500' : 'text-red-500'}`}
+                                    >
+                                        {percentage}%
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-4 bg-slate-50 flex justify-end">
+                            <button
+                                onClick={handleSave}
+                                className="bg-green-600 text-white py-2 px-4 rounded-lg font-semibold hover:bg-green-700 transition shadow-md"
+                            >
+                                Guardar Planificación
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        
+        // ==========================================
+        // COMPONENTE PRINCIPAL
+        // ==========================================
 
         const App = () => {
-            const [user, setUser] = useState(null);
+            const [firebaseUser, setFirebaseUser] = useState(null); // Usuario de Firebase
+            const [authenticatedUser, setAuthenticatedUser] = useState(null); // Usuario con rol y PIN
             const [productionData, setProductionData] = useState({});
             const [loading, setLoading] = useState(true);
             const [savingStatus, setSavingStatus] = useState('idle');
+            const [expandedMachineId, setExpandedMachineId] = useState(null);
+            const [planningModal, setPlanningModal] = useState(null); // {machineId, rowId}
+
+            // Toggle para expandir/contraer la columna
+            const toggleExpansion = (machineId) => {
+                setExpandedMachineId(currentId => currentId === machineId ? null : machineId);
+            };
 
             // Cargar Iconos Lucide
             useEffect(() => {
                 if (window.lucide) window.lucide.createIcons();
             });
 
-            // Autenticación Anónima
+            // Autenticación Anónima (Necesaria para Firestore, pero el PIN controla el acceso a la UI)
             useEffect(() => {
-                const unsubscribe = onAuthStateChanged(auth, setUser);
+                const unsubscribe = onAuthStateChanged(auth, setFirebaseUser);
                 signInAnonymously(auth).catch((error) => {
                     console.error("Error Auth:", error);
-                    alert("Error de autenticación. Verifica que 'Anonymous Auth' esté activado en Firebase Console.");
                 });
                 return () => unsubscribe();
             }, []);
 
             // Escuchar Datos en Tiempo Real
             useEffect(() => {
-                if (!user) return;
+                if (!firebaseUser) return;
 
-                // Conectamos a la colección 'produccion_2025'
+                // Usaremos una colección genérica para la data anidada
                 const q = collection(db, 'produccion_2025');
                 
                 const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -151,61 +448,136 @@
                 });
 
                 return () => unsubscribe();
-            }, [user]);
+            }, [firebaseUser]);
 
-            // Guardar Cambios
-            const handleCellChange = async (rowId, machineId, value) => {
-                const numericValue = value === '' ? '' : Number(value);
-                if (isNaN(numericValue)) return;
+            /**
+             * Guarda los cambios de producción real o planificación.
+             * @param {string} rowId - Fecha (ej: 'LUNES 17')
+             * @param {string} machineId - ID de máquina (ej: 'm30')
+             * @param {string} field - Campo a actualizar ('actual', 'plan_model', etc.)
+             * @param {any} value - Nuevo valor
+             */
+            const handleUpdateField = useCallback(async (rowId, machineId, field, value) => {
+                if (!authenticatedUser || authenticatedUser.role === ROLES.OBSERVER) return;
 
                 setSavingStatus('saving');
                 try {
                     const docRef = doc(db, 'produccion_2025', rowId);
-                    await setDoc(docRef, { [machineId]: numericValue }, { merge: true });
+                    
+                    let updateData = {
+                        [`${machineId}.${field}`]: value
+                    };
+
+                    // Si es un cambio de planificación, recalcula y actualiza los campos calculados
+                    if (field.startsWith('plan_') || field === 'actual') {
+                        const currentMachineData = productionData[rowId]?.[machineId] || {};
+                        const plan_target_qty = field === 'plan_target_qty' ? value : currentMachineData.plan_target_qty;
+                        const plan_time_min = field === 'plan_time_min' ? value : currentMachineData.plan_time_min;
+                        const plan_hours = field === 'plan_hours' ? value : currentMachineData.plan_hours;
+                        const actualQty = field === 'actual' ? value : currentMachineData.actual;
+
+                        const { targetPieces, percentage } = calculateProduction(
+                            plan_target_qty, plan_time_min, plan_hours, actualQty
+                        );
+                        
+                        updateData[`${machineId}.calculated_target`] = targetPieces;
+                        updateData[`${machineId}.percentage`] = percentage;
+                    }
+                    
+                    await setDoc(docRef, updateData, { merge: true });
                     setSavingStatus('saved');
                     setTimeout(() => setSavingStatus('idle'), 2000);
+
                 } catch (err) {
                     console.error("Error guardando:", err);
                     setSavingStatus('error');
-                    alert("Error al guardar. Verifica las Reglas de Firestore en Firebase Console.");
                 }
-            };
+            }, [authenticatedUser, productionData]);
 
-            // Calcular Totales
-            const totals = useMemo(() => {
-                const rowTotals = {};
-                const colTotals = {};
-                let grandTotal = 0;
+            /**
+             * Maneja el guardado desde el modal de planificación.
+             * @param {string} rowId - Fecha
+             * @param {string} machineId - ID de máquina
+             * @param {object} planningData - Objeto con los nuevos campos de planificación
+             */
+            const handleSavePlanning = useCallback(async (rowId, machineId, planningData) => {
+                if (authenticatedUser.role !== ROLES.ADMIN) return;
 
-                MACHINES.forEach(m => colTotals[m.id] = 0);
+                setSavingStatus('saving');
+                try {
+                    const docRef = doc(db, 'produccion_2025', rowId);
+                    
+                    let updateData = {};
+                    const currentMachineData = productionData[rowId]?.[machineId] || {};
+                    const actualQty = currentMachineData.actual || 0;
+                    
+                    // Aplicar la nueva data
+                    const mergedData = { ...currentMachineData, ...planningData };
 
-                INITIAL_ROWS.forEach(row => {
-                    let rTotal = 0;
-                    MACHINES.forEach(m => {
-                        const val = productionData[row]?.[m.id] || 0;
-                        rTotal += val;
-                        colTotals[m.id] += val;
-                    });
-                    rowTotals[row] = rTotal;
-                    grandTotal += rTotal;
-                });
+                    const { targetPieces, percentage } = calculateProduction(
+                        mergedData.plan_target_qty, mergedData.plan_time_min, mergedData.plan_hours, actualQty
+                    );
+                    
+                    updateData[machineId] = {
+                        ...mergedData,
+                        actual: actualQty, // Asegurar que el actual se mantenga
+                        calculated_target: targetPieces,
+                        percentage: percentage,
+                    };
 
-                return { rowTotals, colTotals, grandTotal };
-            }, [productionData]);
+                    await setDoc(docRef, updateData, { merge: true });
+                    setSavingStatus('saved');
+                    setTimeout(() => setSavingStatus('idle'), 2000);
 
-            if (!user || loading) {
+                } catch (err) {
+                    console.error("Error guardando planificación:", err);
+                    setSavingStatus('error');
+                }
+            }, [authenticatedUser, productionData]);
+
+
+            if (!authenticatedUser) {
+                return <LoginScreen setAuthenticatedUser={setAuthenticatedUser} />;
+            }
+            
+            if (loading) {
                 return (
                     <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-600">
                         <div className="flex flex-col items-center gap-4">
                             <i data-lucide="loader-2" className="w-10 h-10 animate-spin text-blue-600"></i>
-                            <p>Conectando a Firebase...</p>
+                            <p>Cargando datos de producción...</p>
                         </div>
                     </div>
                 );
             }
+            
+            // FILTRADO DE FILAS PARA OBSERVADOR
+            const visibleRows = authenticatedUser.role === ROLES.OBSERVER 
+                ? INITIAL_ROWS.filter(row => CURRENT_WEEK_DATES.includes(row)) 
+                : INITIAL_ROWS;
+
+
+            // Función de ayuda para la visualización del porcentaje
+            const getPercentageColor = (percentage) => {
+                if (percentage >= 100) return 'bg-green-100 text-green-700';
+                if (percentage > 70) return 'bg-orange-100 text-orange-700';
+                if (percentage > 0) return 'bg-red-100 text-red-700';
+                return 'bg-slate-50 text-slate-400';
+            };
 
             return (
                 <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
+                    {/* MODAL DE PLANIFICACIÓN */}
+                    {planningModal && (
+                        <PlanningModal 
+                            machine={MACHINES.find(m => m.id === planningModal.machineId)}
+                            rowId={planningModal.rowId}
+                            currentData={productionData[planningModal.rowId]?.[planningModal.machineId]}
+                            onClose={() => setPlanningModal(null)}
+                            onSave={handleSavePlanning}
+                        />
+                    )}
+
                     {/* HEADER */}
                     <header className="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-20">
                         <div className="w-full px-4 py-3 flex justify-between items-center">
@@ -217,7 +589,7 @@
                                     <h1 className="text-xl font-bold text-slate-800">Control de Producción - Cirineo 2025</h1>
                                     <p className="text-xs text-slate-500 flex items-center gap-1">
                                         <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                                        En línea
+                                        Logueado como: <span className="font-semibold text-slate-700">{authenticatedUser.name} ({authenticatedUser.role.toUpperCase()})</span>
                                     </p>
                                 </div>
                             </div>
@@ -226,10 +598,13 @@
                                 {savingStatus === 'saving' && <span className="text-xs text-blue-500 font-medium">Guardando...</span>}
                                 {savingStatus === 'saved' && <span className="text-xs text-green-600 font-medium">Guardado</span>}
                                 {savingStatus === 'error' && <span className="text-xs text-red-600 font-medium">Error</span>}
-                                <div className="bg-slate-100 px-3 py-1 rounded-full text-xs font-medium text-slate-600 flex items-center gap-2">
-                                    <i data-lucide="users" className="w-3 h-3"></i>
-                                    Colaborativo
-                                </div>
+                                <button 
+                                    onClick={() => setAuthenticatedUser(null)} 
+                                    className="bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium hover:bg-red-600 transition"
+                                >
+                                    <i data-lucide="log-out" className="w-3 h-3 inline mr-1"></i>
+                                    Salir
+                                </button>
                             </div>
                         </div>
                     </header>
@@ -238,7 +613,7 @@
                     <main className="flex-1 overflow-auto p-4">
                         <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
                             <div className="overflow-x-auto custom-scrollbar pb-2">
-                                <table className="w-full border-collapse min-w-[2000px]">
+                                <table className="w-full border-collapse"> 
                                     <thead>
                                         <tr className="bg-slate-50 border-b border-slate-200">
                                             <th className="sticky left-0 z-10 bg-slate-50 p-4 min-w-[150px] border-r border-slate-200 text-left shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
@@ -248,19 +623,12 @@
                                                 </div>
                                             </th>
                                             {MACHINES.map(machine => (
-                                                <th key={machine.id} className="p-2 min-w-[100px] border-r border-slate-100 align-bottom group hover:bg-slate-100 transition-colors">
-                                                    <div className="flex flex-col items-center gap-2 pb-2">
-                                                        <div className="w-12 h-14 mb-1 transform group-hover:scale-110 transition-transform duration-300">
-                                                            <SantoniMachineIcon className="w-full h-full text-slate-700" />
-                                                        </div>
-                                                        <span className="font-bold text-blue-700 text-sm">{machine.name}</span>
-                                                        <div className="text-[10px] text-slate-500 font-normal leading-tight text-center">
-                                                            {machine.type.replace('SANTONI', '')}<br/>
-                                                            {machine.diam}" - {machine.needles}ag<br/>
-                                                            G{machine.gauge}
-                                                        </div>
-                                                    </div>
-                                                </th>
+                                                <MachineHeader 
+                                                    key={machine.id}
+                                                    machine={machine}
+                                                    isExpanded={expandedMachineId === machine.id}
+                                                    onClick={toggleExpansion}
+                                                />
                                             ))}
                                             <th className="sticky right-0 z-10 bg-slate-50 p-4 min-w-[100px] border-l border-slate-200 text-center text-slate-700 font-bold shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                                                 TOTAL<br/>DIARIO
@@ -268,46 +636,112 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {INITIAL_ROWS.map((rowLabel, rowIndex) => (
-                                            <tr key={rowLabel} className={`border-b border-slate-100 hover:bg-blue-50/50 transition-colors ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
-                                                <td className="sticky left-0 z-10 bg-inherit p-3 border-r border-slate-200 font-medium text-slate-700 text-sm whitespace-nowrap shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                                                    <div className="flex items-center gap-2">
-                                                        <i data-lucide="calendar" className="w-3 h-3 text-slate-400"></i>
-                                                        {rowLabel}
-                                                    </div>
-                                                </td>
-                                                {MACHINES.map(machine => {
-                                                    const val = productionData[rowLabel]?.[machine.id] ?? '';
-                                                    return (
-                                                        <td key={`${rowLabel}-${machine.id}`} className="p-0 border-r border-slate-100 relative">
-                                                            <input
-                                                                type="number"
-                                                                placeholder="-"
-                                                                className="w-full h-full py-3 text-center bg-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all text-slate-800 font-medium placeholder-slate-200"
-                                                                value={val}
-                                                                onChange={(e) => handleCellChange(rowLabel, machine.id, e.target.value)}
-                                                            />
-                                                        </td>
-                                                    );
-                                                })}
-                                                <td className="sticky right-0 z-10 bg-slate-50 p-3 border-l border-slate-200 text-center font-bold text-blue-600 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                                                    {totals.rowTotals[rowLabel] > 0 ? totals.rowTotals[rowLabel].toLocaleString() : '-'}
-                                                </td>
-                                            </tr>
-                                        ))}
+                                        {visibleRows.map((rowLabel, rowIndex) => {
+                                            let rowTotal = 0;
+                                            const isReadOnly = authenticatedUser.role === ROLES.OBSERVER;
+
+                                            return (
+                                                <tr key={rowLabel} className={`border-b border-slate-100 transition-colors ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'} ${isReadOnly ? 'opacity-80' : 'hover:bg-blue-50/50'}`}>
+                                                    <td className="sticky left-0 z-10 bg-inherit p-3 border-r border-slate-200 font-medium text-slate-700 text-sm whitespace-nowrap shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                                                        <div className="flex items-center gap-2">
+                                                            <i data-lucide="calendar" className="w-3 h-3 text-slate-400"></i>
+                                                            {rowLabel}
+                                                        </div>
+                                                    </td>
+                                                    {MACHINES.map(machine => {
+                                                        const machineData = productionData[rowLabel]?.[machine.id] || {};
+                                                        const actualQty = machineData.actual ?? '';
+                                                        const targetPieces = machineData.calculated_target ?? 0;
+                                                        const percentage = machineData.percentage ?? 0;
+                                                        
+                                                        rowTotal += Number(actualQty) || 0;
+
+                                                        const isExpanded = expandedMachineId === machine.id;
+                                                        const canEditActual = [ROLES.ADMIN, ROLES.OPERATOR].includes(authenticatedUser.role) && !isReadOnly;
+                                                        const canPlan = authenticatedUser.role === ROLES.ADMIN && !isReadOnly;
+                                                        
+                                                        const showPlanningInfo = isExpanded || authenticatedUser.role !== ROLES.OPERATOR;
+
+
+                                                        return (
+                                                            <td 
+                                                                key={`${rowLabel}-${machine.id}`} 
+                                                                className={`p-0 border-r border-slate-100 relative machine-col ${isExpanded ? 'expanded' : ''} transition-[min-width] duration-300 ease-in-out`}
+                                                            >
+                                                                <div className="w-full h-full flex flex-col justify-between">
+                                                                    
+                                                                    {/* Planning Info (Visible para Admin/Comentador/Observador) */}
+                                                                    {showPlanningInfo && (
+                                                                        <div className={`p-1 text-center text-[10px] leading-tight transition-all ${isExpanded ? 'opacity-100' : 'opacity-0 h-0 p-0'} ${canPlan ? 'bg-blue-50/50' : 'bg-slate-50'}`}>
+                                                                            {canPlan && (
+                                                                                <button 
+                                                                                    onClick={() => setPlanningModal({ machineId: machine.id, rowId: rowLabel })}
+                                                                                    className="text-blue-600 hover:text-blue-800 font-bold mb-1 px-1 rounded-sm text-xs transition"
+                                                                                >
+                                                                                    {machineData.plan_model || 'PLANIFICAR'} 
+                                                                                    <i data-lucide="edit-3" className="w-3 h-3 inline ml-1"></i>
+                                                                                </button>
+                                                                            )}
+                                                                            <p className={`font-semibold ${machineData.plan_model ? 'text-slate-800' : 'text-slate-400'}`}>
+                                                                                Mod: {machineData.plan_model || '-'} / T: {machineData.plan_time_min || '-'} min
+                                                                            </p>
+                                                                            <p className="font-medium text-slate-600">
+                                                                                Obj: {targetPieces.toLocaleString()} Pz
+                                                                            </p>
+                                                                            <div className={`mt-1 text-xs font-black p-[1px] rounded ${getPercentageColor(percentage)}`}>
+                                                                                {percentage}%
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Input de Producción Real (Operador/Admin) */}
+                                                                    <input
+                                                                        type="number"
+                                                                        placeholder={isReadOnly ? '0' : 'Ingresar Pzas'}
+                                                                        className={`w-full py-2 text-center text-slate-800 font-bold placeholder-slate-400 transition-all ${canEditActual ? 'bg-white hover:bg-yellow-50 focus:ring-blue-500 focus:border-blue-500 focus:ring-2' : 'bg-slate-100 cursor-default'}`}
+                                                                        value={actualQty}
+                                                                        onChange={(e) => canEditActual && handleUpdateField(rowLabel, machine.id, 'actual', Number(e.target.value) || 0)}
+                                                                        disabled={!canEditActual}
+                                                                    />
+                                                                </div>
+                                                            </td>
+                                                        );
+                                                    })}
+                                                    <td className="sticky right-0 z-10 bg-slate-50 p-3 border-l border-slate-200 text-center font-bold text-blue-600 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                                                        {rowTotal.toLocaleString()}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
                                     </tbody>
                                     <tfoot className="bg-slate-100 border-t-2 border-slate-300">
                                         <tr>
                                             <td className="sticky left-0 z-10 bg-slate-100 p-4 font-bold text-slate-800 border-r border-slate-300 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                                                TOTAL SEMANA
+                                                TOTAL VISIBLE
                                             </td>
-                                            {MACHINES.map(machine => (
-                                                <td key={`total-${machine.id}`} className="p-3 text-center font-bold text-slate-700 border-r border-slate-200 bg-slate-100">
-                                                    {totals.colTotals[machine.id] > 0 ? totals.colTotals[machine.id].toLocaleString() : '-'}
-                                                </td>
-                                            ))}
+                                            {MACHINES.map(machine => {
+                                                const isExpanded = expandedMachineId === machine.id;
+                                                
+                                                // Calcular total solo para las filas visibles
+                                                let colTotal = 0;
+                                                visibleRows.forEach(rowLabel => {
+                                                    colTotal += productionData[rowLabel]?.[machine.id]?.actual || 0;
+                                                });
+
+                                                return (
+                                                    <td 
+                                                        key={`total-${machine.id}`} 
+                                                        className={`p-3 text-center font-bold text-slate-700 border-r border-slate-200 bg-slate-100 machine-col ${isExpanded ? 'expanded' : ''} transition-[min-width] duration-300 ease-in-out`}
+                                                    >
+                                                        {colTotal.toLocaleString()}
+                                                    </td>
+                                                );
+                                            })}
                                             <td className="sticky right-0 z-10 bg-slate-200 p-3 text-center font-black text-blue-800 border-l border-slate-300 text-lg shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                                                {totals.grandTotal > 0 ? totals.grandTotal.toLocaleString() : '-'}
+                                                {/* Calcular total general solo para las filas visibles */}
+                                                {visibleRows.reduce((acc, rowLabel) => {
+                                                    return acc + MACHINES.reduce((sum, machine) => sum + (productionData[rowLabel]?.[machine.id]?.actual || 0), 0);
+                                                }, 0).toLocaleString()}
                                             </td>
                                         </tr>
                                     </tfoot>
@@ -324,5 +758,4 @@
     </script>
 </body>
 </html>
-
 
