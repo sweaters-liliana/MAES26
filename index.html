@@ -46,7 +46,6 @@
         }
         .prod-input:focus { background: #1e293b; color: #60a5fa; }
 
-        /* CLASE NUEVA: OCULTAR PIN VISUALMENTE */
         .password-mask {
             -webkit-text-security: disc;
             text-security: disc;
@@ -54,6 +53,8 @@
 
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .zoom-transition { transition: transform 0.2s ease-out; }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-200 font-sans fixed inset-0 overflow-hidden">
@@ -121,15 +122,13 @@
             { id: 'm8',  name: 'MAQ 8',  type: 'SANTONI TOP2' },
         ];
 
-        // Generador de Calendario (ACTUALIZADO: Nov 2025 - Dic 2026)
+        // Generador de Calendario
         const generateCalendar = () => {
             const dates = [];
             const days = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
             const months = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
             
-            // INICIO: 1 de Diciembre 2025 (Ajustado a Nov 2025 para consistencia)
             const start = new Date(2025, 11, 1);
-            // FIN: 31 de Diciembre 2026
             const end = new Date(2026, 11, 31);
             
             let idx = 0;
@@ -158,8 +157,6 @@
         };
 
         // --- COMPONENTES AUXILIARES ---
-
-        // 1. BLOC DE NOTAS COMPARTIDO
         const NotesModal = ({ onClose, user }) => {
             const [notes, setNotes] = useState([]);
             const [newMessage, setNewMessage] = useState('');
@@ -219,11 +216,9 @@
             );
         };
 
-        // 2. MODAL DE ESTADÍSTICAS Y PDF
         const StatsModal = ({ onClose, visibleMachines, currentWeekData, weekTitle }) => {
             const canvasRef = useRef(null);
             
-            // Preparar datos
             const labels = visibleMachines.map(m => m.name.replace('MAQ ', 'M-'));
             const actualData = visibleMachines.map(m => {
                 return currentWeekData.reduce((acc, row) => acc + (row.data[m.id]?.actual || 0), 0);
@@ -323,7 +318,6 @@
             );
         };
 
-        // 3. NUEVO COMPONENTE: GUÍA DE AYUDA Y COLORES (Semáforo de Eficiencia)
         const HelpModal = ({ onClose }) => {
             return (
                 <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
@@ -370,7 +364,6 @@
                 </div>
             );
         };
-        // FIN: NUEVO COMPONENTE: GUÍA DE AYUDA
 
         const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall }) => {
             const [pin, setPin] = useState('');
@@ -383,9 +376,7 @@
             return (
                 <div className="flex items-center justify-center h-full bg-slate-900 p-4">
                     <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center border border-slate-700 relative">
-                        {/* ICONO PWA HEADER */}
                         <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg shadow-blue-900/50">
-                            {/* Icono tipo Ficha Técnica SVG Inline */}
                             <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M9 14h6"/><path d="M9 18h6"/><path d="M9 10h6"/></svg>
                         </div>
                         
@@ -406,7 +397,6 @@
                             <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-blue-500 active:scale-95 transition-all shadow-lg shadow-blue-900/20">INGRESAR</button>
                         </form>
 
-                        {/* BOTON INSTALAR SI ESTA DISPONIBLE */}
                         {installPrompt && (
                             <div className="mt-8 pt-6 border-t border-slate-700">
                                 <button onClick={onInstall} className="flex items-center justify-center gap-2 w-full bg-slate-700 hover:bg-slate-600 text-slate-200 py-3 rounded-lg font-bold text-sm transition-all border border-slate-600">
@@ -643,18 +633,19 @@
             const [planModal, setPlanModal] = useState(null);
             const [showVisibilityModal, setShowVisibilityModal] = useState(false);
             
-            // Nuevos Estados
             const [showNotes, setShowNotes] = useState(false);
             const [showStats, setShowStats] = useState(false);
-            const [showHelp, setShowHelp] = useState(false); // NUEVO: Estado para el Modal de Ayuda
-            const [machineSearch, setMachineSearch] = useState(''); // NUEVO: Estado para el Buscador
+            const [showHelp, setShowHelp] = useState(false);
+            const [machineSearch, setMachineSearch] = useState('');
 
-            // Estado para instalación PWA
+            // --- ESTADOS DE ZOOM (DESKTOP) ---
+            const [zoomLevel, setZoomLevel] = useState(1.0);
+            const [showZoomOverlay, setShowZoomOverlay] = useState(false);
+
             const [deferredPrompt, setDeferredPrompt] = useState(null);
 
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
             
-            // Capturar evento de instalación
             useEffect(() => {
                 const handler = (e) => {
                     e.preventDefault();
@@ -746,7 +737,6 @@
                 return MACHINES.filter(m => !visibilityConfig.machines.includes(m.id));
             }, [visibilityConfig.machines]);
 
-            // NUEVO: Lógica de filtrado de máquinas por búsqueda
             const filteredVisibleMachines = useMemo(() => {
                 if (!machineSearch) return visibleMachines;
                 return visibleMachines.filter(m => 
@@ -761,7 +751,6 @@
                 return rawWeek.filter(r => !visibilityConfig.days.includes(r.id));
             }, [weekOffset, visibilityConfig.days]);
             
-            // Datos enriquecidos para la gráfica
             const weekDataForStats = useMemo(() => {
                 return currentWeekRows.map(row => ({
                     ...row,
@@ -786,7 +775,7 @@
 
                 const rowId = selectedDay.id;
                 const dayData = data[rowId] || {};
-                const dayTotal = filteredVisibleMachines.reduce((acc, m) => acc + (dayData[m.id]?.actual || 0), 0); // Usa filteredVisibleMachines
+                const dayTotal = filteredVisibleMachines.reduce((acc, m) => acc + (dayData[m.id]?.actual || 0), 0);
 
                 return (
                     <div className="flex flex-col h-full bg-slate-900">
@@ -800,7 +789,6 @@
                                     </div>
                                 </div>
                                 <div className="flex gap-2">
-                                    {/* Boton Instalación Mini */}
                                     {deferredPrompt && (
                                         <button onClick={handleInstallClick} className="w-8 h-8 bg-blue-900/50 border border-blue-500 rounded-lg flex items-center justify-center text-blue-400 active:scale-95 animate-pulse">
                                             <i data-lucide="download" className="w-4 h-4"></i>
@@ -814,7 +802,7 @@
                                             <i data-lucide="bar-chart-2" className="w-4 h-4"></i>
                                         </button>
                                     )}
-                                    <button onClick={() => setShowHelp(true)} className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-blue-400 active:scale-95"> {/* NUEVO BOTÓN */}
+                                    <button onClick={() => setShowHelp(true)} className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-blue-400 active:scale-95">
                                         <i data-lucide="help-circle" className="w-4 h-4"></i>
                                     </button>
                                     {canConfig && (
@@ -851,8 +839,6 @@
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-3 pb-24 custom-scrollbar">
-                            
-                            {/* --- NUEVA BARRA DE BÚSQUEDA EN MÓVIL --- */}
                             <div className="mb-4 sticky top-0 z-10">
                                 <div className="relative">
                                     <i data-lucide="search" className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500"></i>
@@ -878,7 +864,7 @@
                                 </div>
                             )}
 
-                            {filteredVisibleMachines.map(m => { // USA filteredVisibleMachines
+                            {filteredVisibleMachines.map(m => { 
                                 const mData = dayData[m.id] || {};
                                 const pct = mData.percentage || 0;
                                 const target = mData.calculated_target || 0;
@@ -937,7 +923,7 @@
 
             // --- VISTA DESKTOP ---
             const DesktopView = () => (
-                <div className="h-full flex flex-col bg-slate-900 overflow-hidden">
+                <div className="h-full flex flex-col bg-slate-900 overflow-hidden relative">
                     <header className="bg-slate-800 shadow-sm border-b border-slate-700 p-3 flex justify-between items-center z-20 shrink-0">
                         <div className="flex items-center gap-4">
                             <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-2 rounded-lg text-white shadow-lg shadow-blue-900/50">
@@ -949,12 +935,11 @@
                                 <p className="text-[10px] text-slate-500 uppercase font-medium leading-none">{user.area}</p>
                             </div>
                             
-                            {/* BOTONES NUEVOS */}
                             <button onClick={() => setShowNotes(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-yellow-400 ml-4 transition-colors relative group" title="Notas Compartidas">
                                 <i data-lucide="sticky-note" className="w-5 h-5"></i>
                             </button>
                             
-                            <button onClick={() => setShowHelp(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-blue-400 transition-colors" title="Guía de Colores y Ayuda"> {/* NUEVO BOTÓN */}
+                            <button onClick={() => setShowHelp(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-blue-400 transition-colors" title="Guía de Colores y Ayuda">
                                 <i data-lucide="help-circle" className="w-5 h-5"></i>
                             </button>
 
@@ -978,14 +963,15 @@
                              <button onClick={() => setUser(null)} className="p-2 text-red-400 hover:bg-red-900/20 rounded"><i data-lucide="log-out" className="w-5 h-5"></i></button>
                         </div>
                     </header>
-                    <main className="flex-1 overflow-auto p-2 custom-scrollbar">
-                        <div className="bg-slate-800 rounded-xl shadow border border-slate-700 overflow-hidden h-full">
+                    <main className="flex-1 overflow-auto p-2 custom-scrollbar relative">
+                        {/* APLICACIÓN DEL ZOOM MEDIANTE ESTILO 'zoom' PARA MEJOR COMPATIBILIDAD DE TABLAS */}
+                        <div className="bg-slate-800 rounded-xl shadow border border-slate-700 overflow-hidden h-full" style={{ zoom: zoomLevel }}>
                             <div className="overflow-auto custom-scrollbar h-full relative">
                                 <table className="w-full border-collapse">
                                     <thead className="sticky top-0 z-20 bg-slate-900 shadow-sm border-b border-slate-700">
                                         <tr>
                                             <th className="sticky left-0 z-30 bg-slate-900 p-3 min-w-[120px] text-left border-r border-slate-700 text-xs font-bold text-slate-500">FECHA</th>
-                                            {filteredVisibleMachines.map(m => ( // USA filteredVisibleMachines
+                                            {filteredVisibleMachines.map(m => ( 
                                                 <th key={m.id} className="min-w-[100px] border-r border-slate-700 p-2">
                                                     <div className="flex flex-col items-center">
                                                         <span className="text-xs font-bold text-blue-400">{m.name.replace('MAQ ','')}</span>
@@ -1000,14 +986,14 @@
                                         {currentWeekRows.map(row => {
                                             const rowId = row.id;
                                             const rowData = data[rowId] || {};
-                                            const total = filteredVisibleMachines.reduce((acc, m) => acc + (rowData[m.id]?.actual || 0), 0); // USA filteredVisibleMachines
+                                            const total = filteredVisibleMachines.reduce((acc, m) => acc + (rowData[m.id]?.actual || 0), 0);
                                             return (
                                                 <tr key={rowId} className="border-b border-slate-700 hover:bg-slate-700/50 transition-colors">
                                                     <td className="sticky left-0 bg-slate-800 p-2 border-r border-slate-700 text-xs font-bold text-slate-400 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">
                                                         {row.shortDay} <br/> <span className="text-lg text-slate-200">{row.dateNum}</span>
                                                         <span className="block text-[9px] mt-1 text-slate-500">{row.year}</span>
                                                     </td>
-                                                    {filteredVisibleMachines.map(m => { // USA filteredVisibleMachines
+                                                    {filteredVisibleMachines.map(m => {
                                                         const mData = rowData[m.id] || {};
                                                         const actual = mData.actual !== undefined && mData.actual !== null ? mData.actual : '';
                                                         const pct = mData.percentage || 0;
@@ -1053,6 +1039,48 @@
                             </div>
                         </div>
                     </main>
+
+                    {/* BOTON FLOTANTE DE ZOOM */}
+                    <button 
+                        onClick={() => setShowZoomOverlay(true)}
+                        className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-500 text-white w-14 h-14 rounded-full shadow-lg shadow-blue-900/50 flex items-center justify-center z-40 transition-transform active:scale-95"
+                    >
+                        <i data-lucide="search" className="w-6 h-6"></i>
+                    </button>
+
+                    {/* OVERLAY DE ZOOM GIGANTE */}
+                    {showZoomOverlay && (
+                        <div className="fixed inset-0 z-[60] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center fade-in">
+                            <div className="flex items-center gap-12">
+                                {/* Boton Menos Gigante */}
+                                <button 
+                                    onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} 
+                                    className="w-32 h-32 rounded-full bg-slate-800 border-4 border-slate-600 text-white flex items-center justify-center hover:bg-slate-700 active:scale-95 transition-all"
+                                >
+                                    <i data-lucide="minus" className="w-16 h-16"></i>
+                                </button>
+
+                                {/* Boton Confirmar Gigante */}
+                                <button 
+                                    onClick={() => setShowZoomOverlay(false)}
+                                    className="w-24 h-24 rounded-full bg-blue-600 border-4 border-blue-400 text-white flex items-center justify-center hover:bg-blue-500 active:scale-95 transition-all shadow-[0_0_30px_rgba(37,99,235,0.5)]"
+                                >
+                                    <i data-lucide="check" className="w-12 h-12"></i>
+                                </button>
+
+                                {/* Boton Más Gigante */}
+                                <button 
+                                    onClick={() => setZoomLevel(z => Math.min(2.0, z + 0.1))} 
+                                    className="w-32 h-32 rounded-full bg-slate-800 border-4 border-slate-600 text-white flex items-center justify-center hover:bg-slate-700 active:scale-95 transition-all"
+                                >
+                                    <i data-lucide="plus" className="w-16 h-16"></i>
+                                </button>
+                            </div>
+                            <div className="absolute bottom-20 text-slate-400 font-bold text-xl uppercase tracking-widest">
+                                Zoom: {Math.round(zoomLevel * 100)}%
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
 
@@ -1084,7 +1112,7 @@
                         weekTitle={`Semana ${weekOffset + 1}`} 
                     />}
 
-                    {showHelp && <HelpModal onClose={() => setShowHelp(false)} />} {/* NUEVO: Renderiza el Modal de Ayuda */}
+                    {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
 
                     <div className="block md:hidden h-full"><MobileView /></div>
                     <div className="hidden md:block h-full"><DesktopView /></div>
