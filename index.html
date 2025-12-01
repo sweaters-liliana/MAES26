@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
-    <title>M.A.E.S. 2026</title>
+    <title>MAES26 Control Lunes</title>
 
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -166,14 +166,12 @@
             return { targetPieces, percentage: parseFloat(percentage.toFixed(1)) };
         };
 
-        // --- COMPONENTE PRODUCTION SLOT MEJORADO (CON BUFFER Y CHECK BUTTON) ---
+        // --- COMPONENTE PRODUCTION SLOT MEJORADO (BUFFER + PC FIX) ---
         const ProductionSlot = ({ slotData, index, disabled, onUpdate }) => {
-            // Estado local para permitir escritura libre sin actualizar BD a cada letra
             const [localModel, setLocalModel] = useState(slotData?.model || '');
             const [localQty, setLocalQty] = useState(slotData?.qty || '');
-            const [isDirty, setIsDirty] = useState(false); // Rastrea si hay cambios sin guardar
+            const [isDirty, setIsDirty] = useState(false);
 
-            // Sincronizar con la BD solo si el usuario NO está editando (para recibir actualizaciones de otros)
             useEffect(() => {
                 if (!isDirty) {
                     setLocalModel(slotData?.model || '');
@@ -182,14 +180,13 @@
             }, [slotData, isDirty]);
 
             const handleSave = (e) => {
-                e && e.stopPropagation(); // Evitar disparar clics en filas si las hubiera
+                e && e.preventDefault();
+                e && e.stopPropagation();
                 
-                // Enviar Model si cambió
                 if (localModel !== (slotData?.model || '')) {
                     onUpdate(index, 'model', localModel);
                 }
                 
-                // Enviar Cantidad si cambió (manejo seguro de tipos)
                 const currentQtyStr = slotData?.qty !== undefined && slotData?.qty !== null ? String(slotData.qty) : '';
                 const newQtyStr = String(localQty);
                 
@@ -197,19 +194,20 @@
                     onUpdate(index, 'qty', localQty);
                 }
 
-                setIsDirty(false); // Marcar como guardado
+                setIsDirty(false);
             };
 
             const handleChange = (field, val) => {
                 if (field === 'model') setLocalModel(val);
                 else setLocalQty(val);
-                setIsDirty(true); // Activar bandera de "cambios pendientes"
+                setIsDirty(true);
             };
 
             const handleKeyDown = (e) => {
                 if (e.key === 'Enter') {
+                    e.preventDefault(); // Evita submits accidentales en PC
                     handleSave(e);
-                    e.target.blur(); // Quitar foco opcionalmente
+                    e.target.blur(); 
                 }
             };
 
@@ -222,6 +220,7 @@
                         onChange={(e) => handleChange('model', e.target.value)}
                         onKeyDown={handleKeyDown}
                         disabled={disabled}
+                        autoComplete="off"
                         className="slot-input text-[8px] text-yellow-500 uppercase border-b border-slate-700/50 h-1/2"
                     />
                     <input 
@@ -231,17 +230,16 @@
                         onChange={(e) => handleChange('qty', e.target.value)}
                         onKeyDown={handleKeyDown}
                         disabled={disabled}
+                        autoComplete="off"
                         className="slot-input text-[10px] text-white h-1/2"
                     />
                     
-                    {/* BOTÓN DE CONFIRMACIÓN (CHECK) */}
-                    {/* Solo aparece si isDirty es true. Flota a la derecha para no tapar la escritura. */}
                     {isDirty && !disabled && (
                         <div className="absolute inset-y-0 right-0 w-8 flex items-center justify-center bg-gradient-to-l from-slate-900 via-slate-900/80 to-transparent z-10 animate-zoom-in">
                             <button 
                                 onClick={handleSave}
                                 className="bg-green-600 hover:bg-green-500 text-white rounded-full p-1.5 shadow-lg shadow-green-900/50 transform hover:scale-110 active:scale-95 transition-all"
-                                title="Guardar cambios"
+                                title="Confirmar (Guardar)"
                             >
                                 <i data-lucide="check" className="w-4 h-4 md:w-3 md:h-3"></i>
                             </button>
@@ -688,7 +686,7 @@
                                             ) : (canEditPlan && <button onClick={() => setPlanModal({ machineId: m.id, rowId })} className="text-[10px] bg-slate-700 text-slate-400 px-2 py-1 rounded hover:bg-slate-600">+ Plan</button>)}
                                         </div>
                                         <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
-                                            {hasPlan && <div className="text-[10px] text-slate-400 mb-2 font-bold uppercase flex justify-between"><span>Plan: {mData.plan_model}</span> {canEditPlan && <button onClick={() => setPlanModal({ machineId: m.id, rowId })}><i data-lucide="edit-2" className="w-3 h-3 text-blue-500"></i></button>}</div>}
+                                            {hasPlan && <div className="text-[10px] text-yellow-500 font-bold uppercase mb-2 flex justify-between"><span>Plan: {mData.plan_model}</span> {canEditPlan && <button onClick={() => setPlanModal({ machineId: m.id, rowId })}><i data-lucide="edit-2" className="w-3 h-3 text-blue-500"></i></button>}</div>}
                                             <div className={`grid ${gridCols} gap-2`}>
                                                 {visibleSlotIndices.map(idx => (
                                                     <div key={idx} className="h-16">
@@ -760,7 +758,7 @@
                                                             <td key={m.id} className="p-1 border-r border-slate-700 relative h-[80px]">
                                                                 <div className="flex flex-col h-full">
                                                                     <div className="flex justify-between items-center px-1 mb-1">
-                                                                        <span className="text-[9px] font-bold text-slate-500">{mData.plan_model || '-'}</span>
+                                                                        <span className="text-[9px] font-bold text-yellow-500 uppercase">{mData.plan_model || '-'}</span>
                                                                         {canEditPlan && !mData.plan_model && <button onClick={() => setPlanModal({machineId: m.id, rowId})}><i data-lucide="edit-2" className="w-3 h-3 text-blue-500"></i></button>}
                                                                         <span className={`text-[9px] font-black ${pct>=100?'text-green-400':pct<50?'text-red-400':'text-orange-400'}`}>{pct}%</span>
                                                                     </div>
