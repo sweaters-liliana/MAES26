@@ -133,9 +133,9 @@
             const foundIndex = ALL_ROWS.findIndex(r => r.isoDate === todayISO);
             if (foundIndex !== -1) {
                 const row = ALL_ROWS[foundIndex];
-                return { weekOffset: Math.floor(foundIndex / 7), selectedDayIndex: foundIndex % 7, currentMonthDate: new Date(row.year, row.monthIndex, 1) };
+                return { weekOffset: Math.floor(foundIndex / 7), selectedDayIndex: foundIndex % 7 };
             }
-            return { weekOffset: 0, selectedDayIndex: 0, currentMonthDate: new Date(2025, 9, 1) };
+            return { weekOffset: 0, selectedDayIndex: 0 };
         };
 
         const INITIAL_STATE = getInitialState();
@@ -223,7 +223,7 @@
         };
 
         const CalendarModal = ({ onClose, onSelectDate, allRows }) => {
-            const [viewDate, setViewDate] = useState(new Date(2025, 9, 1)); // Oct 2025 start
+            const [viewDate, setViewDate] = useState(new Date(2025, 9, 1)); 
 
             const handleMonthChange = (delta) => {
                 const d = new Date(viewDate);
@@ -232,8 +232,6 @@
             };
 
             const monthRows = allRows.filter(r => r.monthIndex === viewDate.getMonth() && r.year === viewDate.getFullYear());
-            const daysInMonth = monthRows.length;
-            // Align start day
             const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(monthRows[0]?.shortDay) || 0;
             const blanks = Array(startDayOffset).fill(null);
 
@@ -265,13 +263,13 @@
         const StatsModal = ({ onClose, visibleMachines, currentWeekData, weekTitle }) => {
             const canvasRef = useRef(null);
             const effCanvasRef = useRef(null);
+            const totalProdCanvasRef = useRef(null);
             
-            // Data for Operators Comparison
             const labels = visibleMachines.map(m => m.name.replace('MAQ ', 'M-'));
             const andresData = visibleMachines.map(m => currentWeekData.reduce((acc, row) => acc + (Number(row.data[m.id]?.slots?.[0]?.qty) || 0), 0));
             const baltaData = visibleMachines.map(m => currentWeekData.reduce((acc, row) => acc + (Number(row.data[m.id]?.slots?.[1]?.qty) || 0), 0));
+            const totalProductionData = visibleMachines.map((_, index) => andresData[index] + baltaData[index]);
 
-            // Data for Efficiency Chart
             const efficiencyData = visibleMachines.map(m => {
                 let totalPct = 0;
                 let count = 0;
@@ -285,13 +283,9 @@
                 return count > 0 ? (totalPct / count).toFixed(1) : 0;
             });
 
-            // Prepare Data for Reports
             const prepareReportData = () => {
                 const reportRows = [];
                 visibleMachines.forEach(m => {
-                    const mName = m.name;
-                    // Aggregate data or take last plan? Taking the plan from the first active day or average
-                    // For simplicity, we take the plan from the last day of the week that has data, or just sum actuals
                     let totalActual = 0;
                     let lastPlanModel = '-';
                     let lastTimeMin = 0;
@@ -310,140 +304,67 @@
                         }
                     });
                     const finalEff = countEff > 0 ? (avgEff / countEff).toFixed(1) : 0;
-
-                    reportRows.push({
-                        machine: mName,
-                        model: lastPlanModel,
-                        time: lastTimeMin || 0,
-                        hours: lastHours || 0,
-                        actual: totalActual,
-                        efficiency: finalEff
-                    });
+                    reportRows.push({ machine: m.name, model: lastPlanModel, time: lastTimeMin || 0, hours: lastHours || 0, actual: totalActual, efficiency: finalEff });
                 });
                 return reportRows;
             };
 
             const generatePDF = () => {
                 const doc = new jsPDF();
-                doc.setFontSize(16);
-                doc.text(`Reporte de Producción: ${weekTitle}`, 14, 15);
-                doc.setFontSize(10);
-                doc.text(`Generado: ${new Date().toLocaleDateString()}`, 14, 22);
-
+                doc.setFontSize(16); doc.text(`Reporte de Producción: ${weekTitle}`, 14, 15);
+                doc.setFontSize(10); doc.text(`Generado: ${new Date().toLocaleDateString()}`, 14, 22);
                 const data = prepareReportData();
-                const tableColumn = ["Máquina", "Modelo", "Min/Pza", "Horas", "Prod. Real", "Eficiencia %"];
                 const tableRows = data.map(row => [row.machine, row.model, row.time, row.hours, row.actual, `${row.efficiency}%`]);
-
-                doc.autoTable({
-                    head: [tableColumn],
-                    body: tableRows,
-                    startY: 30,
-                    theme: 'grid',
-                    styles: { fontSize: 8 },
-                    headStyles: { fillColor: [22, 160, 133] }
-                });
-
-                // Add Chart Image (Efficiency)
+                doc.autoTable({ head: [["Máquina", "Modelo", "Min/Pza", "Horas", "Prod. Real", "Eficiencia %"]], body: tableRows, startY: 30, theme: 'grid', styles: { fontSize: 8 }, headStyles: { fillColor: [22, 160, 133] } });
                 if (effCanvasRef.current) {
                     const imgData = effCanvasRef.current.toDataURL('image/png');
                     const finalY = doc.lastAutoTable.finalY || 40;
                     doc.text("Gráfica de Eficiencia Operativa:", 14, finalY + 10);
                     doc.addImage(imgData, 'PNG', 14, finalY + 15, 180, 80);
                 }
-
                 doc.save(`Reporte_${weekTitle.replace(/\s/g, '_')}.pdf`);
             };
 
             const generateExcel = () => {
                 const data = prepareReportData();
                 const ws = XLSX.utils.json_to_sheet(data);
-                
-                // Rename headers
                 XLSX.utils.sheet_add_aoa(ws, [["Máquina", "Modelo", "Min/Pza", "Horas Turno", "Producción Real", "Eficiencia %"]], { origin: "A1" });
-
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, "Reporte Semanal");
                 XLSX.writeFile(wb, `Reporte_${weekTitle.replace(/\s/g, '_')}.xlsx`);
             };
 
             useEffect(() => {
-                let chart1 = null, chart2 = null;
+                let c1 = null, c2 = null, c3 = null;
                 if (canvasRef.current) {
-                    const ctx = canvasRef.current.getContext('2d');
-                    chart1 = new Chart(ctx, {
-                        type: 'bar',
-                        data: {
-                            labels: labels,
-                            datasets: [
-                                { label: 'Andrés', data: andresData, backgroundColor: '#3b82f6', borderRadius: 4 }, 
-                                { label: 'Balta', data: baltaData, backgroundColor: '#f97316', borderRadius: 4 }
-                            ]
-                        },
-                        options: {
-                            responsive: true, maintainAspectRatio: false,
-                            plugins: { legend: { labels: { color: '#94a3b8' } } },
-                            scales: { y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' }, beginAtZero: true }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } }
-                        }
-                    });
+                    c1 = new Chart(canvasRef.current.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [{ label: 'Andrés', data: andresData, backgroundColor: '#3b82f6', borderRadius: 4 }, { label: 'Balta', data: baltaData, backgroundColor: '#f97316', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' }, beginAtZero: true }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } } } });
                 }
                 if (effCanvasRef.current) {
-                    const ctx2 = effCanvasRef.current.getContext('2d');
-                    chart2 = new Chart(ctx2, {
-                        type: 'line',
-                        data: {
-                            labels: labels,
-                            datasets: [{
-                                label: 'Eficiencia Operativa (%)',
-                                data: efficiencyData,
-                                borderColor: '#10b981',
-                                backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                                tension: 0.3, fill: true
-                            }]
-                        },
-                        options: {
-                            responsive: true, maintainAspectRatio: false,
-                            plugins: { legend: { labels: { color: '#94a3b8' } } },
-                            scales: { y: { min: 0, max: 120, grid: { color: '#1e293b' }, ticks: { color: '#64748b' } }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } }
-                        }
-                    });
+                    c2 = new Chart(effCanvasRef.current.getContext('2d'), { type: 'line', data: { labels: labels, datasets: [{ label: 'Eficiencia (%)', data: efficiencyData, borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.2)', tension: 0.3, fill: true }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { y: { min: 0, max: 120, grid: { color: '#1e293b' }, ticks: { color: '#64748b' } }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } } } });
                 }
-                return () => { if (chart1) chart1.destroy(); if (chart2) chart2.destroy(); };
+                if (totalProdCanvasRef.current) {
+                    c3 = new Chart(totalProdCanvasRef.current.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [{ label: 'Producción Total (Pzas)', data: totalProductionData, backgroundColor: '#8b5cf6', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' }, beginAtZero: true }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } } } });
+                }
+                return () => { if (c1) c1.destroy(); if (c2) c2.destroy(); if (c3) c3.destroy(); };
             }, []);
 
             return (
                 <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col border border-slate-700" onClick={e => e.stopPropagation()}>
                         <div className="p-4 bg-slate-900 border-b border-slate-700 flex justify-between items-center">
-                            <div>
-                                <h3 className="font-bold text-white flex items-center gap-2"><i data-lucide="bar-chart-2" className="w-5 h-5 text-green-400"></i> Estadísticas</h3>
-                                <p className="text-xs text-blue-400 uppercase font-bold tracking-wider">{weekTitle}</p>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={generatePDF} className="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1"><i data-lucide="file-text" className="w-3 h-3"></i> PDF</button>
-                                <button onClick={generateExcel} className="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1"><i data-lucide="table" className="w-3 h-3"></i> Excel</button>
-                                <button onClick={onClose} className="bg-slate-700 p-2 rounded hover:bg-slate-600"><i data-lucide="x" className="text-white w-4 h-4"></i></button>
-                            </div>
+                            <div><h3 className="font-bold text-white flex items-center gap-2"><i data-lucide="bar-chart-2" className="w-5 h-5 text-green-400"></i> Estadísticas</h3><p className="text-xs text-blue-400 uppercase font-bold tracking-wider">{weekTitle}</p></div>
+                            <div className="flex gap-2"><button onClick={generatePDF} className="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1"><i data-lucide="file-text" className="w-3 h-3"></i> PDF</button><button onClick={generateExcel} className="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1"><i data-lucide="table" className="w-3 h-3"></i> Excel</button><button onClick={onClose} className="bg-slate-700 p-2 rounded hover:bg-slate-600"><i data-lucide="x" className="text-white w-4 h-4"></i></button></div>
                         </div>
                         <div className="flex-1 p-6 overflow-y-auto custom-scrollbar">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 h-[300px] relative">
-                                    <h4 className="text-slate-400 text-xs font-bold uppercase mb-2">Producción por Operador</h4>
-                                    <div className="h-[250px]"><canvas ref={canvasRef}></canvas></div>
-                                </div>
-                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 h-[300px] relative">
-                                    <h4 className="text-slate-400 text-xs font-bold uppercase mb-2">Eficiencia Operativa (%)</h4>
-                                    <div className="h-[250px]"><canvas ref={effCanvasRef}></canvas></div>
-                                </div>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 h-[300px] relative"><h4 className="text-slate-400 text-xs font-bold uppercase mb-2">Producción por Operador</h4><div className="h-[250px]"><canvas ref={canvasRef}></canvas></div></div>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 h-[300px] relative"><h4 className="text-slate-400 text-xs font-bold uppercase mb-2">Eficiencia Operativa (%)</h4><div className="h-[250px]"><canvas ref={effCanvasRef}></canvas></div></div>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 h-[300px] relative md:col-span-2"><h4 className="text-violet-400 text-xs font-bold uppercase mb-2">Producción Total (Andrés + Balta)</h4><div className="h-[250px]"><canvas ref={totalProdCanvasRef}></canvas></div></div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-slate-800 p-4 rounded border border-blue-900/50 text-center">
-                                    <h4 className="text-blue-400 font-bold uppercase text-sm">Total Andrés</h4>
-                                    <p className="text-2xl font-black text-white">{andresData.reduce((a,b)=>a+b,0).toLocaleString()} pzas</p>
-                                </div>
-                                <div className="bg-slate-800 p-4 rounded border border-orange-900/50 text-center">
-                                    <h4 className="text-orange-400 font-bold uppercase text-sm">Total Balta</h4>
-                                    <p className="text-2xl font-black text-white">{baltaData.reduce((a,b)=>a+b,0).toLocaleString()} pzas</p>
-                                </div>
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="bg-slate-800 p-4 rounded border border-blue-900/50 text-center"><h4 className="text-blue-400 font-bold uppercase text-xs">Total Andrés</h4><p className="text-xl font-black text-white">{andresData.reduce((a,b)=>a+b,0).toLocaleString()}</p></div>
+                                <div className="bg-slate-800 p-4 rounded border border-orange-900/50 text-center"><h4 className="text-orange-400 font-bold uppercase text-xs">Total Balta</h4><p className="text-xl font-black text-white">{baltaData.reduce((a,b)=>a+b,0).toLocaleString()}</p></div>
+                                <div className="bg-slate-800 p-4 rounded border border-violet-900/50 text-center"><h4 className="text-violet-400 font-bold uppercase text-xs">Gran Total</h4><p className="text-xl font-black text-white">{totalProductionData.reduce((a,b)=>a+b,0).toLocaleString()}</p></div>
                             </div>
                         </div>
                     </div>
@@ -571,23 +492,19 @@
             const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
             const filteredVisibleMachines = useMemo(() => { if (!machineSearch) return visibleMachines; return visibleMachines.filter(m => m.name.toLowerCase().includes(machineSearch.toLowerCase()) || m.type.toLowerCase().includes(machineSearch.toLowerCase())); }, [visibleMachines, machineSearch]);
             
-            // Core Logic for Weeks
             const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7).filter(r => !visibilityConfig.days?.includes(r.id)); }, [weekOffset, visibilityConfig.days]);
             const weekLabel = useMemo(() => getWeekLabel(currentWeekRows), [currentWeekRows]);
-            
             const weekDataForStats = useMemo(() => currentWeekRows.map(row => ({ ...row, data: data[row.id] || {} })), [currentWeekRows, data]);
             
             const canEditPlan = user && (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT);
             const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
             const canViewStats = user && (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT);
-            
             const canEditSlot = (machineId, slotIndex) => {
                 if (!user) return false;
                 if (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) return true;
                 if (user.allowedSlots) return user.allowedSlots.includes(slotIndex);
                 return false; 
             };
-
             const getVisibleSlots = (machineId) => [0, 1]; 
 
             if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={handleInstallClick} />;
@@ -599,7 +516,6 @@
                 if (!selectedDay) return <div className="p-10 text-center text-slate-500">Semana sin días visibles</div>;
                 const rowId = selectedDay.id;
                 const dayData = data[rowId] || {};
-
                 return (
                     <div className="flex flex-col h-full bg-slate-900">
                         <div className="bg-slate-800 shadow-sm z-20 shrink-0 border-b border-slate-700">
@@ -620,31 +536,16 @@
                                 const slots = mData.slots || [{}, {}, {}, {}];
                                 const hasPlan = !!mData.plan_model;
                                 const visibleSlotIndices = getVisibleSlots(m.id);
-
                                 return (
                                     <div key={m.id} className="bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-700 relative overflow-hidden mb-3">
                                         <div className="flex justify-between items-start mb-2">
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center overflow-hidden"><i data-lucide="cpu" className="w-5 h-5 opacity-50"></i></div>
-                                                <div><h3 className="font-black text-slate-200 text-sm">{m.name.replace('MAQ ','M-')}</h3><p className="text-[10px] text-slate-500 font-medium">{m.type}</p></div>
-                                            </div>
-                                            {hasPlan ? (
-                                                <div className="flex flex-col items-end"><span className={`text-xs font-black px-2 py-0.5 rounded-full ${pct>=100?'bg-green-900/50 text-green-400': pct>70?'bg-blue-900/50 text-blue-400':'bg-red-900/50 text-red-400'}`}>{pct}%</span></div>
-                                            ) : (canEditPlan && <button onClick={() => setPlanModal({ machineId: m.id, rowId })} className="text-[10px] bg-slate-700 text-slate-400 px-2 py-1 rounded hover:bg-slate-600">+ Plan</button>)}
+                                            <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center overflow-hidden"><i data-lucide="cpu" className="w-5 h-5 opacity-50"></i></div><div><h3 className="font-black text-slate-200 text-sm">{m.name.replace('MAQ ','M-')}</h3><p className="text-[10px] text-slate-500 font-medium">{m.type}</p></div></div>
+                                            {hasPlan ? (<div className="flex flex-col items-end"><span className={`text-xs font-black px-2 py-0.5 rounded-full ${pct>=100?'bg-green-900/50 text-green-400': pct>70?'bg-blue-900/50 text-blue-400':'bg-red-900/50 text-red-400'}`}>{pct}%</span></div>) : (canEditPlan && <button onClick={() => setPlanModal({ machineId: m.id, rowId })} className="text-[10px] bg-slate-700 text-slate-400 px-2 py-1 rounded hover:bg-slate-600">+ Plan</button>)}
                                         </div>
                                         <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
                                             {hasPlan && <div className="text-[10px] text-yellow-500 font-bold uppercase mb-2 flex justify-between"><span>Plan: {mData.plan_model}</span> {canEditPlan && <button onClick={() => setPlanModal({ machineId: m.id, rowId })}><i data-lucide="edit-2" className="w-3 h-3 text-blue-500"></i></button>}</div>}
-                                            <div className="grid grid-cols-2 gap-2 mb-1">
-                                                <div className="text-[9px] text-center font-bold text-blue-400 uppercase tracking-widest border-b border-blue-900 pb-1">Andrés</div>
-                                                <div className="text-[9px] text-center font-bold text-orange-400 uppercase tracking-widest border-b border-orange-900 pb-1">Balta</div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {visibleSlotIndices.map(idx => (
-                                                    <div key={idx} className="h-16">
-                                                        <ProductionSlot slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />
-                                                    </div>
-                                                ))}
-                                            </div>
+                                            <div className="grid grid-cols-2 gap-2 mb-1"><div className="text-[9px] text-center font-bold text-blue-400 uppercase tracking-widest border-b border-blue-900 pb-1">Andrés</div><div className="text-[9px] text-center font-bold text-orange-400 uppercase tracking-widest border-b border-orange-900 pb-1">Balta</div></div>
+                                            <div className="grid grid-cols-2 gap-2">{visibleSlotIndices.map(idx => (<div key={idx} className="h-16"><ProductionSlot slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} /></div>))}</div>
                                         </div>
                                     </div>
                                 );
@@ -652,9 +553,7 @@
                         </div>
                         <div className="fixed bottom-0 left-0 w-full bg-slate-900/90 backdrop-blur border-t border-slate-700 p-3 flex justify-between items-center z-30">
                              <button onClick={() => setWeekOffset(prev => Math.max(0, prev - 1))} className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400"><i data-lucide="chevron-left" className="w-5 h-5"></i></button>
-                             <div className="text-center">
-                                <span className="block text-xs font-bold text-blue-400 uppercase tracking-wide">{weekLabel}</span>
-                             </div>
+                             <div className="text-center"><span className="block text-xs font-bold text-blue-400 uppercase tracking-wide">{weekLabel}</span></div>
                              <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400"><i data-lucide="chevron-right" className="w-5 h-5"></i></button>
                         </div>
                     </div>
@@ -667,18 +566,12 @@
                         <div className="flex items-center gap-4">
                             <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-2 rounded-lg text-white shadow-lg"><i data-lucide="factory" className="w-5 h-5"></i></div>
                             <h1 className="font-bold text-slate-200 hidden md:block">Control MAES - Tejido</h1>
-                            
-                            {/* Navigation Week/Month with Calendar Overlay */}
                             <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700/50 ml-6">
                                 <button onClick={() => setWeekOffset(prev => Math.max(0, prev - 1))} className="p-1 hover:bg-slate-700 rounded text-slate-400"><i data-lucide="chevron-left" className="w-5 h-5"></i></button>
-                                <div className="flex items-center gap-2 px-2 cursor-pointer" onClick={() => setShowCalendar(true)}>
-                                    <i data-lucide="calendar" className="w-4 h-4 text-blue-400"></i>
-                                    <span className="text-sm font-bold text-white uppercase w-32 text-center select-none">{weekLabel}</span>
-                                </div>
+                                <div className="flex items-center gap-2 px-2 cursor-pointer" onClick={() => setShowCalendar(true)}><i data-lucide="calendar" className="w-4 h-4 text-blue-400"></i><span className="text-sm font-bold text-white uppercase w-32 text-center select-none">{weekLabel}</span></div>
                                 <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-1 hover:bg-slate-700 rounded text-slate-400"><i data-lucide="chevron-right" className="w-5 h-5"></i></button>
                             </div>
                         </div>
-
                         <div className="flex items-center gap-4">
                             <div className="text-right px-3 py-1 bg-slate-900/50 rounded-lg border border-slate-700/50"><p className="text-sm font-bold text-blue-400">{user.name.toUpperCase()}</p><p className="text-[10px] text-slate-500 uppercase font-medium leading-none">{user.area}</p></div>
                             <div className="flex gap-2">
@@ -698,33 +591,18 @@
                                     </thead>
                                     <tbody>
                                         {currentWeekRows.map(row => {
-                                            const rowId = row.id;
-                                            const rowData = data[rowId] || {};
+                                            const rowId = row.id; const rowData = data[rowId] || {};
                                             return (
                                                 <tr key={rowId} className="border-b border-slate-700 hover:bg-slate-700/50 transition-colors">
                                                     <td className="sticky left-0 bg-slate-800 p-2 border-r border-slate-700 text-xs font-bold text-slate-400 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">{row.shortDay} <br/> <span className="text-lg text-slate-200">{row.dateNum}</span></td>
                                                     {filteredVisibleMachines.map(m => {
-                                                        const mData = rowData[m.id] || {};
-                                                        const pct = mData.percentage || 0;
-                                                        const slots = mData.slots || [{}, {}, {}, {}];
-                                                        const visibleSlotIndices = getVisibleSlots(m.id);
+                                                        const mData = rowData[m.id] || {}; const pct = mData.percentage || 0; const slots = mData.slots || [{}, {}, {}, {}]; const visibleSlotIndices = getVisibleSlots(m.id);
                                                         return (
                                                             <td key={m.id} className="p-1 border-r border-slate-700 relative h-[80px]">
                                                                 <div className="flex flex-col h-full">
-                                                                    <div className="flex justify-between items-center px-1 mb-1">
-                                                                        <span className="text-[9px] font-bold text-yellow-500 uppercase">{mData.plan_model || '-'}</span>
-                                                                        {canEditPlan && !mData.plan_model && <button onClick={() => setPlanModal({machineId: m.id, rowId})}><i data-lucide="edit-2" className="w-3 h-3 text-blue-500"></i></button>}
-                                                                        <span className={`text-[9px] font-black ${pct>=100?'text-green-400':pct<50?'text-red-400':'text-orange-400'}`}>{pct}%</span>
-                                                                    </div>
-                                                                    <div className="grid grid-cols-2 gap-1 mb-0.5">
-                                                                        <div className="text-[8px] text-center text-blue-400 font-bold bg-slate-900/50 rounded">ANDRÉS</div>
-                                                                        <div className="text-[8px] text-center text-orange-400 font-bold bg-slate-900/50 rounded">BALTA</div>
-                                                                    </div>
-                                                                    <div className="grid grid-cols-2 gap-1 flex-1">
-                                                                        {visibleSlotIndices.map(idx => (
-                                                                            <ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />
-                                                                        ))}
-                                                                    </div>
+                                                                    <div className="flex justify-between items-center px-1 mb-1"><span className="text-[9px] font-bold text-yellow-500 uppercase">{mData.plan_model || '-'}</span>{canEditPlan && !mData.plan_model && <button onClick={() => setPlanModal({machineId: m.id, rowId})}><i data-lucide="edit-2" className="w-3 h-3 text-blue-500"></i></button>}<span className={`text-[9px] font-black ${pct>=100?'text-green-400':pct<50?'text-red-400':'text-orange-400'}`}>{pct}%</span></div>
+                                                                    <div className="grid grid-cols-2 gap-1 mb-0.5"><div className="text-[8px] text-center text-blue-400 font-bold bg-slate-900/50 rounded">ANDRÉS</div><div className="text-[8px] text-center text-orange-400 font-bold bg-slate-900/50 rounded">BALTA</div></div>
+                                                                    <div className="grid grid-cols-2 gap-1 flex-1">{visibleSlotIndices.map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
                                                                 </div>
                                                             </td>
                                                         );
