@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
-    <title>MAES26 Control Operadores</title>
+    <title>MAES26 Control + Pedidos</title>
 
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -36,6 +36,8 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes zoomIn { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         .animate-zoom-in { animation: zoomIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .machine-circle { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .machine-circle.selected { transform: scale(1.1); box-shadow: 0 0 15px rgba(34, 197, 94, 0.6); }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-200 font-sans fixed inset-0 overflow-hidden">
@@ -75,47 +77,36 @@
         const USERS = {
             '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración' },
             '0000': { name: 'Prisciliano Espinoza', role: ROLES.COMMENTATOR, area: 'Comentarios' },
-            '2222': { name: 'Susana', role: ROLES.OBSERVER, area: 'Observación' },
-            '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo' },
+            '2222': { name: 'Susana', role: ROLES.OBSERVER, area: 'Observación', canManageOrders: true }, 
+            '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo', canManageOrders: true }, 
             '3333': { name: 'Tejido', role: ROLES.OPERATOR, area: 'Operadores Gral' },
             '1392': { name: 'Andrés', role: ROLES.OPERATOR, area: 'Tejido (A)', allowedSlots: [0] },
             '7914': { name: 'Balta', role: ROLES.OPERATOR, area: 'Tejido (B)', allowedSlots: [1] }
         };
         
         const MACHINES = [
-            { id: 'm35', name: 'MAQ 35', type: 'SANTONI SM8' },
-            { id: 'm39', name: 'MAQ 39', type: 'SANTONI SM8' },
-            { id: 'm40', name: 'MAQ 40', type: 'SANTONI SM8' },
-            { id: 'm36', name: 'MAQ 36', type: 'CIXING GE82' },
-            { id: 'm38', name: 'MAQ 38', type: 'SANTONI SM8' },
-            { id: 'm37', name: 'MAQ 37', type: 'SANTONI SM8' },
-            { id: 'm29', name: 'MAQ 29', type: 'SANTONI EVO4' },
-            { id: 'm28', name: 'MAQ 28', type: 'SANTONI EVO4' },
-            { id: 'm27', name: 'MAQ 27', type: 'SANTONI EVO4' },
-            { id: 'm33', name: 'MAQ 33', type: 'SANTONI EVO4' },
-            { id: 'm1',  name: 'MAQ 1',  type: 'CIXING' },
-            { id: 'm30', name: 'MAQ 30', type: 'CIXING GE82' },
-            { id: 'm31', name: 'MAQ 31', type: 'CIXING GE82' },
-            { id: 'm6',  name: 'MAQ 6',  type: 'CIXING GE82' },
-            { id: 'm32', name: 'MAQ 32', type: 'CIXING GE82' },
-            { id: 'm13', name: 'MAQ 13', type: 'SANTONI EVO4' },
-            { id: 'm12', name: 'MAQ 12', type: 'SANTONI EVO4' },
-            { id: 'm24', name: 'MAQ 24', type: 'SANTONI EVO4' },
+            { id: 'm35', name: 'MAQ 35', type: 'SANTONI SM8' }, { id: 'm39', name: 'MAQ 39', type: 'SANTONI SM8' },
+            { id: 'm40', name: 'MAQ 40', type: 'SANTONI SM8' }, { id: 'm36', name: 'MAQ 36', type: 'CIXING GE82' },
+            { id: 'm38', name: 'MAQ 38', type: 'SANTONI SM8' }, { id: 'm37', name: 'MAQ 37', type: 'SANTONI SM8' },
+            { id: 'm29', name: 'MAQ 29', type: 'SANTONI EVO4' }, { id: 'm28', name: 'MAQ 28', type: 'SANTONI EVO4' },
+            { id: 'm27', name: 'MAQ 27', type: 'SANTONI EVO4' }, { id: 'm33', name: 'MAQ 33', type: 'SANTONI EVO4' },
+            { id: 'm1',  name: 'MAQ 1',  type: 'CIXING' }, { id: 'm30', name: 'MAQ 30', type: 'CIXING GE82' },
+            { id: 'm31', name: 'MAQ 31', type: 'CIXING GE82' }, { id: 'm6',  name: 'MAQ 6',  type: 'CIXING GE82' },
+            { id: 'm32', name: 'MAQ 32', type: 'CIXING GE82' }, { id: 'm13', name: 'MAQ 13', type: 'SANTONI EVO4' },
+            { id: 'm12', name: 'MAQ 12', type: 'SANTONI EVO4' }, { id: 'm24', name: 'MAQ 24', type: 'SANTONI EVO4' },
             { id: 'm8',  name: 'MAQ 8',  type: 'SANTONI TOP2' },
         ];
 
         const generateCalendar = () => {
             const dates = [];
-            const days = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
             const months = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-            const start = new Date(2025, 8, 29); 
-            const end = new Date(2026, 11, 31);
+            const start = new Date(2025, 8, 29); const end = new Date(2026, 11, 31);
             let idx = 0;
             for (let d = start; d <= end; d.setDate(d.getDate() + 1)) {
                 dates.push({
                     index: idx++,
                     id: `${['DOMINGO','LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO'][d.getDay()]} ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`,
-                    shortDay: days[d.getDay()],
+                    shortDay: ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'][d.getDay()],
                     dateNum: d.getDate(),
                     month: months[d.getMonth()],
                     monthIndex: d.getMonth(),
@@ -127,33 +118,64 @@
         };
 
         const ALL_ROWS = generateCalendar();
-
-        const getInitialState = () => {
+        const INITIAL_STATE = (() => {
             const todayISO = new Date().toISOString().split('T')[0];
             const foundIndex = ALL_ROWS.findIndex(r => r.isoDate === todayISO);
-            if (foundIndex !== -1) {
-                const row = ALL_ROWS[foundIndex];
-                return { weekOffset: Math.floor(foundIndex / 7), selectedDayIndex: foundIndex % 7 };
-            }
-            return { weekOffset: 0, selectedDayIndex: 0 };
-        };
-
-        const INITIAL_STATE = getInitialState();
+            return foundIndex !== -1 ? { weekOffset: Math.floor(foundIndex / 7), selectedDayIndex: foundIndex % 7 } : { weekOffset: 0, selectedDayIndex: 0 };
+        })();
 
         const getWeekLabel = (weekRows) => {
             if (!weekRows || weekRows.length === 0) return '';
-            const first = weekRows[0];
-            const last = weekRows[weekRows.length - 1];
-            if (first.month === last.month) return `${first.month} ${first.year}`;
-            return `${first.month} - ${last.month} ${last.year}`;
+            const f = weekRows[0], l = weekRows[weekRows.length - 1];
+            return f.month === l.month ? `${f.month} ${f.year}` : `${f.month} - ${l.month} ${l.year}`;
         };
 
-        const calculateProduction = (targetQty, timeMin, hours, actualQty) => {
-            if (!targetQty || !timeMin || !hours) return { targetPieces: 0, percentage: 0 };
-            const totalMinutes = hours * 60;
-            const targetPieces = Math.round(totalMinutes / timeMin);
-            const percentage = targetPieces > 0 ? Math.min(100, (actualQty / targetPieces) * 100) : 0;
-            return { targetPieces, percentage: parseFloat(percentage.toFixed(1)) };
+        // --- CÁLCULO DINÁMICO DE FECHA DE FIN Y PROGRESO ---
+        const calculateOrderMetrics = (machineId, order, allProductionData, allRows, hiddenDays) => {
+            if (!order || !order.totalQty || !order.timePerPieceMin || !order.startDate || !order.dailyHours) {
+                return { isPlanned: false, finishDate: null, totalNeeded: 0, progress: 0, produced: 0 };
+            }
+            
+            const totalQty = Number(order.totalQty);
+            const dailyHours = Number(order.dailyHours);
+            const timePerPieceMin = Number(order.timePerPieceMin);
+
+            // Calcular Producción Real Acumulada desde la fecha de inicio
+            let produced = 0;
+            const startIndex = allRows.findIndex(r => r.isoDate === order.startDate);
+            
+            if (startIndex !== -1) {
+                // Sumamos producción desde el día de inicio en adelante
+                for (let i = startIndex; i < allRows.length; i++) {
+                    const row = allRows[i];
+                    produced += Number(allProductionData[row.id]?.[machineId]?.actual || 0);
+                    // Si la fecha actual es mayor a hoy, paramos de sumar (futuro)
+                    if (new Date(row.isoDate) > new Date()) break; 
+                }
+            }
+
+            const progress = totalQty > 0 ? Math.min(100, (produced / totalQty) * 100) : 0;
+            const remainingQty = Math.max(0, totalQty - produced);
+            
+            if (remainingQty <= 0) {
+                return { isPlanned: true, finishDate: 'COMPLETADO', totalNeeded: 0, progress: 100, produced };
+            }
+            
+            const dailyCapacity = Math.floor((dailyHours * 60) / timePerPieceMin);
+            
+            // Proyección de Fin
+            let projRemaining = remainingQty;
+            let currentIdx = startIndex !== -1 ? startIndex : allRows.findIndex(r => r.isoDate >= new Date().toISOString().split('T')[0]);
+            
+            if (currentIdx === -1) return { isPlanned: true, finishDate: 'PENDIENTE', totalNeeded: remainingQty, progress, produced };
+
+            for (let i = currentIdx; i < allRows.length; i++) {
+                if (hiddenDays.includes(allRows[i].id)) continue;
+                projRemaining -= dailyCapacity; 
+                if (projRemaining <= 0) return { isPlanned: true, finishDate: allRows[i].isoDate, totalNeeded: remainingQty, progress, produced };
+            }
+
+            return { isPlanned: true, finishDate: 'PENDIENTE', totalNeeded: remainingQty, progress, produced };
         };
 
         const ProductionSlot = ({ slotData, index, disabled, onUpdate }) => {
@@ -164,41 +186,252 @@
             useEffect(() => {
                 if (!isDirty) { 
                     setLocalModel(slotData?.model || ''); 
-                    const qtyVal = slotData?.qty;
-                    setLocalQty(qtyVal !== null && qtyVal !== undefined ? qtyVal : ''); 
+                    setLocalQty(slotData?.qty ?? ''); 
                 }
             }, [slotData, isDirty]);
 
             const handleSave = (e) => {
-                e && e.preventDefault(); e && e.stopPropagation();
+                e?.preventDefault();
                 if (localModel !== (slotData?.model || '')) onUpdate(index, 'model', localModel);
-                const currentQtyStr = slotData?.qty !== undefined && slotData?.qty !== null ? String(slotData.qty) : '';
-                if (String(localQty) !== currentQtyStr) onUpdate(index, 'qty', localQty);
+                if (String(localQty) !== String(slotData?.qty ?? '')) onUpdate(index, 'qty', localQty);
                 setIsDirty(false);
             };
 
-            const handleChange = (field, val) => {
-                if (field === 'model') setLocalModel(val); else setLocalQty(val);
-                setIsDirty(true);
-            };
-
-            const handleKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleSave(e); e.target.blur(); } };
+            const handleChange = (f, v) => { if (f==='model') setLocalModel(v); else setLocalQty(v); setIsDirty(true); };
+            const handleKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleSave(); e.target.blur(); } };
 
             return (
                 <div className={`flex flex-col border border-slate-700/50 rounded overflow-hidden h-full relative ${disabled ? 'bg-slate-900/20 opacity-40' : 'bg-slate-800'} ${isDirty ? 'border-yellow-500/50' : ''}`}>
-                    <input type="text" placeholder="MOD" value={localModel} onChange={(e) => handleChange('model', e.target.value)} onKeyDown={handleKeyDown} disabled={disabled} autoComplete="off" className="slot-input text-[8px] text-yellow-500 uppercase border-b border-slate-700/50 h-1/2" />
-                    <input type="number" placeholder="CANT" value={localQty} onChange={(e) => handleChange('qty', e.target.value)} onKeyDown={handleKeyDown} disabled={disabled} autoComplete="off" className="slot-input text-[10px] text-white h-1/2" />
-                    {isDirty && !disabled && (
-                        <div className="absolute inset-y-0 right-0 w-8 flex items-center justify-center bg-gradient-to-l from-slate-900 via-slate-900/80 to-transparent z-10 animate-zoom-in">
-                            <button onClick={handleSave} className="bg-green-600 text-white rounded-full p-1 shadow-lg transform hover:scale-110"><i data-lucide="check" className="w-3 h-3"></i></button>
-                        </div>
-                    )}
+                    <input type="text" placeholder="MOD" value={localModel} onChange={(e) => handleChange('model', e.target.value)} onKeyDown={handleKeyDown} disabled={disabled} className="slot-input text-[8px] text-yellow-500 uppercase border-b border-slate-700/50 h-1/2" />
+                    <input type="number" placeholder="CANT" value={localQty} onChange={(e) => handleChange('qty', e.target.value)} onKeyDown={handleKeyDown} disabled={disabled} className="slot-input text-[10px] text-white h-1/2" />
+                    {isDirty && !disabled && (<div className="absolute inset-y-0 right-0 w-8 flex items-center justify-center bg-gradient-to-l from-slate-900 via-slate-900/80 to-transparent z-10 animate-zoom-in"><button onClick={handleSave} className="bg-green-600 text-white rounded-full p-1 shadow-lg hover:scale-110"><i data-lucide="check" className="w-3 h-3"></i></button></div>)}
                 </div>
             );
         };
 
-        const NotesModal=({onClose,user})=>{const[notes,setNotes]=useState([]);const[newMessage,setNewMessage]=useState('');const endOfMessagesRef=useRef(null);useEffect(()=>{const q=query(collection(db,'shared_notes'),orderBy('timestamp','asc'),limit(50));const unsubscribe=onSnapshot(q,(snapshot)=>{const loadedNotes=snapshot.docs.map(doc=>({id:doc.id,...doc.data()}));setNotes(loadedNotes);setTimeout(()=>endOfMessagesRef.current?.scrollIntoView({behavior:'smooth'}),100)});return()=>unsubscribe()},[]);const handleSend=async(e)=>{e.preventDefault();if(!newMessage.trim())return;await addDoc(collection(db,'shared_notes'),{text:newMessage,author:user.name,area:user.area,timestamp:serverTimestamp()});setNewMessage('')};return(<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}><div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md h-[70vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e=>e.stopPropagation()}><div className="p-4 bg-slate-900 border-b border-slate-700 flex justify-between items-center"><h3 className="font-bold text-white flex items-center gap-2"><i data-lucide="sticky-note" className="w-5 h-5 text-yellow-400"></i> Notas</h3><button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button></div><div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-900/50 custom-scrollbar">{notes.map(note=>{const isMe=note.author===user.name;return(<div key={note.id} className={`flex flex-col ${isMe?'items-end':'items-start'}`}><div className={`max-w-[85%] rounded-xl p-3 text-sm ${isMe?'bg-blue-600 text-white':'bg-slate-700 text-slate-200'}`}><p className="font-bold text-[10px] opacity-75 mb-1">{note.author}</p><p>{note.text}</p></div></div>)})} <div ref={endOfMessagesRef}></div></div><form onSubmit={handleSend} className="p-3 bg-slate-800 border-t border-slate-700 flex gap-2"><input type="text" value={newMessage} onChange={e=>setNewMessage(e.target.value)} className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm" placeholder="Escribir..." /><button type="submit" className="bg-blue-600 p-2 rounded-lg text-white"><i data-lucide="send" className="w-5 h-5"></i></button></form></div></div>)};
-        
+        // --- COMPONENTE GESTOR DE PEDIDOS (NUEVO) ---
+        const OrderManager = ({ onClose, onSaveOrders, ordersData, allProductionData, allRows, hiddenDays }) => {
+            const [step, setStep] = useState(1);
+            const [modelName, setModelName] = useState('');
+            const [selectedMachines, setSelectedMachines] = useState([]);
+            const [config, setConfig] = useState({ totalQty: '', timePerPiece: '', startDate: new Date().toISOString().split('T')[0], hours: '12' });
+            
+            // Estado para visualizar pedidos activos
+            const [viewMode, setViewMode] = useState('list'); // 'list' or 'create'
+
+            const toggleMachine = (id) => {
+                setSelectedMachines(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
+            };
+
+            const calculatePreview = () => {
+                // Cálculo simple de fecha fin para la configuración actual
+                if (!config.totalQty || !config.timePerPiece) return null;
+                const dummyOrder = { totalQty: config.totalQty, timePerPieceMin: config.timePerPiece, startDate: config.startDate, dailyHours: config.hours };
+                // Usamos cualquier ID solo para la lógica de calendario
+                const calc = calculateOrderMetrics('dummy', dummyOrder, {}, allRows, hiddenDays); 
+                return calc.finishDate;
+            };
+
+            const handleFinalSave = () => {
+                // Guardar pedido para CADA máquina seleccionada
+                selectedMachines.forEach(mid => {
+                    const orderPayload = {
+                        model: modelName,
+                        totalQty: Number(config.totalQty),
+                        timePerPieceMin: Number(config.timePerPiece),
+                        startDate: config.startDate,
+                        dailyHours: Number(config.hours)
+                    };
+                    onSaveOrders(mid, orderPayload);
+                });
+                setViewMode('list');
+                setStep(1);
+                setModelName('');
+                setSelectedMachines([]);
+                setConfig({ totalQty: '', timePerPiece: '', startDate: new Date().toISOString().split('T')[0], hours: '12' });
+            };
+
+            const renderCreateFlow = () => (
+                <div className="flex flex-col h-full">
+                    {/* Pasos */}
+                    <div className="flex justify-between mb-6 px-2">
+                        {[1,2,3,4].map(s => (
+                            <div key={s} className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= s ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-500'}`}>{s}</div>
+                        ))}
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto custom-scrollbar px-2">
+                        {step === 1 && (
+                            <div className="space-y-4 fade-in">
+                                <h3 className="text-xl font-bold text-white text-center mb-6">Nuevo Pedido</h3>
+                                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                                    <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Ingresa el Modelo</label>
+                                    <input type="text" value={modelName} onChange={e => setModelName(e.target.value.toUpperCase())} placeholder="EJ: B001-EG" className="w-full bg-slate-900 text-2xl font-black text-white p-4 rounded-lg border border-slate-600 focus:border-blue-500 outline-none text-center uppercase" autoFocus />
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 2 && (
+                            <div className="fade-in">
+                                <h3 className="text-lg font-bold text-white text-center mb-4">Selecciona Máquinas</h3>
+                                <p className="text-xs text-slate-400 text-center mb-4">Toca los círculos rojos para asignarlas (se pondrán verdes)</p>
+                                <div className="grid grid-cols-4 gap-4 justify-items-center">
+                                    {MACHINES.map(m => {
+                                        const isSelected = selectedMachines.includes(m.id);
+                                        const hasActiveOrder = ordersData[m.id] && ordersData[m.id].totalQty; // Simple check
+                                        return (
+                                            <button key={m.id} onClick={() => toggleMachine(m.id)} className={`machine-circle w-14 h-14 rounded-full flex flex-col items-center justify-center border-2 shadow-lg relative ${isSelected ? 'bg-green-600 border-green-400 selected' : hasActiveOrder ? 'bg-yellow-900/50 border-yellow-700 opacity-70' : 'bg-red-600 border-red-400'}`}>
+                                                <span className="text-[10px] font-black text-white">{m.name.replace('MAQ ','')}</span>
+                                                <span className="text-[7px] text-white/80">{m.type.split(' ')[0]}</span>
+                                                {isSelected && <div className="absolute -top-1 -right-1 bg-white text-green-600 rounded-full p-0.5"><i data-lucide="check" className="w-3 h-3"></i></div>}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 3 && (
+                            <div className="space-y-4 fade-in">
+                                <h3 className="text-lg font-bold text-white text-center mb-4">Configuración del Lote</h3>
+                                <p className="text-center text-sm text-blue-400 font-bold mb-4">{modelName} - {selectedMachines.length} Máquinas</p>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div><label className="text-xs text-slate-400 uppercase">Cantidad (Por Máq)</label><input type="number" value={config.totalQty} onChange={e => setConfig({...config, totalQty: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="1000" /></div>
+                                    <div><label className="text-xs text-slate-400 uppercase">Minutos/Pieza</label><input type="number" value={config.timePerPiece} onChange={e => setConfig({...config, timePerPiece: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="1.5" /></div>
+                                    <div><label className="text-xs text-slate-400 uppercase">Inicio</label><input type="date" value={config.startDate} onChange={e => setConfig({...config, startDate: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
+                                    <div><label className="text-xs text-slate-400 uppercase">Horas Turno</label><select value={config.hours} onChange={e => setConfig({...config, hours: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white"><option value="12">12 Horas</option><option value="24">24 Horas</option></select></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 4 && (
+                            <div className="space-y-6 fade-in text-center">
+                                <h3 className="text-xl font-bold text-white">Confirmación</h3>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 inline-block text-left w-full">
+                                    <div className="flex justify-between border-b border-slate-700 pb-2 mb-2">
+                                        <span className="text-slate-400">Modelo:</span>
+                                        <span className="font-bold text-yellow-400 text-lg">{modelName}</span>
+                                    </div>
+                                    <div className="flex justify-between mb-1"><span className="text-slate-400">Máquinas:</span><span className="text-white">{selectedMachines.length}</span></div>
+                                    <div className="flex justify-between mb-1"><span className="text-slate-400">Total/Máq:</span><span className="text-white">{Number(config.totalQty).toLocaleString()} pzas</span></div>
+                                    <div className="flex justify-between border-t border-slate-700 pt-2 mt-2">
+                                        <span className="text-blue-400 font-bold">Fin Estimado:</span>
+                                        <span className="text-green-400 font-bold text-lg">{calculatePreview() ? new Date(calculatePreview()).toLocaleDateString() : 'Error datos'}</span>
+                                    </div>
+                                </div>
+                                <p className="text-sm text-slate-400">¿Deseas confirmar este pedido y asignarlo?</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-slate-700 flex justify-between">
+                        {step > 1 ? <button onClick={() => setStep(s => s - 1)} className="px-4 py-2 rounded bg-slate-700 text-white">Atrás</button> : <button onClick={() => setViewMode('list')} className="px-4 py-2 rounded bg-slate-800 text-slate-400">Cancelar</button>}
+                        {step < 4 ? (
+                            <button onClick={() => {
+                                if (step===1 && !modelName) return;
+                                if (step===2 && selectedMachines.length===0) return;
+                                setStep(s => s + 1);
+                            }} className="px-6 py-2 rounded bg-blue-600 text-white font-bold hover:bg-blue-500">Siguiente</button>
+                        ) : (
+                            <button onClick={handleFinalSave} className="px-6 py-2 rounded bg-green-600 text-white font-bold shadow-lg hover:bg-green-500 animate-pulse">CONFIRMAR PEDIDO</button>
+                        )}
+                    </div>
+                </div>
+            );
+
+            const renderListView = () => {
+                // Filtrar máquinas que tienen pedidos activos
+                const activeMachines = MACHINES.filter(m => ordersData[m.id] && ordersData[m.id].totalQty > 0);
+
+                return (
+                    <div className="flex flex-col h-full">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-xl font-black text-white flex items-center gap-2"><i data-lucide="clipboard-list" className="text-yellow-400"></i> Pedidos Activos</h2>
+                            <button onClick={() => setViewMode('create')} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg transition-transform hover:scale-105"><i data-lucide="plus-circle" className="w-5 h-5"></i> Nuevo</button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
+                            {activeMachines.length === 0 && <div className="text-center text-slate-500 py-10">No hay pedidos activos.</div>}
+                            {activeMachines.map(m => {
+                                const order = ordersData[m.id];
+                                const metrics = calculateOrderMetrics(m.id, order, allProductionData, allRows, hiddenDays);
+                                
+                                return (
+                                    <div key={m.id} className="bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-md relative overflow-hidden group">
+                                        <div className="flex justify-between items-start mb-2 relative z-10">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-blue-400 text-sm">{m.name}</span>
+                                                    <span className="text-[10px] bg-slate-800 px-2 rounded text-slate-400">{m.type.split(' ')[0]}</span>
+                                                </div>
+                                                <h4 className="text-xl font-black text-yellow-400 uppercase mt-1">{order.model}</h4>
+                                            </div>
+                                            <div className="text-right">
+                                                <span className={`block text-xs font-bold ${metrics.finishDate === 'COMPLETADO' ? 'text-green-500' : 'text-slate-400'}`}>{metrics.finishDate === 'COMPLETADO' ? '¡LISTO!' : 'Fin Estimado'}</span>
+                                                <span className="text-lg font-bold text-white">{metrics.finishDate === 'COMPLETADO' ? <i data-lucide="check-circle" className="w-5 h-5 inline"/> : (metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}) : '-')}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="relative z-10">
+                                            <div className="flex justify-between text-xs text-slate-400 mb-1">
+                                                <span>Progreso: {metrics.progress.toFixed(1)}%</span>
+                                                <span>{metrics.produced.toLocaleString()} / {Number(order.totalQty).toLocaleString()}</span>
+                                            </div>
+                                            <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden border border-slate-700">
+                                                <div className="h-full bg-gradient-to-r from-blue-600 to-cyan-400 transition-all duration-1000" style={{ width: `${metrics.progress}%` }}></div>
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Background Decoration */}
+                                        <div className="absolute right-0 top-0 h-full w-24 bg-gradient-to-l from-blue-900/10 to-transparent pointer-events-none"></div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl h-[85vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
+                            <span className="font-bold text-white uppercase tracking-wider text-sm">Gestión de Producción</span>
+                            <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6 hover:text-white"></i></button>
+                        </div>
+                        <div className="flex-1 p-6 overflow-hidden">
+                            {viewMode === 'list' ? renderListView() : renderCreateFlow()}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall }) => {
+            const [pin, setPin] = useState('');
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const user = USERS[pin]; 
+                if (user) setAuthenticatedUser({ ...user, id: pin }); 
+                else alert('PIN incorrecto');
+            };
+            return (
+                <div className="flex items-center justify-center h-full bg-slate-900 p-4">
+                    <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center border border-slate-700 relative">
+                        <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg"><i data-lucide="grid" className="w-8 h-8"></i></div>
+                        <h2 className="text-2xl font-black text-white mb-2">MAES - TEJIDO</h2>
+                        <p className="text-slate-400 mb-8">Control Andrés & Balta</p>
+                        <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
+                            <input type="tel" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="• • • •" className="w-full text-center text-4xl p-4 bg-slate-900 border-2 border-slate-700 rounded-xl tracking-[0.2em] focus:border-blue-500 outline-none font-bold text-white password-mask" autoFocus />
+                            <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-blue-500 shadow-lg">INGRESAR</button>
+                        </form>
+                        {installPrompt && (<div className="mt-8 pt-6 border-t border-slate-700"><button onClick={onInstall} className="flex items-center justify-center gap-2 w-full bg-slate-700 text-slate-200 py-3 rounded-lg font-bold text-sm border border-slate-600"><i data-lucide="download" className="w-4 h-4"></i>Instalar App</button></div>)}
+                    </div>
+                </div>
+            );
+        };
+
         const VisibilityModal = ({ onClose, currentHiddenMachines, currentHiddenDays, onSaveVisibility, allRows }) => {
             const [hiddenM, setHiddenM] = useState([...currentHiddenMachines]);
             const [hiddenD, setHiddenD] = useState([...currentHiddenDays]);
@@ -224,13 +457,7 @@
 
         const CalendarModal = ({ onClose, onSelectDate, allRows }) => {
             const [viewDate, setViewDate] = useState(new Date(2025, 9, 1)); 
-
-            const handleMonthChange = (delta) => {
-                const d = new Date(viewDate);
-                d.setMonth(d.getMonth() + delta);
-                setViewDate(d);
-            };
-
+            const handleMonthChange = (delta) => { const d = new Date(viewDate); d.setMonth(d.getMonth() + delta); setViewDate(d); };
             const monthRows = allRows.filter(r => r.monthIndex === viewDate.getMonth() && r.year === viewDate.getFullYear());
             const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(monthRows[0]?.shortDay) || 0;
             const blanks = Array(startDayOffset).fill(null);
@@ -238,182 +465,10 @@
             return (
                 <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-700 p-4" onClick={e => e.stopPropagation()}>
-                        <div className="flex justify-between items-center mb-4">
-                            <button onClick={() => handleMonthChange(-1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-left" className="text-white w-5 h-5"></i></button>
-                            <span className="font-bold text-white uppercase">{viewDate.toLocaleString('es-MX', { month: 'long', year: 'numeric' })}</span>
-                            <button onClick={() => handleMonthChange(1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-right" className="text-white w-5 h-5"></i></button>
-                        </div>
-                        <div className="grid grid-cols-7 gap-1 text-center mb-2">
-                            {['D','L','M','M','J','V','S'].map((d,i) => <div key={i} className="text-xs text-slate-500 font-bold">{d}</div>)}
-                        </div>
-                        <div className="grid grid-cols-7 gap-1">
-                            {blanks.map((_, i) => <div key={`b-${i}`}></div>)}
-                            {monthRows.map(row => (
-                                <button key={row.id} onClick={() => onSelectDate(row)} className="aspect-square flex items-center justify-center rounded-lg hover:bg-blue-600 bg-slate-900 text-slate-200 text-sm font-bold border border-slate-700">
-                                    {row.dateNum}
-                                </button>
-                            ))}
-                        </div>
+                        <div className="flex justify-between items-center mb-4"><button onClick={() => handleMonthChange(-1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-left" className="text-white w-5 h-5"></i></button><span className="font-bold text-white uppercase">{viewDate.toLocaleString('es-MX', { month: 'long', year: 'numeric' })}</span><button onClick={() => handleMonthChange(1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-right" className="text-white w-5 h-5"></i></button></div>
+                        <div className="grid grid-cols-7 gap-1 text-center mb-2">{['D','L','M','M','J','V','S'].map((d,i) => <div key={i} className="text-xs text-slate-500 font-bold">{d}</div>)}</div>
+                        <div className="grid grid-cols-7 gap-1">{blanks.map((_, i) => <div key={`b-${i}`}></div>)}{monthRows.map(row => (<button key={row.id} onClick={() => onSelectDate(row)} className="aspect-square flex items-center justify-center rounded-lg hover:bg-blue-600 bg-slate-900 text-slate-200 text-sm font-bold border border-slate-700">{row.dateNum}</button>))}</div>
                         <button onClick={onClose} className="w-full mt-4 bg-slate-700 py-2 rounded-lg text-white font-bold text-sm">Cerrar</button>
-                    </div>
-                </div>
-            );
-        };
-
-        const StatsModal = ({ onClose, visibleMachines, currentWeekData, weekTitle }) => {
-            const canvasRef = useRef(null);
-            const effCanvasRef = useRef(null);
-            const totalProdCanvasRef = useRef(null);
-            
-            const labels = visibleMachines.map(m => m.name.replace('MAQ ', 'M-'));
-            const andresData = visibleMachines.map(m => currentWeekData.reduce((acc, row) => acc + (Number(row.data[m.id]?.slots?.[0]?.qty) || 0), 0));
-            const baltaData = visibleMachines.map(m => currentWeekData.reduce((acc, row) => acc + (Number(row.data[m.id]?.slots?.[1]?.qty) || 0), 0));
-            const totalProductionData = visibleMachines.map((_, index) => andresData[index] + baltaData[index]);
-
-            const efficiencyData = visibleMachines.map(m => {
-                let totalPct = 0;
-                let count = 0;
-                currentWeekData.forEach(row => {
-                    const d = row.data[m.id];
-                    if (d && d.percentage > 0) {
-                        totalPct += d.percentage;
-                        count++;
-                    }
-                });
-                return count > 0 ? (totalPct / count).toFixed(1) : 0;
-            });
-
-            const prepareReportData = () => {
-                const reportRows = [];
-                visibleMachines.forEach(m => {
-                    let totalActual = 0;
-                    let lastPlanModel = '-';
-                    let lastTimeMin = 0;
-                    let lastHours = 0;
-                    let avgEff = 0;
-                    let countEff = 0;
-
-                    currentWeekData.forEach(row => {
-                        const d = row.data[m.id];
-                        if (d) {
-                            totalActual += (Number(d.actual) || 0);
-                            if (d.plan_model) lastPlanModel = d.plan_model;
-                            if (d.plan_time_min) lastTimeMin = d.plan_time_min;
-                            if (d.plan_hours) lastHours = d.plan_hours;
-                            if (d.percentage > 0) { avgEff += d.percentage; countEff++; }
-                        }
-                    });
-                    const finalEff = countEff > 0 ? (avgEff / countEff).toFixed(1) : 0;
-                    reportRows.push({ machine: m.name, model: lastPlanModel, time: lastTimeMin || 0, hours: lastHours || 0, actual: totalActual, efficiency: finalEff });
-                });
-                return reportRows;
-            };
-
-            const generatePDF = () => {
-                const doc = new jsPDF();
-                doc.setFontSize(16); doc.text(`Reporte de Producción: ${weekTitle}`, 14, 15);
-                doc.setFontSize(10); doc.text(`Generado: ${new Date().toLocaleDateString()}`, 14, 22);
-                const data = prepareReportData();
-                const tableRows = data.map(row => [row.machine, row.model, row.time, row.hours, row.actual, `${row.efficiency}%`]);
-                doc.autoTable({ head: [["Máquina", "Modelo", "Min/Pza", "Horas", "Prod. Real", "Eficiencia %"]], body: tableRows, startY: 30, theme: 'grid', styles: { fontSize: 8 }, headStyles: { fillColor: [22, 160, 133] } });
-                if (effCanvasRef.current) {
-                    const imgData = effCanvasRef.current.toDataURL('image/png');
-                    const finalY = doc.lastAutoTable.finalY || 40;
-                    doc.text("Gráfica de Eficiencia Operativa:", 14, finalY + 10);
-                    doc.addImage(imgData, 'PNG', 14, finalY + 15, 180, 80);
-                }
-                doc.save(`Reporte_${weekTitle.replace(/\s/g, '_')}.pdf`);
-            };
-
-            const generateExcel = () => {
-                const data = prepareReportData();
-                const ws = XLSX.utils.json_to_sheet(data);
-                XLSX.utils.sheet_add_aoa(ws, [["Máquina", "Modelo", "Min/Pza", "Horas Turno", "Producción Real", "Eficiencia %"]], { origin: "A1" });
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Reporte Semanal");
-                XLSX.writeFile(wb, `Reporte_${weekTitle.replace(/\s/g, '_')}.xlsx`);
-            };
-
-            useEffect(() => {
-                let c1 = null, c2 = null, c3 = null;
-                if (canvasRef.current) {
-                    c1 = new Chart(canvasRef.current.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [{ label: 'Andrés', data: andresData, backgroundColor: '#3b82f6', borderRadius: 4 }, { label: 'Balta', data: baltaData, backgroundColor: '#f97316', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' }, beginAtZero: true }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } } } });
-                }
-                if (effCanvasRef.current) {
-                    c2 = new Chart(effCanvasRef.current.getContext('2d'), { type: 'line', data: { labels: labels, datasets: [{ label: 'Eficiencia (%)', data: efficiencyData, borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.2)', tension: 0.3, fill: true }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { y: { min: 0, max: 120, grid: { color: '#1e293b' }, ticks: { color: '#64748b' } }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } } } });
-                }
-                if (totalProdCanvasRef.current) {
-                    c3 = new Chart(totalProdCanvasRef.current.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [{ label: 'Producción Total (Pzas)', data: totalProductionData, backgroundColor: '#8b5cf6', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' }, beginAtZero: true }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } } } });
-                }
-                return () => { if (c1) c1.destroy(); if (c2) c2.destroy(); if (c3) c3.destroy(); };
-            }, []);
-
-            return (
-                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
-                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col border border-slate-700" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 bg-slate-900 border-b border-slate-700 flex justify-between items-center">
-                            <div><h3 className="font-bold text-white flex items-center gap-2"><i data-lucide="bar-chart-2" className="w-5 h-5 text-green-400"></i> Estadísticas</h3><p className="text-xs text-blue-400 uppercase font-bold tracking-wider">{weekTitle}</p></div>
-                            <div className="flex gap-2"><button onClick={generatePDF} className="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1"><i data-lucide="file-text" className="w-3 h-3"></i> PDF</button><button onClick={generateExcel} className="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1"><i data-lucide="table" className="w-3 h-3"></i> Excel</button><button onClick={onClose} className="bg-slate-700 p-2 rounded hover:bg-slate-600"><i data-lucide="x" className="text-white w-4 h-4"></i></button></div>
-                        </div>
-                        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 h-[300px] relative"><h4 className="text-slate-400 text-xs font-bold uppercase mb-2">Producción por Operador</h4><div className="h-[250px]"><canvas ref={canvasRef}></canvas></div></div>
-                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 h-[300px] relative"><h4 className="text-slate-400 text-xs font-bold uppercase mb-2">Eficiencia Operativa (%)</h4><div className="h-[250px]"><canvas ref={effCanvasRef}></canvas></div></div>
-                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 h-[300px] relative md:col-span-2"><h4 className="text-violet-400 text-xs font-bold uppercase mb-2">Producción Total (Andrés + Balta)</h4><div className="h-[250px]"><canvas ref={totalProdCanvasRef}></canvas></div></div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-4">
-                                <div className="bg-slate-800 p-4 rounded border border-blue-900/50 text-center"><h4 className="text-blue-400 font-bold uppercase text-xs">Total Andrés</h4><p className="text-xl font-black text-white">{andresData.reduce((a,b)=>a+b,0).toLocaleString()}</p></div>
-                                <div className="bg-slate-800 p-4 rounded border border-orange-900/50 text-center"><h4 className="text-orange-400 font-bold uppercase text-xs">Total Balta</h4><p className="text-xl font-black text-white">{baltaData.reduce((a,b)=>a+b,0).toLocaleString()}</p></div>
-                                <div className="bg-slate-800 p-4 rounded border border-violet-900/50 text-center"><h4 className="text-violet-400 font-bold uppercase text-xs">Gran Total</h4><p className="text-xl font-black text-white">{totalProductionData.reduce((a,b)=>a+b,0).toLocaleString()}</p></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )
-        };
-        
-        const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall }) => {
-            const [pin, setPin] = useState('');
-            const handleLogin = (e) => {
-                e.preventDefault();
-                const user = USERS[pin]; 
-                if (user) setAuthenticatedUser({ ...user, id: pin }); 
-                else alert('PIN incorrecto');
-            };
-            return (
-                <div className="flex items-center justify-center h-full bg-slate-900 p-4">
-                    <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center border border-slate-700 relative">
-                        <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg"><i data-lucide="grid" className="w-8 h-8"></i></div>
-                        <h2 className="text-2xl font-black text-white mb-2">MAES - TEJIDO</h2>
-                        <p className="text-slate-400 mb-8">Control Andrés & Balta</p>
-                        <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
-                            <input type="tel" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="• • • •" className="w-full text-center text-4xl p-4 bg-slate-900 border-2 border-slate-700 rounded-xl tracking-[0.2em] focus:border-blue-500 outline-none font-bold text-white password-mask" autoFocus />
-                            <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-blue-500 shadow-lg">INGRESAR</button>
-                        </form>
-                        {installPrompt && (<div className="mt-8 pt-6 border-t border-slate-700"><button onClick={onInstall} className="flex items-center justify-center gap-2 w-full bg-slate-700 text-slate-200 py-3 rounded-lg font-bold text-sm border border-slate-600"><i data-lucide="download" className="w-4 h-4"></i>Instalar App</button></div>)}
-                    </div>
-                </div>
-            );
-        };
-
-        const PlanningModal = ({ machine, rowId, currentData, onClose, onSave, allRows }) => {
-            const [model, setModel] = useState(currentData?.plan_model || '');
-            const [targetQty, setTargetQty] = useState(currentData?.plan_target_qty || '');
-            const [timeMin, setTimeMin] = useState(currentData?.plan_time_min || '');
-            const [hours, setHours] = useState(currentData?.plan_hours || 12);
-            const { targetPieces } = calculateProduction(Number(targetQty), Number(timeMin), Number(hours), 0);
-            const handleSave = () => { onSave([rowId], [machine.id], { plan_model: model || null, plan_target_qty: Number(targetQty) || null, plan_time_min: Number(timeMin) || null, plan_hours: Number(hours) || null }); onClose(); };
-
-            return (
-                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
-                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-700" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 bg-slate-900 border-b border-slate-700 flex justify-between items-center"><h3 className="font-bold text-lg text-white">Planificar {machine.name}</h3><button onClick={onClose}><i data-lucide="x" className="w-5 h-5 text-slate-400"></i></button></div>
-                        <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto custom-scrollbar">
-                            <div><label className="text-xs font-bold text-slate-400 uppercase">Modelo Principal</label><input type="text" value={model} onChange={e => setModel(e.target.value)} className="w-full p-3 bg-slate-900 border border-slate-700 text-white rounded-lg font-bold text-lg uppercase focus:border-blue-500 outline-none" placeholder="Ej: B001" /></div>
-                            <div className="grid grid-cols-2 gap-4"><div><label className="text-xs font-bold text-slate-400 uppercase">Pedido Total</label><input type="number" value={targetQty} onChange={e => setTargetQty(e.target.value)} className="w-full p-3 bg-slate-900 border border-slate-700 text-white rounded-lg focus:border-blue-500 outline-none" /></div><div><label className="text-xs font-bold text-slate-400 uppercase">Min/Pieza</label><input type="number" value={timeMin} onChange={e => setTimeMin(e.target.value)} className="w-full p-3 bg-slate-900 border border-slate-700 text-white rounded-lg focus:border-blue-500 outline-none" /></div></div>
-                            <div className="bg-slate-900/50 p-4 rounded-xl text-center border border-slate-700"><span className="block text-xs text-blue-400 font-bold uppercase mb-1">Meta Calculada</span><span className="text-3xl font-black text-blue-500">{targetPieces}</span><span className="text-sm text-slate-500 font-medium"> pzas</span></div>
-                        </div>
-                        <div className="p-4 bg-slate-900 border-t border-slate-700"><button onClick={handleSave} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-lg hover:bg-blue-500 shadow-lg">Guardar Plan</button></div>
                     </div>
                 </div>
             );
@@ -422,30 +477,28 @@
         const App = () => {
             const [user, setUser] = useState(null);
             const [data, setData] = useState({});
+            const [ordersData, setOrdersData] = useState({});
             const [visibilityConfig, setVisibilityConfig] = useState({ machines: [], days: [] });
             const [loading, setLoading] = useState(true);
             const [weekOffset, setWeekOffset] = useState(INITIAL_STATE.weekOffset);
             const [selectedDayIndex, setSelectedDayIndex] = useState(INITIAL_STATE.selectedDayIndex); 
-            const [planModal, setPlanModal] = useState(null);
+            
+            // Modales
+            const [showOrderManager, setShowOrderManager] = useState(false);
             const [showVisibilityModal, setShowVisibilityModal] = useState(false);
-            const [showNotes, setShowNotes] = useState(false);
-            const [showStats, setShowStats] = useState(false);
             const [showCalendar, setShowCalendar] = useState(false);
-            const [machineSearch, setMachineSearch] = useState('');
-            const [zoomLevel, setZoomLevel] = useState(1.0);
-            const [showZoomOverlay, setShowZoomOverlay] = useState(false);
             const [deferredPrompt, setDeferredPrompt] = useState(null);
 
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
             useEffect(() => { const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); }; window.addEventListener('beforeinstallprompt', handler); return () => window.removeEventListener('beforeinstallprompt', handler); }, []);
-            const handleInstallClick = () => { if (!deferredPrompt) return; deferredPrompt.prompt(); deferredPrompt.userChoice.then((choiceResult) => { if (choiceResult.outcome === 'accepted') setDeferredPrompt(null); }); };
-
+            
             useEffect(() => {
                 const unsubAuth = onAuthStateChanged(auth, (u) => {
                     if (u) {
                         const unsubDb = onSnapshot(collection(db, 'produccion_2026'), (snap) => { const d = {}; snap.forEach(doc => d[doc.id] = doc.data()); setData(d); setLoading(false); });
                         const unsubSettings = onSnapshot(doc(db, 'settings', 'visibility'), (docSnap) => { if (docSnap.exists()) setVisibilityConfig(docSnap.data()); });
-                        return () => { unsubDb(); unsubSettings(); };
+                        const unsubOrders = onSnapshot(doc(db, 'settings', 'orders'), (docSnap) => { if (docSnap.exists()) setOrdersData(docSnap.data()); });
+                        return () => { unsubDb(); unsubSettings(); unsubOrders(); };
                     } else signInAnonymously(auth);
                 });
                 return () => unsubAuth();
@@ -459,55 +512,32 @@
                 if (field === 'qty') updatedSlots[slotIndex].qty = value === '' ? '' : Number(value);
                 else updatedSlots[slotIndex].model = value;
                 const newTotalActual = updatedSlots.reduce((acc, s) => acc + (Number(s?.qty) || 0), 0);
-                const plan = { tgt: currentMachineData.plan_target_qty || 0, min: currentMachineData.plan_time_min || 0, hrs: currentMachineData.plan_hours || 0, act: newTotalActual };
-                const res = calculateProduction(plan.tgt, plan.min, plan.hrs, plan.act);
-                const updatedMachine = { ...currentMachineData, slots: updatedSlots, actual: newTotalActual, calculated_target: res.targetPieces, percentage: res.percentage };
+                const updatedMachine = { ...currentMachineData, slots: updatedSlots, actual: newTotalActual };
                 await setDoc(doc(db, 'produccion_2026', rowId), { [machineId]: updatedMachine }, { merge: true });
             };
 
-            const handleSavePlan = async (rowIds, machineIds, planData) => {
-                const promises = [];
-                rowIds.forEach(rId => {
-                    const docRef = doc(db, 'produccion_2026', rId);
-                    const updatePayload = {};
-                    machineIds.forEach(mId => {
-                        const currentM = data[rId]?.[mId] || {};
-                        const actualQty = currentM.actual || 0;
-                        const res = calculateProduction(planData.plan_target_qty, planData.plan_time_min, planData.plan_hours, actualQty);
-                        updatePayload[mId] = { ...currentM, ...planData, actual: actualQty, calculated_target: res.targetPieces, percentage: res.percentage };
-                    });
-                    promises.push(setDoc(docRef, updatePayload, { merge: true }));
-                });
-                await Promise.all(promises);
+            const handleSaveOrder = async (machineId, orderData) => {
+                await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { ...orderData, lastUpdated: serverTimestamp(), updatedBy: user.name } }, { merge: true });
             };
 
             const handleSaveVisibility = async (hiddenMachines, hiddenDays) => { await setDoc(doc(db, 'settings', 'visibility'), { machines: hiddenMachines, days: hiddenDays }, { merge: true }); };
 
-            const handleDateSelect = (row) => {
-                const newWeekOffset = Math.floor(row.index / 7);
-                setWeekOffset(newWeekOffset);
-                setShowCalendar(false);
-            };
+            const handleDateSelect = (row) => { setWeekOffset(Math.floor(row.index / 7)); setShowCalendar(false); };
 
             const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
-            const filteredVisibleMachines = useMemo(() => { if (!machineSearch) return visibleMachines; return visibleMachines.filter(m => m.name.toLowerCase().includes(machineSearch.toLowerCase()) || m.type.toLowerCase().includes(machineSearch.toLowerCase())); }, [visibleMachines, machineSearch]);
-            
             const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7).filter(r => !visibilityConfig.days?.includes(r.id)); }, [weekOffset, visibilityConfig.days]);
             const weekLabel = useMemo(() => getWeekLabel(currentWeekRows), [currentWeekRows]);
-            const weekDataForStats = useMemo(() => currentWeekRows.map(row => ({ ...row, data: data[row.id] || {} })), [currentWeekRows, data]);
             
-            const canEditPlan = user && (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT);
+            const canManageOrders = user && (user.canManageOrders || user.role === ROLES.DEVELOPMENT); 
             const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
-            const canViewStats = user && (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT);
             const canEditSlot = (machineId, slotIndex) => {
                 if (!user) return false;
                 if (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) return true;
                 if (user.allowedSlots) return user.allowedSlots.includes(slotIndex);
                 return false; 
             };
-            const getVisibleSlots = (machineId) => [0, 1]; 
 
-            if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={handleInstallClick} />;
+            if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={() => deferredPrompt?.prompt()} />;
             if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900"><i data-lucide="loader-2" className="animate-spin w-12 h-12 text-blue-500"></i></div>;
 
             const MobileView = () => {
@@ -522,30 +552,33 @@
                              <div className="p-3 flex justify-between items-center bg-slate-900/50"> 
                                 <div className="flex items-center gap-2"><i data-lucide="user-check" className="w-5 h-5 text-blue-400"></i><div><p className="text-sm font-bold text-slate-100">{user.name.split(' ')[0]}</p><p className="text-[10px] text-slate-500 uppercase font-medium">{user.area}</p></div></div>
                                 <div className="flex gap-2">
-                                    <button onClick={() => setShowNotes(true)} className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-yellow-400"><i data-lucide="sticky-note" className="w-4 h-4"></i></button>
-                                    {canViewStats && <button onClick={() => setShowStats(true)} className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-green-400"><i data-lucide="bar-chart-2" className="w-4 h-4"></i></button>}
+                                    {canManageOrders && <button onClick={() => setShowOrderManager(true)} className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg animate-pulse"><i data-lucide="clipboard-list" className="w-4 h-4"></i></button>}
                                     {canConfig && <button onClick={() => setShowVisibilityModal(true)} className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-slate-300"><i data-lucide="settings" className="w-4 h-4"></i></button>}
                                 </div>
                             </div>
                             <div className="flex overflow-x-auto custom-scrollbar pb-1 px-1 gap-1 bg-slate-900/50">{currentWeekRows.map((day, idx) => (<button key={day.id} onClick={() => setSelectedDayIndex(idx)} className={`flex-shrink-0 flex flex-col items-center justify-center p-2 min-w-[60px] rounded-lg my-2 transition-all ${idx === safeIndex ? 'bg-slate-700 shadow border-b-4 border-blue-500 scale-105' : 'text-slate-500 hover:bg-slate-800'}`}><span className="text-[10px] font-bold uppercase mb-0.5 text-blue-400">{day.shortDay}</span><span className={`text-lg font-black leading-none ${idx === safeIndex ? 'text-white' : 'text-slate-600'}`}>{day.dateNum}</span></button>))}</div>
                         </div>
                         <div className="flex-1 overflow-y-auto p-3 pb-24 custom-scrollbar">
-                            {filteredVisibleMachines.map(m => { 
+                            {visibleMachines.map(m => { 
                                 const mData = dayData[m.id] || {};
-                                const pct = mData.percentage || 0;
                                 const slots = mData.slots || [{}, {}, {}, {}];
-                                const hasPlan = !!mData.plan_model;
-                                const visibleSlotIndices = getVisibleSlots(m.id);
+                                const order = ordersData[m.id];
+                                const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days);
                                 return (
                                     <div key={m.id} className="bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-700 relative overflow-hidden mb-3">
                                         <div className="flex justify-between items-start mb-2">
-                                            <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center overflow-hidden"><i data-lucide="cpu" className="w-5 h-5 opacity-50"></i></div><div><h3 className="font-black text-slate-200 text-sm">{m.name.replace('MAQ ','M-')}</h3><p className="text-[10px] text-slate-500 font-medium">{m.type}</p></div></div>
-                                            {hasPlan ? (<div className="flex flex-col items-end"><span className={`text-xs font-black px-2 py-0.5 rounded-full ${pct>=100?'bg-green-900/50 text-green-400': pct>70?'bg-blue-900/50 text-blue-400':'bg-red-900/50 text-red-400'}`}>{pct}%</span></div>) : (canEditPlan && <button onClick={() => setPlanModal({ machineId: m.id, rowId })} className="text-[10px] bg-slate-700 text-slate-400 px-2 py-1 rounded hover:bg-slate-600">+ Plan</button>)}
+                                            <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center"><i data-lucide="cpu" className="w-5 h-5 opacity-50"></i></div><div><h3 className="font-black text-slate-200 text-sm">{m.name.replace('MAQ ','M-')}</h3><p className="text-[10px] text-slate-500 font-medium">{m.type}</p></div></div>
+                                            {metrics.progress > 0 && <div className="text-[10px] font-bold text-blue-400 bg-blue-900/30 px-2 py-0.5 rounded">{metrics.progress.toFixed(0)}%</div>}
                                         </div>
+                                        {order && order.totalQty > 0 && (
+                                            <div className="mb-3">
+                                                <div className="text-[10px] text-yellow-500 font-bold uppercase flex justify-between border-b border-slate-700 pb-1"><span>{order.model}</span><span>{Number(order.totalQty).toLocaleString()} pzas</span></div>
+                                                <div className="h-1 w-full bg-slate-700 mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
+                                            </div>
+                                        )}
                                         <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
-                                            {hasPlan && <div className="text-[10px] text-yellow-500 font-bold uppercase mb-2 flex justify-between"><span>Plan: {mData.plan_model}</span> {canEditPlan && <button onClick={() => setPlanModal({ machineId: m.id, rowId })}><i data-lucide="edit-2" className="w-3 h-3 text-blue-500"></i></button>}</div>}
                                             <div className="grid grid-cols-2 gap-2 mb-1"><div className="text-[9px] text-center font-bold text-blue-400 uppercase tracking-widest border-b border-blue-900 pb-1">Andrés</div><div className="text-[9px] text-center font-bold text-orange-400 uppercase tracking-widest border-b border-orange-900 pb-1">Balta</div></div>
-                                            <div className="grid grid-cols-2 gap-2">{visibleSlotIndices.map(idx => (<div key={idx} className="h-16"><ProductionSlot slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} /></div>))}</div>
+                                            <div className="grid grid-cols-2 gap-2">{[0,1].map(idx => (<div key={idx} className="h-16"><ProductionSlot slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} /></div>))}</div>
                                         </div>
                                     </div>
                                 );
@@ -575,19 +608,38 @@
                         <div className="flex items-center gap-4">
                             <div className="text-right px-3 py-1 bg-slate-900/50 rounded-lg border border-slate-700/50"><p className="text-sm font-bold text-blue-400">{user.name.toUpperCase()}</p><p className="text-[10px] text-slate-500 uppercase font-medium leading-none">{user.area}</p></div>
                             <div className="flex gap-2">
-                                <button onClick={() => setShowNotes(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-yellow-400"><i data-lucide="sticky-note" className="w-5 h-5"></i></button>
-                                {canViewStats && <button onClick={() => setShowStats(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-green-400"><i data-lucide="bar-chart-2" className="w-5 h-5"></i></button>}
+                                {canManageOrders && <button onClick={() => setShowOrderManager(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 shadow-lg"><i data-lucide="clipboard-list" className="w-4 h-4"></i> Pedidos</button>}
                                 {canConfig && <button onClick={() => setShowVisibilityModal(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"><i data-lucide="settings" className="w-5 h-5"></i></button>}
                                 <button onClick={() => setUser(null)} className="p-2 text-red-400 hover:bg-red-900/20 rounded"><i data-lucide="log-out" className="w-5 h-5"></i></button>
                             </div>
                         </div>
                     </header>
                     <main className="flex-1 overflow-auto p-2 custom-scrollbar relative">
-                        <div className="bg-slate-800 rounded-xl shadow border border-slate-700 overflow-hidden h-full" style={{ zoom: zoomLevel }}>
+                        <div className="bg-slate-800 rounded-xl shadow border border-slate-700 overflow-hidden h-full">
                             <div className="overflow-auto custom-scrollbar h-full relative">
                                 <table className="w-full border-collapse">
                                     <thead className="sticky top-0 z-20 bg-slate-900 shadow-sm border-b border-slate-700">
-                                        <tr><th className="sticky left-0 z-30 bg-slate-900 p-3 min-w-[120px] text-left border-r border-slate-700 text-xs font-bold text-slate-500">FECHA</th>{filteredVisibleMachines.map(m => (<th key={m.id} className="min-w-[160px] border-r border-slate-700 p-2"><div className="flex flex-col items-center"><span className="text-xs font-bold text-blue-400">{m.name.replace('MAQ ','')}</span><span className="text-[9px] text-slate-500">{m.type}</span></div></th>))}</tr>
+                                        <tr>
+                                            <th className="sticky left-0 z-30 bg-slate-900 p-3 min-w-[120px] text-left border-r border-slate-700 text-xs font-bold text-slate-500">FECHA</th>
+                                            {visibleMachines.map(m => {
+                                                const order = ordersData[m.id];
+                                                const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days);
+                                                return (
+                                                    <th key={m.id} className={`min-w-[160px] p-2 border-r border-slate-700 ${metrics.isPlanned ? 'bg-yellow-900/10' : ''}`}>
+                                                        <div className="flex flex-col items-center">
+                                                            <span className="text-xs font-bold text-blue-400">{m.name.replace('MAQ ','')}</span>
+                                                            {order && order.totalQty > 0 ? (
+                                                                <div className="mt-1 w-full px-2">
+                                                                    <div className="flex justify-between items-center text-[9px] font-black text-yellow-400 uppercase leading-none mb-1"><span>{order.model}</span><span>{metrics.progress.toFixed(0)}%</span></div>
+                                                                    <div className="h-1 bg-slate-700 rounded-full overflow-hidden w-full"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
+                                                                    <span className="block text-[8px] text-slate-500 mt-1">Fin: {metrics.finishDate === 'COMPLETADO' ? 'OK' : metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}) : '-'}</span>
+                                                                </div>
+                                                            ) : <span className="text-[9px] text-slate-600">Sin Orden</span>}
+                                                        </div>
+                                                    </th>
+                                                );
+                                            })}
+                                        </tr>
                                     </thead>
                                     <tbody>
                                         {currentWeekRows.map(row => {
@@ -595,14 +647,16 @@
                                             return (
                                                 <tr key={rowId} className="border-b border-slate-700 hover:bg-slate-700/50 transition-colors">
                                                     <td className="sticky left-0 bg-slate-800 p-2 border-r border-slate-700 text-xs font-bold text-slate-400 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">{row.shortDay} <br/> <span className="text-lg text-slate-200">{row.dateNum}</span></td>
-                                                    {filteredVisibleMachines.map(m => {
-                                                        const mData = rowData[m.id] || {}; const pct = mData.percentage || 0; const slots = mData.slots || [{}, {}, {}, {}]; const visibleSlotIndices = getVisibleSlots(m.id);
+                                                    {visibleMachines.map(m => {
+                                                        const mData = rowData[m.id] || {}; const slots = mData.slots || [{}, {}, {}, {}];
+                                                        const metrics = calculateOrderMetrics(m.id, ordersData[m.id], data, ALL_ROWS, visibilityConfig.days);
+                                                        const isFinishDay = metrics.finishDate === row.isoDate;
+                                                        
                                                         return (
-                                                            <td key={m.id} className="p-1 border-r border-slate-700 relative h-[80px]">
+                                                            <td key={m.id} className={`p-1 border-r border-slate-700 relative h-[80px] ${isFinishDay ? 'bg-green-900/30 border-green-500/50' : ''}`}>
                                                                 <div className="flex flex-col h-full">
-                                                                    <div className="flex justify-between items-center px-1 mb-1"><span className="text-[9px] font-bold text-yellow-500 uppercase">{mData.plan_model || '-'}</span>{canEditPlan && !mData.plan_model && <button onClick={() => setPlanModal({machineId: m.id, rowId})}><i data-lucide="edit-2" className="w-3 h-3 text-blue-500"></i></button>}<span className={`text-[9px] font-black ${pct>=100?'text-green-400':pct<50?'text-red-400':'text-orange-400'}`}>{pct}%</span></div>
-                                                                    <div className="grid grid-cols-2 gap-1 mb-0.5"><div className="text-[8px] text-center text-blue-400 font-bold bg-slate-900/50 rounded">ANDRÉS</div><div className="text-[8px] text-center text-orange-400 font-bold bg-slate-900/50 rounded">BALTA</div></div>
-                                                                    <div className="grid grid-cols-2 gap-1 flex-1">{visibleSlotIndices.map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
+                                                                    <div className="grid grid-cols-2 gap-1 mb-0.5"><div className="text-[8px] text-center text-blue-400 font-bold bg-slate-900/50 rounded">A</div><div className="text-[8px] text-center text-orange-400 font-bold bg-slate-900/50 rounded">B</div></div>
+                                                                    <div className="grid grid-cols-2 gap-1 flex-1">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
                                                                 </div>
                                                             </td>
                                                         );
@@ -615,17 +669,13 @@
                             </div>
                         </div>
                     </main>
-                    <button onClick={() => setShowZoomOverlay(true)} className="fixed bottom-6 right-6 bg-blue-600 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-40"><i data-lucide="search" className="w-6 h-6"></i></button>
-                    {showZoomOverlay && (<div className="fixed inset-0 z-[60] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center fade-in"><div className="flex items-center gap-12"><button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="w-32 h-32 rounded-full bg-slate-800 border-4 border-slate-600 text-white flex items-center justify-center"><i data-lucide="minus" className="w-16 h-16"></i></button><button onClick={() => setShowZoomOverlay(false)} className="w-24 h-24 rounded-full bg-blue-600 border-4 border-blue-400 text-white flex items-center justify-center"><i data-lucide="check" className="w-12 h-12"></i></button><button onClick={() => setZoomLevel(z => Math.min(2.0, z + 0.1))} className="w-32 h-32 rounded-full bg-slate-800 border-4 border-slate-600 text-white flex items-center justify-center"><i data-lucide="plus" className="w-16 h-16"></i></button></div></div>)}
                 </div>
             );
 
             return (
                 <div className="h-full relative">
-                    {planModal && <PlanningModal machine={MACHINES.find(m => m.id === planModal.machineId)} rowId={planModal.rowId} currentData={data[planModal.rowId]?.[planModal.machineId]} onClose={() => setPlanModal(null)} onSave={handleSavePlan} allRows={ALL_ROWS} />}
+                    {showOrderManager && <OrderManager onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} />}
                     {showVisibilityModal && <VisibilityModal onClose={() => setShowVisibilityModal(false)} currentHiddenMachines={visibilityConfig.machines} currentHiddenDays={visibilityConfig.days} onSaveVisibility={handleSaveVisibility} allRows={ALL_ROWS} />}
-                    {showNotes && <NotesModal onClose={() => setShowNotes(false)} user={user} />}
-                    {showStats && <StatsModal onClose={() => setShowStats(false)} visibleMachines={visibleMachines} currentWeekData={weekDataForStats} weekTitle={`Semana: ${weekLabel}`} />}
                     {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} onSelectDate={handleDateSelect} allRows={ALL_ROWS} />}
                     <div className="block md:hidden h-full"><MobileView /></div>
                     <div className="hidden md:block h-full"><DesktopView /></div>
