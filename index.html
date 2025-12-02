@@ -347,15 +347,32 @@
                 }
 
                 const payload = { 
-                    name, 
+                    name,
                     role, 
                     area,
                     // Mantener permisos existentes si se edita, o usar valores por defecto
                     canManageOrders: editingUser ? editingUser.canManageOrders : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
                     canViewGraph: editingUser ? editingUser.canViewGraph : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
                     canManageUsers: editingUser ? editingUser.canManageUsers : role === ROLES.DEVELOPMENT,
-                    allowedSlots: editingUser ? editingUser.allowedSlots : (role === ROLES.OPERATOR ? [] : undefined),
+                    // CORRECCIÓN CLAVE AQUÍ: Inicializa siempre a [] si es operador, o toma el valor existente.
+                    // Si no es operador y no tiene valor (new user), no incluimos el campo, o lo inicializamos a un array vacío [] si es necesario mantenerlo.
+                    // Optaremos por inicializar a [] para simplificar la lógica de setDoc, ya que no hace daño que esté vacío.
+                    allowedSlots: (editingUser?.allowedSlots && role !== ROLES.OPERATOR) 
+                        ? editingUser.allowedSlots 
+                        : (role === ROLES.OPERATOR ? (editingUser?.allowedSlots || []) : []) // Si es OPERATOR, toma el existente o [], si no es OPERATOR, también asignamos []
                 };
+                // *OPCIÓN MÁS LIMPIA (Recomendada):* Eliminar el campo si no es necesario, para no enviar 'undefined'.
+                // Si el rol NO es OPERATOR, el campo allowedSlots es innecesario.
+                // Aunque tu error es por 'undefined', si no quieres el campo en Firestore para ADMIN/DEV, haz esto:
+                if (role !== ROLES.OPERATOR) {
+                delete payload.allowedSlots;
+                } else {
+                // Asegura que, si es operador, el campo existe y es un array (vacío o con datos)
+                payload.allowedSlots = editingUser?.allowedSlots || [];
+             }
+                onSaveUser(pin, payload);
+                // ... (reseteo de estados) ...
+            };
 
                 onSaveUser(pin, payload);
                 setEditingUser(null);
