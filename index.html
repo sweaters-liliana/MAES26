@@ -33,6 +33,7 @@
         .animate-zoom-in { animation: zoomIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         .machine-circle { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         .machine-circle.selected { transform: scale(1.1); box-shadow: 0 0 15px rgba(34, 197, 94, 0.6); }
+        .planning-info { color: #facc15; background-color: rgba(120, 53, 15, 0.1); border-radius: 4px; padding: 1px 3px; font-weight: bold; font-size: 8px; }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-200 font-sans fixed inset-0 overflow-hidden">
@@ -124,61 +125,90 @@
             return f.month === l.month ? `${f.month} ${f.year}` : `${f.month} - ${l.month} ${l.year}`;
         };
 
-        // --- CÁLCULO PROYECCIÓN ---
+        // --- CÁLCULO PROYECCIÓN Y DESVIACIÓN ---
         const calculateOrderMetrics = (machineId, order, allProductionData, allRows, globalHiddenDays) => {
-            if (!order || !order.totalQty || !order.timePerPieceMin || !order.startDate) {
-                return { isPlanned: false, finishDate: null, totalNeeded: 0, progress: 0, produced: 0 };
-            }
+            const metrics = { 
+                isPlanned: false, finishDate: null, totalNeeded: 0, progress: 0, produced: 0, 
+                dailyCapacity: 0, plannedToDate: 0, deviation: 0, status: 'OK'
+            };
+            
+            if (!order || !order.totalQty || !order.timePerPieceMin || !order.startDate) return metrics;
             
             const totalQty = Number(order.totalQty);
-            let dailyHours = 0;
-            if (order.operators && Array.isArray(order.operators)) {
-                dailyHours = order.operators.length * 12; 
-            } else {
-                dailyHours = Number(order.dailyHours || 12);
-            }
-            
+            let dailyHours = order.operators && Array.isArray(order.operators) ? order.operators.length * 12 : Number(order.dailyHours || 12);
             const timePerPieceMin = Number(order.timePerPieceMin);
             const disabledDates = order.disabledDates || []; 
-
-            // 1. Producción Real
+            
+            metrics.dailyCapacity = Math.floor((dailyHours * 60) / timePerPieceMin);
+            
+            // 1. Producción Real y Progreso
             let produced = 0;
+            let plannedToDate = 0;
+            const todayISO = new Date().toISOString().split('T')[0];
             const startIndex = allRows.findIndex(r => r.isoDate === order.startDate);
+            const todayIndex = allRows.findIndex(r => r.isoDate === todayISO);
             
             if (startIndex !== -1) {
                 for (let i = startIndex; i < allRows.length; i++) {
                     const row = allRows[i];
                     produced += Number(allProductionData[row.id]?.[machineId]?.actual || 0);
-                    if (new Date(row.isoDate) > new Date()) break; 
+
+                    // Calculate planned production up to yesterday
+                    if (i < todayIndex) {
+                        if (!globalHiddenDays.includes(row.id) && !disabledDates.includes(row.isoDate)) {
+                            plannedToDate += metrics.dailyCapacity;
+                        }
+                    }
+                    
+                    if (new Date(row.isoDate) >= new Date(todayISO) && new Date(row.isoDate).getDate() === new Date(todayISO).getDate()) break; 
                 }
             }
+            
+            metrics.produced = produced;
+            metrics.plannedToDate = plannedToDate;
+            metrics.deviation = produced - plannedToDate; // Negative means behind schedule
+            metrics.progress = totalQty > 0 ? Math.min(100, (produced / totalQty) * 100) : 0;
+            metrics.isPlanned = true;
 
-            const progress = totalQty > 0 ? Math.min(100, (produced / totalQty) * 100) : 0;
+            // Set deviation status
+            if (metrics.deviation < -metrics.dailyCapacity * 1.5) { // Behind by more than 1.5 days
+                metrics.status = 'ATRASO CRÍTICO';
+            } else if (metrics.deviation < 0) { // Behind by some quantity
+                metrics.status = 'ATRASO LEVE';
+            }
+
             const remainingQty = Math.max(0, totalQty - produced);
             
             if (remainingQty <= 0) {
-                return { isPlanned: true, finishDate: 'COMPLETADO', totalNeeded: 0, progress: 100, produced };
+                metrics.finishDate = 'COMPLETADO';
+                metrics.progress = 100;
+                return metrics;
             }
             
-            const dailyCapacity = Math.floor((dailyHours * 60) / timePerPieceMin);
+            metrics.totalNeeded = remainingQty;
             
-            // 2. Proyección Futura
+            // 2. Proyección Futura (starts from today or startDate if in future)
             let projRemaining = remainingQty;
             let currentIdx = startIndex !== -1 ? startIndex : 0;
-            const todayIdx = allRows.findIndex(r => r.isoDate >= new Date().toISOString().split('T')[0]);
-            if (todayIdx > currentIdx) currentIdx = todayIdx;
+            
+            // If the start date is in the past, start the projection from today
+            if (todayIndex > currentIdx) currentIdx = todayIndex;
 
-            if (currentIdx === -1) return { isPlanned: true, finishDate: 'PENDIENTE', totalNeeded: remainingQty, progress, produced };
+            if (currentIdx === -1) { metrics.finishDate = 'PENDIENTE'; return metrics; }
 
             for (let i = currentIdx; i < allRows.length; i++) {
                 const row = allRows[i];
                 if (globalHiddenDays.includes(row.id) || disabledDates.includes(row.isoDate)) continue;
                 
-                projRemaining -= dailyCapacity; 
-                if (projRemaining <= 0) return { isPlanned: true, finishDate: row.isoDate, totalNeeded: remainingQty, progress, produced };
+                projRemaining -= metrics.dailyCapacity; 
+                if (projRemaining <= 0) {
+                    metrics.finishDate = row.isoDate; 
+                    return metrics;
+                }
             }
 
-            return { isPlanned: true, finishDate: 'PENDIENTE', totalNeeded: remainingQty, progress, produced };
+            metrics.finishDate = 'PENDIENTE (60+ días)';
+            return metrics;
         };
 
         const ProductionSlot = ({ slotData, index, disabled, onUpdate }) => {
@@ -216,33 +246,37 @@
         const OrderManager = ({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays }) => {
             const [step, setStep] = useState(1);
             const [viewMode, setViewMode] = useState('list'); 
-            
             const [modelName, setModelName] = useState('');
             const [selectedMachines, setSelectedMachines] = useState([]);
+            const [isEditing, setIsEditing] = useState(false);
+            const [editMachineId, setEditMachineId] = useState(null); // Used to identify the machine being edited
+
             const [config, setConfig] = useState({ 
                 totalQty: '', 
                 timePerPiece: '', 
                 startDate: new Date().toISOString().split('T')[0],
                 operators: ['Andrés', 'Balta'], 
-                disabledDates: []
+                disabledDates: [],
+                pieceWeightGrams: '',
+                materials: [{name: 'LYCRA', percentage: ''}, {name: 'NYLON', percentage: ''}],
+                wastePercentage: 0
             });
-            const [isEditing, setIsEditing] = useState(false);
 
-            const toggleMachine = (id) => {
-                setSelectedMachines(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
-            };
+            const initialConfig = useMemo(() => ({
+                totalQty: '', timePerPiece: '', startDate: new Date().toISOString().split('T')[0],
+                operators: ['Andrés', 'Balta'], disabledDates: [], pieceWeightGrams: '',
+                materials: [{name: 'LYCRA', percentage: ''}, {name: 'NYLON', percentage: ''}],
+                wastePercentage: 0
+            }), []);
 
+            const toggleMachine = (id) => { setSelectedMachines(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]); };
             const toggleOperator = (op) => {
                 setConfig(prev => {
                     const current = prev.operators;
-                    if (current.includes(op)) {
-                        if (current.length === 1) return prev; 
-                        return { ...prev, operators: current.filter(o => o !== op) };
-                    }
+                    if (current.includes(op)) { if (current.length === 1) return prev; return { ...prev, operators: current.filter(o => o !== op) }; }
                     return { ...prev, operators: [...current, op] };
                 });
             };
-
             const toggleDateDisabled = (isoDate) => {
                 setConfig(prev => {
                     const current = prev.disabledDates;
@@ -250,31 +284,61 @@
                     return { ...prev, disabledDates: [...current, isoDate] };
                 });
             };
+            const handleMaterialChange = (index, field, value) => {
+                setConfig(prev => {
+                    const newMaterials = [...prev.materials];
+                    newMaterials[index] = {...newMaterials[index], [field]: value};
+                    return {...prev, materials: newMaterials};
+                });
+            };
+            const addMaterial = () => { setConfig(prev => ({ ...prev, materials: [...prev.materials, { name: '', percentage: '' }] })); };
+            const removeMaterial = (index) => { setConfig(prev => ({ ...prev, materials: prev.materials.filter((_, i) => i !== index) })); };
+            const applyWaste = (percent) => { setConfig(prev => ({...prev, wastePercentage: percent})); };
+
 
             const calculatePreview = () => {
                 if (!config.totalQty || !config.timePerPiece) return null;
                 const dummyOrder = { 
-                    totalQty: config.totalQty, 
-                    timePerPieceMin: config.timePerPiece, 
-                    startDate: config.startDate, 
-                    operators: config.operators,
+                    totalQty: config.totalQty, timePerPieceMin: config.timePerPiece, 
+                    startDate: config.startDate, operators: config.operators,
                     disabledDates: config.disabledDates
                 };
                 const calc = calculateOrderMetrics('dummy', dummyOrder, {}, allRows, hiddenDays); 
                 return calc.finishDate;
             };
 
+            const calculateConsumption = (appliedWaste = false) => {
+                const totalQty = Number(config.totalQty);
+                const pieceWeightGrams = Number(config.pieceWeightGrams);
+                const waste = appliedWaste ? (1 + (config.wastePercentage / 100)) : 1;
+                
+                const totalYarnGrams = totalQty * pieceWeightGrams * waste;
+                const totalYarnKilos = totalYarnGrams / 1000;
+                
+                const consumption = config.materials
+                    .filter(m => m.name && m.percentage)
+                    .map(m => {
+                        const percent = Number(m.percentage) / 100;
+                        const kilos = (totalYarnKilos * percent);
+                        return { name: m.name, kilos: kilos, percentage: m.percentage };
+                    });
+
+                return { totalYarnKilos, consumption };
+            };
+
             const handleStartCreate = () => {
                 setIsEditing(false);
+                setEditMachineId(null);
                 setModelName('');
                 setSelectedMachines([]);
-                setConfig({ totalQty: '', timePerPiece: '', startDate: new Date().toISOString().split('T')[0], operators: ['Andrés', 'Balta'], disabledDates: [] });
+                setConfig(initialConfig);
                 setStep(1);
                 setViewMode('create');
             };
 
             const handleStartEdit = (machineId, orderData) => {
                 setIsEditing(true);
+                setEditMachineId(machineId);
                 setModelName(orderData.model);
                 setSelectedMachines([machineId]); 
                 setConfig({
@@ -282,7 +346,10 @@
                     timePerPiece: orderData.timePerPieceMin,
                     startDate: orderData.startDate,
                     operators: orderData.operators || (orderData.dailyHours == 24 ? ['Andrés', 'Balta'] : ['Andrés']),
-                    disabledDates: orderData.disabledDates || []
+                    disabledDates: orderData.disabledDates || [],
+                    pieceWeightGrams: orderData.pieceWeightGrams || '',
+                    materials: orderData.materials || [{name: 'LYCRA', percentage: ''}, {name: 'NYLON', percentage: ''}],
+                    wastePercentage: orderData.wastePercentage || 0,
                 });
                 setStep(1);
                 setViewMode('create');
@@ -296,6 +363,8 @@
 
             const handleFinalSave = () => {
                 selectedMachines.forEach(mid => {
+                    const consumptionData = calculateConsumption();
+                    
                     const orderPayload = {
                         model: modelName,
                         totalQty: Number(config.totalQty),
@@ -303,14 +372,35 @@
                         startDate: config.startDate,
                         operators: config.operators, 
                         dailyHours: config.operators.length * 12, 
-                        disabledDates: config.disabledDates
+                        disabledDates: config.disabledDates,
+                        // New fields
+                        pieceWeightGrams: Number(config.pieceWeightGrams),
+                        materials: config.materials.filter(m => m.name && m.percentage),
+                        wastePercentage: config.wastePercentage,
+                        totalYarnKilos: consumptionData.totalYarnKilos,
+                        consumptionDetails: consumptionData.consumption,
                     };
                     onSaveOrders(mid, orderPayload);
                 });
                 setViewMode('list');
             };
+            
+            // Step validation
+            const validateStep = (s) => {
+                if (s === 1 && !modelName) return false;
+                if (s === 2 && selectedMachines.length === 0) return false;
+                if (s === 3 && (!config.totalQty || !config.timePerPiece || !config.pieceWeightGrams)) return false;
+                if (s === 5) {
+                    const totalPercentage = config.materials.reduce((sum, m) => sum + Number(m.percentage || 0), 0);
+                    return totalPercentage === 100;
+                }
+                return true;
+            }
 
+
+            // Renderers
             const renderCalendarPicker = () => {
+                // ... (implementation of renderCalendarPicker remains the same)
                 const finishDate = calculatePreview();
                 if (!finishDate) return <div className="text-center text-red-400">Datos insuficientes para calcular</div>;
                 
@@ -350,10 +440,94 @@
                 );
             };
 
+            const renderMaterialConfig = () => {
+                const totalPercentage = config.materials.reduce((sum, m) => sum + Number(m.percentage || 0), 0);
+
+                return (
+                    <div className="space-y-4 fade-in">
+                        <h3 className="text-xl font-bold text-white text-center mb-6">Materia Prima y Merma</h3>
+
+                        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Hilaturas ({totalPercentage}%)</label>
+                            <div className="space-y-3">
+                                {config.materials.map((m, index) => (
+                                    <div key={index} className="flex gap-2 items-center">
+                                        <input type="text" value={m.name} onChange={e => handleMaterialChange(index, 'name', e.target.value.toUpperCase())} placeholder="NOMBRE (EJ: NYLON)" className="flex-1 bg-slate-900 text-sm text-white p-2 rounded border border-slate-600 outline-none uppercase" />
+                                        <input type="number" value={m.percentage} onChange={e => handleMaterialChange(index, 'percentage', Math.min(100, Math.max(0, e.target.value)))} placeholder="%" className="w-16 bg-slate-900 text-sm text-white p-2 rounded border border-slate-600 outline-none text-center" />
+                                        <button onClick={() => removeMaterial(index)} className="p-2 bg-red-900/50 rounded text-red-400"><i data-lucide="x" className="w-4 h-4"></i></button>
+                                    </div>
+                                ))}
+                            </div>
+                            <button onClick={addMaterial} className="mt-3 w-full bg-slate-700 text-white py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2"><i data-lucide="plus-circle" className="w-4 h-4"></i> Añadir Hilatura</button>
+
+                            {totalPercentage !== 100 && totalPercentage > 0 && (
+                                <div className="mt-4 p-3 bg-red-900/30 text-red-300 rounded-lg text-xs font-bold text-center">
+                                    ¡Atención! La suma de porcentajes debe ser 100%. (Actual: {totalPercentage}%)
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Merma</label>
+                            <div className="flex gap-4 justify-center">
+                                {[0, 5, 10].map(p => (
+                                    <button key={p} onClick={() => applyWaste(p)} className={`flex-1 py-2 rounded-lg border font-bold text-sm ${config.wastePercentage === p ? 'bg-green-600 border-green-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>
+                                        {p}% Merma
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderConfirmation = () => {
+                const { totalYarnKilos, consumption } = calculateConsumption(true);
+                const consumptionBase = calculateConsumption(false); // Consumption without waste
+                
+                return (
+                    <div className="space-y-6 fade-in text-center">
+                        <h3 className="text-xl font-bold text-white">Confirmación y Consumo</h3>
+                        <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 inline-block text-left w-full">
+                            <div className="flex justify-between border-b border-slate-700 pb-2 mb-2">
+                                <span className="text-slate-400">Modelo:</span>
+                                <span className="font-bold text-yellow-400 text-lg">{modelName}</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-sm mb-4">
+                                <div className="flex justify-between"><span className="text-slate-400">Total Piezas:</span><span className="text-white">{Number(config.totalQty).toLocaleString()}</span></div>
+                                <div className="flex justify-between"><span className="text-slate-400">Peso/Pza:</span><span className="text-white">{config.pieceWeightGrams} g</span></div>
+                                <div className="flex justify-between"><span className="text-slate-400">Merma Aplicada:</span><span className={`font-bold ${config.wastePercentage > 0 ? 'text-red-400' : 'text-green-400'}`}>{config.wastePercentage}%</span></div>
+                            </div>
+                            
+                            <h4 className="text-xs font-bold text-blue-400 uppercase mt-4 mb-2 border-t border-slate-700 pt-2">Consumo Total de Hilatura</h4>
+                            <div className="text-3xl font-black text-center text-green-400 mb-4">{totalYarnKilos.toFixed(2)} KG</div>
+
+                            <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Desglose por Hilatura:</h4>
+                            <div className="space-y-1">
+                                {consumption.map((m, i) => (
+                                    <div key={i} className="flex justify-between text-sm">
+                                        <span className="text-white font-bold">{m.name} ({m.percentage}%)</span>
+                                        <span className="text-slate-300">{m.kilos.toFixed(2)} KG</span>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {config.wastePercentage > 0 && (
+                                <div className="text-[10px] text-red-400 mt-4 border-t border-red-900/50 pt-2">
+                                    Consumo base sin merma: {consumptionBase.totalYarnKilos.toFixed(2)} KG.
+                                </div>
+                            )}
+
+                        </div>
+                        <p className="text-sm text-slate-400">¿Deseas guardar esta planeación?</p>
+                    </div>
+                );
+            };
+
             const renderCreateFlow = () => (
                 <div className="flex flex-col h-full">
                     <div className="flex justify-between mb-6 px-2">
-                        {[1,2,3,4,5].map(s => (
+                        {[1,2,3,4,5,6].map(s => (
                             <div key={s} className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= s ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-500'}`}>{s}</div>
                         ))}
                     </div>
@@ -389,7 +563,7 @@
 
                         {step === 3 && (
                             <div className="space-y-4 fade-in">
-                                <h3 className="text-lg font-bold text-white text-center mb-4">Configuración</h3>
+                                <h3 className="text-lg font-bold text-white text-center mb-4">Configuración Producción</h3>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="col-span-2">
                                         <label className="text-xs text-slate-400 uppercase mb-2 block">Operadores (Turno)</label>
@@ -407,7 +581,8 @@
                                     </div>
                                     <div><label className="text-xs text-slate-400 uppercase">Cantidad Total</label><input type="number" value={config.totalQty} onChange={e => setConfig({...config, totalQty: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="1000" /></div>
                                     <div><label className="text-xs text-slate-400 uppercase">Minutos/Pieza</label><input type="number" value={config.timePerPiece} onChange={e => setConfig({...config, timePerPiece: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="1.5" /></div>
-                                    <div className="col-span-2"><label className="text-xs text-slate-400 uppercase">Fecha Inicio</label><input type="date" value={config.startDate} onChange={e => setConfig({...config, startDate: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
+                                    <div><label className="text-xs text-slate-400 uppercase">Peso/Pieza (Gramos)</label><input type="number" value={config.pieceWeightGrams} onChange={e => setConfig({...config, pieceWeightGrams: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="350 g" /></div>
+                                    <div><label className="text-xs text-slate-400 uppercase">Fecha Inicio</label><input type="date" value={config.startDate} onChange={e => setConfig({...config, startDate: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
                                 </div>
                             </div>
                         )}
@@ -429,36 +604,18 @@
                             </div>
                         )}
 
-                        {step === 5 && (
-                            <div className="space-y-6 fade-in text-center">
-                                <h3 className="text-xl font-bold text-white">Confirmación</h3>
-                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 inline-block text-left w-full">
-                                    <div className="flex justify-between border-b border-slate-700 pb-2 mb-2">
-                                        <span className="text-slate-400">Modelo:</span>
-                                        <span className="font-bold text-yellow-400 text-lg">{modelName}</span>
-                                    </div>
-                                    <div className="flex justify-between mb-1"><span className="text-slate-400">Máquinas:</span><span className="text-white">{selectedMachines.length}</span></div>
-                                    <div className="flex justify-between mb-1"><span className="text-slate-400">Total/Máq:</span><span className="text-white">{Number(config.totalQty).toLocaleString()} pzas</span></div>
-                                    <div className="flex justify-between mb-1"><span className="text-slate-400">Operadores:</span><span className="text-white text-xs">{config.operators.join(' & ')}</span></div>
-                                    <div className="flex justify-between border-t border-slate-700 pt-2 mt-2">
-                                        <span className="text-blue-400 font-bold">Fin Estimado:</span>
-                                        <span className="text-green-400 font-bold text-lg">{calculatePreview() ? new Date(calculatePreview()).toLocaleDateString() : 'Error'}</span>
-                                    </div>
-                                </div>
-                                <p className="text-sm text-slate-400">¿Deseas guardar esta planeación?</p>
-                            </div>
-                        )}
+                        {step === 5 && renderMaterialConfig()}
+
+                        {step === 6 && renderConfirmation()}
                     </div>
 
                     <div className="mt-4 pt-4 border-t border-slate-700 flex justify-between">
                         {step > 1 ? <button onClick={() => setStep(s => s - 1)} className="px-4 py-2 rounded bg-slate-700 text-white">Atrás</button> : <button onClick={() => setViewMode('list')} className="px-4 py-2 rounded bg-slate-800 text-slate-400">Cancelar</button>}
-                        {step < 5 ? (
+                        {step < 6 ? (
                             <button onClick={() => {
-                                if (step===1 && !modelName) return;
-                                if (step===2 && selectedMachines.length===0) return;
-                                if (step===3 && (!config.totalQty || !config.timePerPiece)) return;
-                                setStep(s => s + 1);
-                            }} className="px-6 py-2 rounded bg-blue-600 text-white font-bold hover:bg-blue-500">Siguiente</button>
+                                if (validateStep(step)) { setStep(s => s + 1); }
+                                else { alert(step === 5 ? '¡Error! La suma de porcentajes de hilaturas debe ser 100.' : 'Faltan datos obligatorios para continuar.'); }
+                            }} className="px-6 py-2 rounded bg-blue-600 text-white font-bold hover:bg-blue-500" disabled={!validateStep(step)}>Siguiente</button>
                         ) : (
                             <button onClick={handleFinalSave} className="px-6 py-2 rounded bg-green-600 text-white font-bold shadow-lg hover:bg-green-500 animate-pulse">CONFIRMAR</button>
                         )}
@@ -503,7 +660,14 @@
                                             </div>
                                         </div>
 
-                                        <div className="relative z-10">
+                                        {metrics.status !== 'OK' && metrics.finishDate !== 'COMPLETADO' && (
+                                            <div className="flex items-center gap-2 p-2 mt-2 bg-red-900/30 border border-red-900 rounded-lg text-xs font-bold text-red-300 relative z-10">
+                                                <i data-lucide="alert-triangle" className="w-4 h-4 shrink-0"></i>
+                                                <span>{metrics.status}: Detrás por {Math.abs(metrics.deviation).toLocaleString()} pzas (Plneado: {metrics.plannedToDate.toLocaleString()}).</span>
+                                            </div>
+                                        )}
+
+                                        <div className="relative z-10 mt-3">
                                             <div className="flex justify-between text-xs text-slate-400 mb-1">
                                                 <span>Progreso: {metrics.progress.toFixed(1)}%</span>
                                                 <span>{metrics.produced.toLocaleString()} / {Number(order.totalQty).toLocaleString()}</span>
@@ -536,6 +700,7 @@
         };
 
         const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall }) => {
+            // ... (LoginScreen remains the same)
             const [pin, setPin] = useState('');
             const handleLogin = (e) => {
                 e.preventDefault();
@@ -560,6 +725,7 @@
         };
 
         const VisibilityModal = ({ onClose, currentHiddenMachines, currentHiddenDays, onSaveVisibility, allRows }) => {
+            // ... (VisibilityModal remains the same)
             const [hiddenM, setHiddenM] = useState([...currentHiddenMachines]);
             const [hiddenD, setHiddenD] = useState([...currentHiddenDays]);
             const [dateToHide, setDateToHide] = useState('');
@@ -583,6 +749,7 @@
         };
 
         const CalendarModal = ({ onClose, onSelectDate, allRows }) => {
+            // ... (CalendarModal remains the same)
             const [viewDate, setViewDate] = useState(new Date(2025, 9, 1)); 
             const handleMonthChange = (delta) => { const d = new Date(viewDate); d.setMonth(d.getMonth() + delta); setViewDate(d); };
             const monthRows = allRows.filter(r => r.monthIndex === viewDate.getMonth() && r.year === viewDate.getFullYear());
@@ -656,7 +823,7 @@
             const handleDateSelect = (row) => { setWeekOffset(Math.floor(row.index / 7)); setShowCalendar(false); };
 
             const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
-            const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7).filter(r => !visibilityConfig.days?.includes(r.id)); }, [weekOffset, visibilityConfig.days]);
+            const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7); }, [weekOffset]);
             const weekLabel = useMemo(() => getWeekLabel(currentWeekRows), [currentWeekRows]);
             
             const canManageOrders = user && (user.canManageOrders || user.role === ROLES.DEVELOPMENT); 
@@ -677,6 +844,8 @@
                 if (!selectedDay) return <div className="p-10 text-center text-slate-500">Semana sin días visibles</div>;
                 const rowId = selectedDay.id;
                 const dayData = data[rowId] || {};
+                const isHiddenDay = visibilityConfig.days?.includes(rowId);
+                
                 return (
                     <div className="flex flex-col h-full bg-slate-900">
                         <div className="bg-slate-800 shadow-sm z-20 shrink-0 border-b border-slate-700">
@@ -690,16 +859,19 @@
                             <div className="flex overflow-x-auto custom-scrollbar pb-1 px-1 gap-1 bg-slate-900/50">{currentWeekRows.map((day, idx) => (<button key={day.id} onClick={() => setSelectedDayIndex(idx)} className={`flex-shrink-0 flex flex-col items-center justify-center p-2 min-w-[60px] rounded-lg my-2 transition-all ${idx === safeIndex ? 'bg-slate-700 shadow border-b-4 border-blue-500 scale-105' : 'text-slate-500 hover:bg-slate-800'}`}><span className="text-[10px] font-bold uppercase mb-0.5 text-blue-400">{day.shortDay}</span><span className={`text-lg font-black leading-none ${idx === safeIndex ? 'text-white' : 'text-slate-600'}`}>{day.dateNum}</span></button>))}</div>
                         </div>
                         <div className="flex-1 overflow-y-auto p-3 pb-24 custom-scrollbar">
+                            {isHiddenDay && <div className="p-4 bg-red-900/30 text-red-300 rounded-lg text-center font-bold mb-3">Día Oculto / Feriado</div>}
                             {visibleMachines.map(m => { 
                                 const mData = dayData[m.id] || {};
                                 const slots = mData.slots || [{}, {}, {}, {}];
                                 const order = ordersData[m.id];
-                                const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days);
+                                const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days || []);
+                                const isPlannedDay = metrics.isPlanned && new Date(order.startDate).toISOString().split('T')[0] <= selectedDay.isoDate && (metrics.finishDate === 'PENDIENTE (60+ días)' || metrics.finishDate >= selectedDay.isoDate);
+                                
                                 return (
                                     <div key={m.id} className="bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-700 relative overflow-hidden mb-3">
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center"><i data-lucide="cpu" className="w-5 h-5 opacity-50"></i></div><div><h3 className="font-black text-slate-200 text-sm">{m.name.replace('MAQ ','M-')}</h3><p className="text-[10px] text-slate-500 font-medium">{m.type}</p></div></div>
-                                            {metrics.progress > 0 && <div className="text-[10px] font-bold text-blue-400 bg-blue-900/30 px-2 py-0.5 rounded">{metrics.progress.toFixed(0)}%</div>}
+                                            {(metrics.progress > 0 || isPlannedDay) && <div className="text-[10px] font-bold text-blue-400 bg-blue-900/30 px-2 py-0.5 rounded">{metrics.progress.toFixed(0)}%</div>}
                                         </div>
                                         {order && order.totalQty > 0 && (
                                             <div className="mb-3">
@@ -707,9 +879,10 @@
                                                 <div className="h-1 w-full bg-slate-700 mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
                                             </div>
                                         )}
-                                        <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
+                                        <div className={`rounded-lg p-2 border border-slate-700/50 ${isPlannedDay && !isHiddenDay ? 'bg-yellow-900/10' : 'bg-slate-900/50'}`}>
+                                            {isPlannedDay && !isHiddenDay && <div className="text-[8px] text-yellow-400 text-center font-bold uppercase mb-1">{order.model}</div>}
                                             <div className="grid grid-cols-2 gap-2 mb-1"><div className="text-[9px] text-center font-bold text-blue-400 uppercase tracking-widest border-b border-blue-900 pb-1">Andrés</div><div className="text-[9px] text-center font-bold text-orange-400 uppercase tracking-widest border-b border-orange-900 pb-1">Balta</div></div>
-                                            <div className="grid grid-cols-2 gap-2">{[0,1].map(idx => (<div key={idx} className="h-16"><ProductionSlot slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} /></div>))}</div>
+                                            <div className="grid grid-cols-2 gap-2">{[0,1].map(idx => (<div key={idx} className="h-16"><ProductionSlot slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} /></div>))}</div>
                                         </div>
                                     </div>
                                 );
@@ -754,7 +927,7 @@
                                             <th className="sticky left-0 z-30 bg-slate-900 p-3 min-w-[120px] text-left border-r border-slate-700 text-xs font-bold text-slate-500">FECHA</th>
                                             {visibleMachines.map(m => {
                                                 const order = ordersData[m.id];
-                                                const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days);
+                                                const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days || []);
                                                 return (
                                                     <th key={m.id} className={`min-w-[160px] p-2 border-r border-slate-700 ${metrics.isPlanned ? 'bg-yellow-900/10' : ''}`}>
                                                         <div className="flex flex-col items-center">
@@ -763,7 +936,7 @@
                                                                 <div className="mt-1 w-full px-2">
                                                                     <div className="flex justify-between items-center text-[9px] font-black text-yellow-400 uppercase leading-none mb-1"><span>{order.model}</span><span>{metrics.progress.toFixed(0)}%</span></div>
                                                                     <div className="h-1 bg-slate-700 rounded-full overflow-hidden w-full"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
-                                                                    <span className="block text-[8px] text-slate-500 mt-1">Fin: {metrics.finishDate === 'COMPLETADO' ? 'OK' : metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}) : '-'}</span>
+                                                                    <span className="block text-[8px] text-slate-500 mt-1 font-bold">Fin: <span className={metrics.finishDate === 'COMPLETADO' ? 'text-green-400' : 'text-red-400'}>{metrics.finishDate === 'COMPLETADO' ? 'OK' : metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}) : '-'}</span></span>
                                                                 </div>
                                                             ) : <span className="text-[9px] text-slate-600">Sin Orden</span>}
                                                         </div>
@@ -774,20 +947,27 @@
                                     </thead>
                                     <tbody>
                                         {currentWeekRows.map(row => {
-                                            const rowId = row.id; const rowData = data[rowId] || {};
+                                            const rowId = row.id; 
+                                            const rowData = data[rowId] || {};
+                                            const isHiddenDay = visibilityConfig.days?.includes(rowId);
+                                            
                                             return (
-                                                <tr key={rowId} className="border-b border-slate-700 hover:bg-slate-700/50 transition-colors">
+                                                <tr key={rowId} className={`border-b border-slate-700 hover:bg-slate-700/50 transition-colors ${isHiddenDay ? 'opacity-30' : ''}`}>
                                                     <td className="sticky left-0 bg-slate-800 p-2 border-r border-slate-700 text-xs font-bold text-slate-400 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">{row.shortDay} <br/> <span className="text-lg text-slate-200">{row.dateNum}</span></td>
                                                     {visibleMachines.map(m => {
-                                                        const mData = rowData[m.id] || {}; const slots = mData.slots || [{}, {}, {}, {}];
-                                                        const metrics = calculateOrderMetrics(m.id, ordersData[m.id], data, ALL_ROWS, visibilityConfig.days);
+                                                        const mData = rowData[m.id] || {}; 
+                                                        const slots = mData.slots || [{}, {}, {}, {}];
+                                                        const order = ordersData[m.id];
+                                                        const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days || []);
                                                         const isFinishDay = metrics.finishDate === row.isoDate;
+                                                        const isPlannedDay = metrics.isPlanned && new Date(order.startDate).toISOString().split('T')[0] <= row.isoDate && (metrics.finishDate === 'PENDIENTE (60+ días)' || metrics.finishDate >= row.isoDate);
                                                         
                                                         return (
-                                                            <td key={m.id} className={`p-1 border-r border-slate-700 relative h-[80px] ${isFinishDay ? 'bg-green-900/30 border-green-500/50' : ''}`}>
+                                                            <td key={m.id} className={`p-1 border-r border-slate-700 relative h-[80px] ${isFinishDay ? 'bg-green-900/30 border-green-500/50' : ''} ${isPlannedDay && !isHiddenDay ? 'bg-yellow-900/10' : ''}`}>
+                                                                {isPlannedDay && !isHiddenDay && <div className="planning-info">{order.model}</div>}
                                                                 <div className="flex flex-col h-full">
                                                                     <div className="grid grid-cols-2 gap-1 mb-0.5"><div className="text-[8px] text-center text-blue-400 font-bold bg-slate-900/50 rounded">A</div><div className="text-[8px] text-center text-orange-400 font-bold bg-slate-900/50 rounded">B</div></div>
-                                                                    <div className="grid grid-cols-2 gap-1 flex-1">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx)} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
+                                                                    <div className="grid grid-cols-2 gap-1 flex-1">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
                                                                 </div>
                                                             </td>
                                                         );
@@ -806,7 +986,7 @@
             return (
                 <div className="h-full relative">
                     {showOrderManager && <OrderManager onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} />}
-                    {showVisibilityModal && <VisibilityModal onClose={() => setShowVisibilityModal(false)} currentHiddenMachines={visibilityConfig.machines} currentHiddenDays={visibilityConfig.days} onSaveVisibility={handleSaveVisibility} allRows={ALL_ROWS} />}
+                    {showVisibilityModal && <VisibilityModal onClose={() => setShowVisibilityModal(false)} currentHiddenMachines={visibilityConfig.machines || []} currentHiddenDays={visibilityConfig.days || []} onSaveVisibility={handleSaveVisibility} allRows={ALL_ROWS} />}
                     {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} onSelectDate={handleDateSelect} allRows={ALL_ROWS} />}
                     <div className="block md:hidden h-full"><MobileView /></div>
                     <div className="hidden md:block h-full"><DesktopView /></div>
