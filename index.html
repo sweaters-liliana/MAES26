@@ -135,12 +135,6 @@
 
         const INITIAL_STATE = getInitialState();
 
-        const formatMonthYear = (date) => {
-            if (!date) return '';
-            const months = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
-            return `${months[date.getMonth()]} ${date.getFullYear()}`;
-        };
-
         const calculateProduction = (targetQty, timeMin, hours, actualQty) => {
             if (!targetQty || !timeMin || !hours) return { targetPieces: 0, percentage: 0 };
             const totalMinutes = hours * 60;
@@ -157,6 +151,7 @@
             useEffect(() => {
                 if (!isDirty) { 
                     setLocalModel(slotData?.model || ''); 
+                    // CORRECCIÓN: Respetar el valor 0. Si es null o undefined, usa string vacío.
                     const qtyVal = slotData?.qty;
                     setLocalQty(qtyVal !== null && qtyVal !== undefined ? qtyVal : ''); 
                 }
@@ -222,13 +217,13 @@
             const andresData = visibleMachines.map(m => {
                 return currentWeekData.reduce((acc, row) => {
                     const slots = row.data[m.id]?.slots || [];
-                    return acc + (Number(slots[0]?.qty) || 0); 
+                    return acc + (Number(slots[0]?.qty) || 0); // Slot 0 = Andrés
                 }, 0);
             });
             const baltaData = visibleMachines.map(m => {
                 return currentWeekData.reduce((acc, row) => {
                     const slots = row.data[m.id]?.slots || [];
-                    return acc + (Number(slots[1]?.qty) || 0); 
+                    return acc + (Number(slots[1]?.qty) || 0); // Slot 1 = Balta
                 }, 0);
             });
 
@@ -397,12 +392,6 @@
 
             const handleSaveVisibility = async (hiddenMachines, hiddenDays) => { await setDoc(doc(db, 'settings', 'visibility'), { machines: hiddenMachines, days: hiddenDays }, { merge: true }); };
 
-            const handleMonthChange = (direction) => {
-                const newDate = new Date(currentMonthDate);
-                newDate.setMonth(newDate.getMonth() + direction);
-                setCurrentMonthDate(newDate);
-            };
-
             const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
             const filteredVisibleMachines = useMemo(() => { if (!machineSearch) return visibleMachines; return visibleMachines.filter(m => m.name.toLowerCase().includes(machineSearch.toLowerCase()) || m.type.toLowerCase().includes(machineSearch.toLowerCase())); }, [visibleMachines, machineSearch]);
             const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7).filter(r => !visibilityConfig.days?.includes(r.id)); }, [weekOffset, visibilityConfig.days]);
@@ -412,10 +401,12 @@
             const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
             const canViewStats = user && (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT);
             
+            // CORRECCIÓN PERMISOS: Default false para seguridad (Observadores/Comentarios no editan)
             const canEditSlot = (machineId, slotIndex) => {
                 if (!user) return false;
                 if (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) return true;
                 if (user.allowedSlots) return user.allowedSlots.includes(slotIndex);
+                // Si no es admin y no tiene slots explícitos, no puede editar (ej. Susana, Prisciliano)
                 return false; 
             };
 
@@ -430,9 +421,6 @@
                 if (!selectedDay) return <div className="p-10 text-center text-slate-500">Semana sin días visibles</div>;
                 const rowId = selectedDay.id;
                 const dayData = data[rowId] || {};
-
-                // Obtener el mes de la semana actual
-                const weekMonthLabel = currentWeekRows.length > 0 ? `${currentWeekRows[0].month} ${currentWeekRows[0].year}` : '';
 
                 return (
                     <div className="flex flex-col h-full bg-slate-900">
@@ -485,12 +473,7 @@
                             })}
                         </div>
                         <div className="fixed bottom-0 left-0 w-full bg-slate-900/90 backdrop-blur border-t border-slate-700 p-3 flex justify-between items-center z-30">
-                             <button onClick={() => setWeekOffset(prev => Math.max(0, prev - 1))} className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400"><i data-lucide="chevron-left" className="w-5 h-5"></i></button>
-                             <div className="text-center">
-                                <span className="block text-[10px] font-bold text-blue-400 uppercase tracking-wide">{weekMonthLabel}</span>
-                                <span className="block text-xs font-bold text-slate-500 uppercase">SEMANA {weekOffset + 1}</span>
-                             </div>
-                             <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400"><i data-lucide="chevron-right" className="w-5 h-5"></i></button>
+                             <button onClick={() => setWeekOffset(prev => Math.max(0, prev - 1))} className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400"><i data-lucide="chevron-left" className="w-5 h-5"></i></button><span className="text-xs font-bold text-slate-500 uppercase">Semana {weekOffset + 1}</span><button onClick={() => setWeekOffset(prev => prev + 1)} className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400"><i data-lucide="chevron-right" className="w-5 h-5"></i></button>
                         </div>
                     </div>
                 );
@@ -499,26 +482,12 @@
             const DesktopView = () => (
                 <div className="h-full flex flex-col bg-slate-900 overflow-hidden relative">
                     <header className="bg-slate-800 shadow-sm border-b border-slate-700 p-3 flex justify-between items-center z-20 shrink-0">
-                        <div className="flex items-center gap-4">
-                            <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-2 rounded-lg text-white shadow-lg"><i data-lucide="factory" className="w-5 h-5"></i></div>
-                            <h1 className="font-bold text-slate-200">Control MAES - Tejido</h1>
-                            
-                            {/* NAVEGACIÓN DE MES AGREGADA AQUÍ */}
-                            <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700/50 ml-6">
-                                <button onClick={() => handleMonthChange(-1)} className="p-1 hover:bg-slate-700 rounded text-slate-400"><i data-lucide="chevron-left" className="w-5 h-5"></i></button>
-                                <span className="text-sm font-bold text-white uppercase w-32 text-center">{formatMonthYear(currentMonthDate)}</span>
-                                <button onClick={() => handleMonthChange(1)} className="p-1 hover:bg-slate-700 rounded text-slate-400"><i data-lucide="chevron-right" className="w-5 h-5"></i></button>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center gap-4">
-                            <div className="text-right px-3 py-1 bg-slate-900/50 rounded-lg border border-slate-700/50"><p className="text-sm font-bold text-blue-400">{user.name.toUpperCase()}</p><p className="text-[10px] text-slate-500 uppercase font-medium leading-none">{user.area}</p></div>
-                            <div className="flex gap-2">
-                                <button onClick={() => setShowNotes(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-yellow-400"><i data-lucide="sticky-note" className="w-5 h-5"></i></button>
-                                {canViewStats && <button onClick={() => setShowStats(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-green-400"><i data-lucide="bar-chart-2" className="w-5 h-5"></i></button>}
-                                {canConfig && <button onClick={() => setShowVisibilityModal(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"><i data-lucide="settings" className="w-5 h-5"></i></button>}
-                                <button onClick={() => setUser(null)} className="p-2 text-red-400 hover:bg-red-900/20 rounded"><i data-lucide="log-out" className="w-5 h-5"></i></button>
-                            </div>
+                        <div className="flex items-center gap-4"><div className="bg-gradient-to-br from-blue-600 to-blue-800 p-2 rounded-lg text-white shadow-lg"><i data-lucide="factory" className="w-5 h-5"></i></div><h1 className="font-bold text-slate-200">Control MAES - Tejido</h1><div className="ml-4 text-left p-2 bg-slate-900/50 rounded-lg border border-slate-700/50"><p className="text-sm font-bold text-blue-400">{user.name.toUpperCase()}</p><p className="text-[10px] text-slate-500 uppercase font-medium leading-none">{user.area}</p></div></div>
+                        <div className="flex gap-2 ml-4">
+                            <button onClick={() => setShowNotes(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-yellow-400"><i data-lucide="sticky-note" className="w-5 h-5"></i></button>
+                            {canViewStats && <button onClick={() => setShowStats(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-green-400"><i data-lucide="bar-chart-2" className="w-5 h-5"></i></button>}
+                            {canConfig && <button onClick={() => setShowVisibilityModal(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"><i data-lucide="settings" className="w-5 h-5"></i></button>}
+                            <button onClick={() => setUser(null)} className="p-2 text-red-400 hover:bg-red-900/20 rounded"><i data-lucide="log-out" className="w-5 h-5"></i></button>
                         </div>
                     </header>
                     <main className="flex-1 overflow-auto p-2 custom-scrollbar relative">
