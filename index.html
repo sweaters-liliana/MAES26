@@ -17,6 +17,18 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <style>
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; color: black !important; }
+            .report-page { 
+                margin: 0; 
+                padding: 10mm;
+                color: black !important;
+                background: white !important;
+                min-height: 297mm; /* A4 height */
+            }
+        }
+
         .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
@@ -34,6 +46,23 @@
         .machine-circle { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         .machine-circle.selected { transform: scale(1.1); box-shadow: 0 0 15px rgba(34, 197, 94, 0.6); }
         .planning-info { color: #facc15; background-color: rgba(120, 53, 15, 0.1); border-radius: 4px; padding: 1px 3px; font-weight: bold; font-size: 8px; }
+        
+        /* Report Modal Styles */
+        .report-page {
+            background-color: #f8fafc;
+            color: #1e293b;
+            padding: 30px;
+            font-family: sans-serif;
+        }
+        .report-header h1 { font-size: 24px; font-weight: bold; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 10px; }
+        .report-section { margin-bottom: 20px; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; }
+        .report-section h2 { font-size: 18px; font-weight: bold; color: #1e40af; margin-bottom: 10px; }
+        .report-data div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #cbd5e1; font-size: 14px; }
+        .report-label { font-weight: 500; color: #475569; }
+        .report-value { font-weight: 700; }
+        .report-material-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .report-material-table th, .report-material-table td { border: 1px solid #e2e8f0; padding: 8px; text-align: left; font-size: 13px; }
+        .report-material-table th { background-color: #f1f5f9; color: #1e293b; }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-200 font-sans fixed inset-0 overflow-hidden">
@@ -72,8 +101,8 @@
         const USERS = {
             '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración', canManageOrders: true },
             '0000': { name: 'Prisciliano Espinoza', role: ROLES.COMMENTATOR, area: 'Comentarios' },
-            '2222': { name: 'Susana', role: ROLES.OBSERVER, area: 'Observación', canManageOrders: true }, 
-            '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo', canManageOrders: true }, 
+            '2222': { name: 'Susana', role: ROLES.OBSERVER, area: 'Observación', canManageOrders: true, canViewGraph: true }, 
+            '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo', canManageOrders: true, canViewGraph: true }, 
             '3333': { name: 'Tejido', role: ROLES.OPERATOR, area: 'Operadores Gral' },
             '1392': { name: 'Andrés', role: ROLES.OPERATOR, area: 'Tejido (A)', allowedSlots: [0] },
             '7914': { name: 'Balta', role: ROLES.OPERATOR, area: 'Tejido (B)', allowedSlots: [1] }
@@ -95,7 +124,9 @@
         const generateCalendar = () => {
             const dates = [];
             const months = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-            const start = new Date(2025, 8, 29); const end = new Date(2026, 11, 31);
+            // Covering a period, e.g., 2025 to 2026 for flexibility
+            const start = new Date(2025, 8, 1); 
+            const end = new Date(2026, 11, 31);
             let idx = 0;
             for (let d = start; d <= end; d.setDate(d.getDate() + 1)) {
                 dates.push({
@@ -116,7 +147,9 @@
         const INITIAL_STATE = (() => {
             const todayISO = new Date().toISOString().split('T')[0];
             const foundIndex = ALL_ROWS.findIndex(r => r.isoDate === todayISO);
-            return foundIndex !== -1 ? { weekOffset: Math.floor(foundIndex / 7), selectedDayIndex: foundIndex % 7 } : { weekOffset: 0, selectedDayIndex: 0 };
+            // Default to start of the calendar if today is not found or index is too small
+            const safeIndex = foundIndex !== -1 ? foundIndex : 0;
+            return { weekOffset: Math.floor(safeIndex / 7), selectedDayIndex: safeIndex % 7 };
         })();
 
         const getWeekLabel = (weekRows) => {
@@ -124,6 +157,41 @@
             const f = weekRows[0], l = weekRows[weekRows.length - 1];
             return f.month === l.month ? `${f.month} ${f.year}` : `${f.month} - ${l.month} ${l.year}`;
         };
+
+        const calculateConsumptionDetails = (order, producedQty = 0) => {
+            if (!order || !order.totalQty || !order.pieceWeightGrams) return { totalNeeded: 0, consumption: [], totalYarnKilos: 0, producedYarnKilos: 0 };
+
+            const totalQty = Number(order.totalQty);
+            const pieceWeightGrams = Number(order.pieceWeightGrams);
+            const materials = order.materials || [];
+            const waste = 1 + (Number(order.wastePercentage) / 100);
+
+            // 1. Total Needed (with waste)
+            const totalYarnGramsNeeded = totalQty * pieceWeightGrams * waste;
+            const totalYarnKilos = totalYarnGramsNeeded / 1000;
+
+            // 2. Produced (Consumed) Yarn
+            const producedYarnGrams = producedQty * pieceWeightGrams * waste;
+            const producedYarnKilos = producedYarnGrams / 1000;
+            
+            // 3. Detailed Consumption (with waste)
+            const consumption = materials
+                .filter(m => m.name && m.percentage)
+                .map(m => {
+                    const percent = Number(m.percentage) / 100;
+                    const kilosNeeded = (totalYarnKilos * percent);
+                    const kilosConsumed = (producedYarnKilos * percent);
+                    return { 
+                        name: m.name, 
+                        percentage: m.percentage, 
+                        kilosNeeded: kilosNeeded,
+                        kilosConsumed: kilosConsumed
+                    };
+                });
+            
+            return { totalNeeded: totalQty, consumption, totalYarnKilos, producedYarnKilos };
+        };
+
 
         // --- CÁLCULO PROYECCIÓN Y DESVIACIÓN ---
         const calculateOrderMetrics = (machineId, order, allProductionData, allRows, globalHiddenDays) => {
@@ -149,17 +217,19 @@
             const todayIndex = allRows.findIndex(r => r.isoDate === todayISO);
             
             if (startIndex !== -1) {
+                // Production: Sum all 'actual' quantities from start date up to now
                 for (let i = startIndex; i < allRows.length; i++) {
                     const row = allRows[i];
                     produced += Number(allProductionData[row.id]?.[machineId]?.actual || 0);
 
-                    // Calculate planned production up to yesterday
+                    // Calculate planned production up to *Yesterday*
                     if (i < todayIndex) {
                         if (!globalHiddenDays.includes(row.id) && !disabledDates.includes(row.isoDate)) {
                             plannedToDate += metrics.dailyCapacity;
                         }
                     }
                     
+                    // Stop production sum after today, but allow past days to be included
                     if (new Date(row.isoDate) >= new Date(todayISO) && new Date(row.isoDate).getDate() === new Date(todayISO).getDate()) break; 
                 }
             }
@@ -242,6 +312,90 @@
             );
         };
 
+        // --- REPORTE MODAL ---
+        const ReportModal = ({ onClose, machineId, order, metrics }) => {
+            if (!order || !machineId) return null;
+
+            const machine = MACHINES.find(m => m.id === machineId);
+            const consumptionData = calculateConsumptionDetails(order, metrics.produced);
+            const consumptionBase = calculateConsumptionDetails({...order, wastePercentage: 0}, metrics.produced);
+
+            return (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in no-print" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[95vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
+                            <h3 className="font-bold text-white uppercase tracking-wider text-sm">Reporte de Producción: {machine.name} - {order.model}</h3>
+                            <div className="flex gap-2">
+                                <button onClick={() => window.print()} className="px-3 py-1 rounded bg-green-600 text-white font-bold flex items-center gap-1 hover:bg-green-500"><i data-lucide="printer" className="w-4 h-4"></i> Imprimir/PDF</button>
+                                <button onClick={onClose} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded"><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-0 custom-scrollbar report-page">
+                            <div className="report-header">
+                                <h1>REPORTE DE PRODUCCIÓN - {order.model}</h1>
+                                <p className="text-xs text-gray-500">Generado el: {new Date().toLocaleDateString('es-MX', {day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'})} por Sistema MAES</p>
+                            </div>
+
+                            <div className="report-section">
+                                <h2>📋 Datos del Pedido</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Máquina:</span><span className="report-value">{machine.name} ({machine.type})</span></div>
+                                    <div><span className="report-label">Modelo:</span><span className="report-value text-blue-700">{order.model}</span></div>
+                                    <div><span className="report-label">Cantidad Total:</span><span className="report-value">{Number(order.totalQty).toLocaleString()} piezas</span></div>
+                                    <div><span className="report-label">Inicio Planeado:</span><span className="report-value">{new Date(order.startDate).toLocaleDateString('es-MX')}</span></div>
+                                    <div><span className="report-label">Fin Estimado:</span><span className={`report-value ${metrics.finishDate === 'COMPLETADO' ? 'text-green-600' : 'text-red-600'}`}>{metrics.finishDate === 'COMPLETADO' ? 'COMPLETADO' : new Date(metrics.finishDate).toLocaleDateString('es-MX')}</span></div>
+                                </div>
+                            </div>
+
+                            <div className="report-section">
+                                <h2>📈 Avance y Desempeño</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Piezas Producidas (Real):</span><span className="report-value text-green-700">{metrics.produced.toLocaleString()} piezas</span></div>
+                                    <div><span className="report-label">Piezas Faltantes:</span><span className="report-value">{metrics.totalNeeded.toLocaleString()} piezas</span></div>
+                                    <div><span className="report-label">Progreso (%):</span><span className="report-value text-blue-700">{metrics.progress.toFixed(1)}%</span></div>
+                                    <div><span className="report-label">Producción Planeada (hasta hoy):</span><span className="report-value">{metrics.plannedToDate.toLocaleString()} piezas</span></div>
+                                    <div><span className="report-label">Desviación (vs Plan):</span><span className={`report-value ${metrics.deviation < 0 ? 'text-red-700' : 'text-green-700'}`}>{metrics.deviation.toLocaleString()} piezas</span></div>
+                                </div>
+                            </div>
+
+                            <div className="report-section">
+                                <h2>🧵 Consumo de Materia Prima (KG)</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Peso por Pieza:</span><span className="report-value">{order.pieceWeightGrams} gramos</span></div>
+                                    <div><span className="report-label">Merma Aplicada:</span><span className="report-value text-red-700">{order.wastePercentage}%</span></div>
+                                    <div><span className="report-label">**Total Hilo Requerido (con Merma):**</span><span className="report-value text-blue-700 text-lg">{consumptionData.totalYarnKilos.toFixed(2)} KG</span></div>
+                                    <div><span className="report-label">**Total Hilo Consumido (hasta hoy):**</span><span className="report-value text-green-700 text-lg">{consumptionData.producedYarnKilos.toFixed(2)} KG</span></div>
+                                    {order.wastePercentage > 0 && <div><span className="report-label text-red-500">Consumo Base (Sin Merma):</span><span className="report-value text-red-500">{consumptionBase.totalYarnKilos.toFixed(2)} KG</span></div>}
+                                </div>
+                                <h3 className="font-bold text-sm mt-4">Desglose por Hilatura (Kg):</h3>
+                                <table className="report-material-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Hilatura (%)</th>
+                                            <th>Total Requerido</th>
+                                            <th>Consumido (Hoy)</th>
+                                            <th>Faltante</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {consumptionData.consumption.map((m, i) => (
+                                            <tr key={i}>
+                                                <td>{m.name} ({m.percentage}%)</td>
+                                                <td>{m.kilosNeeded.toFixed(2)} KG</td>
+                                                <td className="font-bold text-green-700">{m.kilosConsumed.toFixed(2)} KG</td>
+                                                <td>{(m.kilosNeeded - m.kilosConsumed).toFixed(2)} KG</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+
         // --- GESTOR DE PEDIDOS ---
         const OrderManager = ({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays }) => {
             const [step, setStep] = useState(1);
@@ -249,7 +403,10 @@
             const [modelName, setModelName] = useState('');
             const [selectedMachines, setSelectedMachines] = useState([]);
             const [isEditing, setIsEditing] = useState(false);
-            const [editMachineId, setEditMachineId] = useState(null); // Used to identify the machine being edited
+            const [editMachineId, setEditMachineId] = useState(null); 
+            const [showReportModal, setShowReportModal] = useState(false);
+            const [reportConfig, setReportConfig] = useState(null);
+
 
             const [config, setConfig] = useState({ 
                 totalQty: '', 
@@ -397,10 +554,14 @@
                 return true;
             }
 
+            const handleOpenReport = (machineId, order, metrics) => {
+                setReportConfig({ machineId, order, metrics });
+                setShowReportModal(true);
+            };
+
 
             // Renderers
             const renderCalendarPicker = () => {
-                // ... (implementation of renderCalendarPicker remains the same)
                 const finishDate = calculatePreview();
                 if (!finishDate) return <div className="text-center text-red-400">Datos insuficientes para calcular</div>;
                 
@@ -410,26 +571,39 @@
                 let endIdx = allRows.findIndex(r => r.isoDate === finishDate);
                 if (finishDate === 'COMPLETADO') endIdx = startIdx + 1; 
                 if (endIdx === -1) endIdx = startIdx + 60; 
-                else endIdx += 7; 
 
-                const daysToShow = allRows.slice(startIdx, Math.min(allRows.length, endIdx + 15));
+                // Start view 7 days before the actual start date to give context
+                const viewStartIdx = Math.max(0, startIdx - 7);
+                const viewEndIdx = Math.min(allRows.length, endIdx + 15);
+
+                const daysToShow = allRows.slice(viewStartIdx, viewEndIdx);
+                const startDay = daysToShow[0];
+                const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(startDay?.shortDay) || 0;
+                const blanks = Array(startDayOffset).fill(null);
 
                 return (
                     <div className="grid grid-cols-7 gap-1">
                         {['D','L','M','M','J','V','S'].map(d => <div key={d} className="text-center text-[10px] text-slate-500 font-bold">{d}</div>)}
+                        {blanks.map((_, i) => <div key={`b-${i}`}></div>)}
                         {daysToShow.map(row => {
                             const isDisabled = config.disabledDates.includes(row.isoDate);
                             const isGlobalHidden = hiddenDays.includes(row.id);
-                            const isWithinRange = !isDisabled && !isGlobalHidden && (finishDate !== 'COMPLETADO' && row.isoDate <= finishDate);
+                            const isStartDay = row.isoDate === config.startDate;
+                            const isFinishDay = finishDate === row.isoDate;
+                            const isWithinRange = !isDisabled && !isGlobalHidden && (finishDate !== 'COMPLETADO' && row.isoDate >= config.startDate && row.isoDate <= finishDate);
+                            const isPast = new Date(row.isoDate) < new Date(config.startDate);
 
                             let bgClass = 'bg-slate-800 text-slate-500'; 
                             if (isGlobalHidden) bgClass = 'bg-slate-900 opacity-30 cursor-not-allowed';
+                            else if (isStartDay) bgClass = 'bg-blue-600 border border-blue-400 text-white';
+                            else if (isFinishDay) bgClass = 'bg-red-600 border border-red-400 text-white shadow shadow-red-900'; 
                             else if (isDisabled) bgClass = 'bg-red-900/40 text-red-500 border border-red-900'; 
-                            else if (isWithinRange) bgClass = 'bg-green-600 text-white shadow shadow-green-900'; 
+                            else if (isWithinRange) bgClass = 'bg-green-600 text-white shadow shadow-green-900';
+                            else if (isPast) bgClass = 'bg-slate-900/50 text-slate-600 cursor-not-allowed';
 
                             return (
                                 <button key={row.id} 
-                                    onClick={() => !isGlobalHidden && toggleDateDisabled(row.isoDate)}
+                                    onClick={() => !isGlobalHidden && !isPast && !isStartDay && toggleDateDisabled(row.isoDate)}
                                     className={`p-1 rounded text-[10px] font-bold h-10 flex flex-col items-center justify-center transition-all ${bgClass}`}>
                                     <span>{row.dateNum}</span>
                                     <span className="text-[6px] uppercase">{row.month}</span>
@@ -483,7 +657,7 @@
 
             const renderConfirmation = () => {
                 const { totalYarnKilos, consumption } = calculateConsumption(true);
-                const consumptionBase = calculateConsumption(false); // Consumption without waste
+                const consumptionBase = calculateConsumption(false); 
                 
                 return (
                     <div className="space-y-6 fade-in text-center">
@@ -526,7 +700,7 @@
 
             const renderCreateFlow = () => (
                 <div className="flex flex-col h-full">
-                    <div className="flex justify-between mb-6 px-2">
+                    <div className="flex justify-between mb-6 px-2 no-print">
                         {[1,2,3,4,5,6].map(s => (
                             <div key={s} className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= s ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-500'}`}>{s}</div>
                         ))}
@@ -609,7 +783,7 @@
                         {step === 6 && renderConfirmation()}
                     </div>
 
-                    <div className="mt-4 pt-4 border-t border-slate-700 flex justify-between">
+                    <div className="mt-4 pt-4 border-t border-slate-700 flex justify-between no-print">
                         {step > 1 ? <button onClick={() => setStep(s => s - 1)} className="px-4 py-2 rounded bg-slate-700 text-white">Atrás</button> : <button onClick={() => setViewMode('list')} className="px-4 py-2 rounded bg-slate-800 text-slate-400">Cancelar</button>}
                         {step < 6 ? (
                             <button onClick={() => {
@@ -629,7 +803,9 @@
                     <div className="flex flex-col h-full">
                         <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-black text-white flex items-center gap-2"><i data-lucide="clipboard-list" className="text-yellow-400"></i> Pedidos Activos</h2>
-                            <button onClick={handleStartCreate} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg transition-transform hover:scale-105"><i data-lucide="plus-circle" className="w-5 h-5"></i> Nuevo</button>
+                            <div className="flex gap-3">
+                                <button onClick={handleStartCreate} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg transition-transform hover:scale-105"><i data-lucide="plus-circle" className="w-5 h-5"></i> Nuevo</button>
+                            </div>
                         </div>
 
                         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
@@ -650,6 +826,7 @@
                                             </div>
                                             <div className="flex flex-col items-end gap-2">
                                                 <div className="flex gap-1">
+                                                     <button onClick={() => handleOpenReport(m.id, order, metrics)} className="p-1.5 bg-green-700/50 hover:bg-green-700 rounded text-green-400" title="Generar Reporte PDF"><i data-lucide="file-text" className="w-4 h-4"></i></button>
                                                      <button onClick={() => handleStartEdit(m.id, order)} className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-blue-400"><i data-lucide="pencil" className="w-4 h-4"></i></button>
                                                      <button onClick={() => handleDelete(m.id)} className="p-1.5 bg-slate-800 hover:bg-red-900/50 rounded text-red-400"><i data-lucide="trash-2" className="w-4 h-4"></i></button>
                                                 </div>
@@ -680,6 +857,7 @@
                                 )
                             })}
                         </div>
+                        {showReportModal && reportConfig && <ReportModal onClose={() => setShowReportModal(false)} {...reportConfig} />}
                     </div>
                 );
             };
@@ -687,7 +865,7 @@
             return (
                 <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
+                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
                             <span className="font-bold text-white uppercase tracking-wider text-sm">Gestión de Producción</span>
                             <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6 hover:text-white"></i></button>
                         </div>
@@ -750,7 +928,7 @@
 
         const CalendarModal = ({ onClose, onSelectDate, allRows }) => {
             // ... (CalendarModal remains the same)
-            const [viewDate, setViewDate] = useState(new Date(2025, 9, 1)); 
+            const [viewDate, setViewDate] = useState(new Date()); 
             const handleMonthChange = (delta) => { const d = new Date(viewDate); d.setMonth(d.getMonth() + delta); setViewDate(d); };
             const monthRows = allRows.filter(r => r.monthIndex === viewDate.getMonth() && r.year === viewDate.getFullYear());
             const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(monthRows[0]?.shortDay) || 0;
@@ -822,6 +1000,8 @@
 
             const handleDateSelect = (row) => { setWeekOffset(Math.floor(row.index / 7)); setShowCalendar(false); };
 
+            const canViewGraph = user && (user.canViewGraph || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT);
+
             const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
             const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7); }, [weekOffset]);
             const weekLabel = useMemo(() => getWeekLabel(currentWeekRows), [currentWeekRows]);
@@ -873,7 +1053,7 @@
                                             <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center"><i data-lucide="cpu" className="w-5 h-5 opacity-50"></i></div><div><h3 className="font-black text-slate-200 text-sm">{m.name.replace('MAQ ','M-')}</h3><p className="text-[10px] text-slate-500 font-medium">{m.type}</p></div></div>
                                             {(metrics.progress > 0 || isPlannedDay) && <div className="text-[10px] font-bold text-blue-400 bg-blue-900/30 px-2 py-0.5 rounded">{metrics.progress.toFixed(0)}%</div>}
                                         </div>
-                                        {order && order.totalQty > 0 && (
+                                        {order && order.totalQty > 0 && canViewGraph && (
                                             <div className="mb-3">
                                                 <div className="text-[10px] text-yellow-500 font-bold uppercase flex justify-between border-b border-slate-700 pb-1"><span>{order.model}</span><span>{Number(order.totalQty).toLocaleString()} pzas</span></div>
                                                 <div className="h-1 w-full bg-slate-700 mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
@@ -935,7 +1115,9 @@
                                                             {order && order.totalQty > 0 ? (
                                                                 <div className="mt-1 w-full px-2">
                                                                     <div className="flex justify-between items-center text-[9px] font-black text-yellow-400 uppercase leading-none mb-1"><span>{order.model}</span><span>{metrics.progress.toFixed(0)}%</span></div>
-                                                                    <div className="h-1 bg-slate-700 rounded-full overflow-hidden w-full"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
+                                                                    {canViewGraph && (
+                                                                        <div className="h-1 bg-slate-700 rounded-full overflow-hidden w-full"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
+                                                                    )}
                                                                     <span className="block text-[8px] text-slate-500 mt-1 font-bold">Fin: <span className={metrics.finishDate === 'COMPLETADO' ? 'text-green-400' : 'text-red-400'}>{metrics.finishDate === 'COMPLETADO' ? 'OK' : metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}) : '-'}</span></span>
                                                                 </div>
                                                             ) : <span className="text-[9px] text-slate-600">Sin Orden</span>}
