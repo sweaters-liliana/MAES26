@@ -97,17 +97,18 @@
             DEVELOPMENT: 'development',
             OPERATOR: 'operator'
         };
-
-        const USERS = {
+        
+        // La lista de usuarios inicial se ha movido a Firestore
+        const DEFAULT_USERS = {
             '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración', canManageOrders: true },
             '0000': { name: 'Prisciliano Espinoza', role: ROLES.COMMENTATOR, area: 'Comentarios' },
             '2222': { name: 'Susana', role: ROLES.OBSERVER, area: 'Observación', canManageOrders: true, canViewGraph: true }, 
-            '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo', canManageOrders: true, canViewGraph: true }, 
+            '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo', canManageOrders: true, canViewGraph: true, canManageUsers: true }, 
             '3333': { name: 'Tejido', role: ROLES.OPERATOR, area: 'Operadores Gral' },
             '1392': { name: 'Andrés', role: ROLES.OPERATOR, area: 'Tejido (A)', allowedSlots: [0] },
             '7914': { name: 'Balta', role: ROLES.OPERATOR, area: 'Tejido (B)', allowedSlots: [1] }
         };
-        
+
         const MACHINES = [
             { id: 'm35', name: 'MAQ 35', type: 'SANTONI SM8' }, { id: 'm39', name: 'MAQ 39', type: 'SANTONI SM8' },
             { id: 'm40', name: 'MAQ 40', type: 'SANTONI SM8' }, { id: 'm36', name: 'MAQ 36', type: 'CIXING GE82' },
@@ -312,6 +313,138 @@
             );
         };
 
+        // --- GESTIÓN DE USUARIOS MODAL ---
+        const UserManagementModal = ({ onClose, users, onSaveUser, onDeleteUser }) => {
+            const [editingUser, setEditingUser] = useState(null); // { id: pin, name: '', role: '', area: '', ... }
+            const [pin, setPin] = useState('');
+            const [name, setName] = useState('');
+            const [role, setRole] = useState(ROLES.OPERATOR);
+            const [area, setArea] = useState('');
+
+            const allUsersArray = Object.entries(users).map(([pin, data]) => ({ pin, ...data }));
+            const availableRoles = Object.values(ROLES);
+
+            const startEdit = (user) => {
+                setEditingUser(user);
+                setPin(user.pin);
+                setName(user.name);
+                setRole(user.role);
+                setArea(user.area || '');
+            };
+
+            const handleSave = () => {
+                if (!pin || !name || !role) {
+                    alert('Todos los campos son obligatorios (PIN, Nombre, Rol)');
+                    return;
+                }
+                if (pin.length !== 4 || isNaN(Number(pin))) {
+                    alert('El PIN debe ser un número de 4 dígitos.');
+                    return;
+                }
+                if (!editingUser && users[pin]) {
+                    alert('El PIN ya existe. Usa un PIN diferente o edita el usuario existente.');
+                    return;
+                }
+
+                const payload = { 
+                    name, 
+                    role, 
+                    area,
+                    // Mantener permisos existentes si se edita, o usar valores por defecto
+                    canManageOrders: editingUser ? editingUser.canManageOrders : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
+                    canViewGraph: editingUser ? editingUser.canViewGraph : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
+                    canManageUsers: editingUser ? editingUser.canManageUsers : role === ROLES.DEVELOPMENT,
+                    allowedSlots: editingUser ? editingUser.allowedSlots : (role === ROLES.OPERATOR ? [] : undefined),
+                };
+
+                onSaveUser(pin, payload);
+                setEditingUser(null);
+                setPin('');
+                setName('');
+                setRole(ROLES.OPERATOR);
+                setArea('');
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
+                            <h3 className="font-bold text-white uppercase tracking-wider text-sm flex items-center gap-2">
+                                <i data-lucide="users" className="w-5 h-5 text-yellow-400"></i>
+                                Gestión de Usuarios
+                            </h3>
+                            <button onClick={onClose} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded"><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar flex gap-6">
+                            
+                            {/* Formulario de Creación/Edición */}
+                            <div className="w-1/3 shrink-0 bg-slate-900 p-4 rounded-xl border border-slate-700 h-fit sticky top-0">
+                                <h4 className="text-lg font-bold text-white mb-4 border-b border-slate-700 pb-2">{editingUser ? `Editar: ${editingUser.name}` : 'Crear Nuevo Usuario'}</h4>
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="block text-xs font-bold text-blue-400 mb-1">PIN (4 Dígitos)</label>
+                                        <input type="number" value={pin} onChange={e => setPin(e.target.value.slice(0, 4))} disabled={!!editingUser} placeholder="Ej: 1352" className="w-full bg-slate-700 text-white p-2 rounded text-lg font-bold outline-none disabled:bg-slate-700/50 disabled:text-slate-400" />
+                                        {!!editingUser && <p className="text-[10px] text-red-400 mt-1">El PIN no se puede cambiar.</p>}
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-blue-400 mb-1">Nombre</label>
+                                        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Vallejo" className="w-full bg-slate-700 text-white p-2 rounded outline-none" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-blue-400 mb-1">Área (Opcional)</label>
+                                        <input type="text" value={area} onChange={e => setArea(e.target.value)} placeholder="Ej: Desarrollo" className="w-full bg-slate-700 text-white p-2 rounded outline-none" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-blue-400 mb-1">Rol</label>
+                                        <select value={role} onChange={e => setRole(e.target.value)} className="w-full bg-slate-700 text-white p-2 rounded outline-none">
+                                            {availableRoles.map(r => (<option key={r} value={r} className="uppercase">{r}</option>))}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="mt-6 flex flex-col gap-2">
+                                    <button onClick={handleSave} className={`w-full py-2 rounded-lg font-bold text-sm ${editingUser ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white`}>
+                                        {editingUser ? 'Guardar Cambios' : 'Crear Usuario'}
+                                    </button>
+                                    {editingUser && (
+                                        <button onClick={() => { setEditingUser(null); setPin(''); setName(''); setRole(ROLES.OPERATOR); setArea(''); }} className="w-full py-2 rounded-lg font-bold text-sm bg-slate-700 text-slate-300 hover:bg-slate-600">
+                                            Cancelar Edición
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Lista de Usuarios */}
+                            <div className="flex-1">
+                                <h4 className="text-lg font-bold text-white mb-4">Lista Actual ({allUsersArray.length})</h4>
+                                <div className="space-y-3">
+                                    {allUsersArray.sort((a,b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name)).map(u => (
+                                        <div key={u.pin} className={`bg-slate-900 p-4 rounded-xl border ${editingUser?.pin === u.pin ? 'border-yellow-500' : 'border-slate-700'} flex justify-between items-center transition-all`}>
+                                            <div className="flex-1">
+                                                <p className="text-lg font-bold text-white">{u.name}</p>
+                                                <div className="flex items-center gap-2 text-sm">
+                                                    <span className="text-blue-400 font-bold uppercase">{u.role}</span>
+                                                    <span className="text-slate-500">|</span>
+                                                    <span className="text-slate-500">{u.area || 'Sin Área'}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-4 shrink-0">
+                                                <span className="text-3xl font-black text-yellow-500/80 tracking-widest">{u.pin}</span>
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => startEdit(u)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-blue-400"><i data-lucide="pencil" className="w-4 h-4"></i></button>
+                                                    <button onClick={() => onDeleteUser(u.pin)} className="p-2 bg-red-900/50 hover:bg-red-700/50 rounded text-red-400"><i data-lucide="trash-2" className="w-4 h-4"></i></button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        
         // --- REPORTE MODAL ---
         const ReportModal = ({ onClose, machineId, order, metrics }) => {
             if (!order || !machineId) return null;
@@ -812,7 +945,7 @@
                             {activeMachines.length === 0 && <div className="text-center text-slate-500 py-10">No hay pedidos activos.</div>}
                             {activeMachines.map(m => {
                                 const order = ordersData[m.id];
-                                const metrics = calculateOrderMetrics(m.id, order, allProductionData, allRows, hiddenDays);
+                                const metrics = calculateOrderMetrics(m.id, order, allProductionData, ALL_ROWS, hiddenDays);
                                 
                                 return (
                                     <div key={m.id} className="bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-md relative overflow-hidden group">
@@ -877,12 +1010,11 @@
             );
         };
 
-        const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall }) => {
-            // ... (LoginScreen remains the same)
+        const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall, users }) => {
             const [pin, setPin] = useState('');
             const handleLogin = (e) => {
                 e.preventDefault();
-                const user = USERS[pin]; 
+                const user = users[pin]; 
                 if (user) setAuthenticatedUser({ ...user, id: pin }); 
                 else alert('PIN incorrecto');
             };
@@ -903,7 +1035,6 @@
         };
 
         const VisibilityModal = ({ onClose, currentHiddenMachines, currentHiddenDays, onSaveVisibility, allRows }) => {
-            // ... (VisibilityModal remains the same)
             const [hiddenM, setHiddenM] = useState([...currentHiddenMachines]);
             const [hiddenD, setHiddenD] = useState([...currentHiddenDays]);
             const [dateToHide, setDateToHide] = useState('');
@@ -927,7 +1058,6 @@
         };
 
         const CalendarModal = ({ onClose, onSelectDate, allRows }) => {
-            // ... (CalendarModal remains the same)
             const [viewDate, setViewDate] = useState(new Date()); 
             const handleMonthChange = (delta) => { const d = new Date(viewDate); d.setMonth(d.getMonth() + delta); setViewDate(d); };
             const monthRows = allRows.filter(r => r.monthIndex === viewDate.getMonth() && r.year === viewDate.getFullYear());
@@ -948,6 +1078,7 @@
 
         const App = () => {
             const [user, setUser] = useState(null);
+            const [usersData, setUsersData] = useState(DEFAULT_USERS); // Dynamic users data
             const [data, setData] = useState({});
             const [ordersData, setOrdersData] = useState({});
             const [visibilityConfig, setVisibilityConfig] = useState({ machines: [], days: [] });
@@ -959,6 +1090,7 @@
             const [showOrderManager, setShowOrderManager] = useState(false);
             const [showVisibilityModal, setShowVisibilityModal] = useState(false);
             const [showCalendar, setShowCalendar] = useState(false);
+            const [showUserManagementModal, setShowUserManagementModal] = useState(false);
             const [deferredPrompt, setDeferredPrompt] = useState(null);
 
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
@@ -970,7 +1102,16 @@
                         const unsubDb = onSnapshot(collection(db, 'produccion_2026'), (snap) => { const d = {}; snap.forEach(doc => d[doc.id] = doc.data()); setData(d); setLoading(false); });
                         const unsubSettings = onSnapshot(doc(db, 'settings', 'visibility'), (docSnap) => { if (docSnap.exists()) setVisibilityConfig(docSnap.data()); });
                         const unsubOrders = onSnapshot(doc(db, 'settings', 'orders'), (docSnap) => { if (docSnap.exists()) setOrdersData(docSnap.data()); });
-                        return () => { unsubDb(); unsubSettings(); unsubOrders(); };
+                        // New: Listen for dynamic users data
+                        const unsubUsers = onSnapshot(doc(db, 'settings', 'users'), (docSnap) => { 
+                            if (docSnap.exists()) {
+                                setUsersData(docSnap.data()); 
+                            } else {
+                                // Initialize users if not found (First run)
+                                setDoc(doc(db, 'settings', 'users'), DEFAULT_USERS);
+                            }
+                        });
+                        return () => { unsubDb(); unsubSettings(); unsubOrders(); unsubUsers(); };
                     } else signInAnonymously(auth);
                 });
                 return () => unsubAuth();
@@ -998,15 +1139,55 @@
 
             const handleSaveVisibility = async (hiddenMachines, hiddenDays) => { await setDoc(doc(db, 'settings', 'visibility'), { machines: hiddenMachines, days: hiddenDays }, { merge: true }); };
 
+            const handleSaveUser = async (pin, userData) => {
+                try {
+                    // Crea el nuevo objeto de usuarios
+                    const newUsers = { ...usersData, [pin]: userData };
+                    // Sobrescribe el documento 'users' con la lista completa de usuarios
+                    await setDoc(doc(db, 'settings', 'users'), newUsers);
+                    
+                    // Si el usuario actual fue editado, refresca sus permisos
+                    if (user.id === pin) setUser({...userData, id: pin});
+                    
+                    console.log(`✅ Usuario ${pin} - ${userData.name} guardado/actualizado con éxito.`);
+                    alert(`Usuario ${userData.name} guardado con éxito!`);
+                } catch (error) {
+                    console.error("Error al guardar usuario:", error);
+                    alert(`Error al guardar usuario: ${error.message}`);
+                }
+            };
+
+            const handleDeleteUser = async (pinToDelete) => {
+                if (pinToDelete === user.id) {
+                    alert('No puedes eliminar tu propio usuario mientras estás logueado.');
+                    return;
+                }
+                if (confirm(`¿Estás seguro de que deseas eliminar al usuario con PIN: ${pinToDelete}?`)) {
+                    try {
+                        // Crea el nuevo objeto sin el PIN a eliminar
+                        const { [pinToDelete]: _, ...newUsers } = usersData;
+                        // Sobrescribe la lista completa de usuarios en Firestore
+                        await setDoc(doc(db, 'settings', 'users'), newUsers);
+
+                        console.log(`✅ Usuario con PIN ${pinToDelete} eliminado con éxito.`);
+                        alert(`Usuario con PIN ${pinToDelete} eliminado con éxito.`);
+                    } catch (error) {
+                        console.error("Error al eliminar usuario:", error);
+                        alert(`Error al eliminar usuario: ${error.message}`);
+                    }
+                }
+            };
+
             const handleDateSelect = (row) => { setWeekOffset(Math.floor(row.index / 7)); setShowCalendar(false); };
 
-            const canViewGraph = user && (user.canViewGraph || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT);
-
+            const canViewGraph = user && (user.canViewGraph || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT || user.role === ROLES.OBSERVER);
+            const canManageUsers = user && user.role === ROLES.DEVELOPMENT; // Explicitly for developer
+            
             const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
             const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7); }, [weekOffset]);
             const weekLabel = useMemo(() => getWeekLabel(currentWeekRows), [currentWeekRows]);
             
-            const canManageOrders = user && (user.canManageOrders || user.role === ROLES.DEVELOPMENT); 
+            const canManageOrders = user && (user.canManageOrders || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT); 
             const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
             const canEditSlot = (machineId, slotIndex) => {
                 if (!user) return false;
@@ -1015,7 +1196,7 @@
                 return false; 
             };
 
-            if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={() => deferredPrompt?.prompt()} />;
+            if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={() => deferredPrompt?.prompt()} users={usersData} />;
             if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900"><i data-lucide="loader-2" className="animate-spin w-12 h-12 text-blue-500"></i></div>;
 
             const MobileView = () => {
@@ -1032,6 +1213,7 @@
                              <div className="p-3 flex justify-between items-center bg-slate-900/50"> 
                                 <div className="flex items-center gap-2"><i data-lucide="user-check" className="w-5 h-5 text-blue-400"></i><div><p className="text-sm font-bold text-slate-100">{user.name.split(' ')[0]}</p><p className="text-[10px] text-slate-500 uppercase font-medium">{user.area}</p></div></div>
                                 <div className="flex gap-2">
+                                    {canManageUsers && <button onClick={() => setShowUserManagementModal(true)} className="w-8 h-8 bg-yellow-600 rounded-lg flex items-center justify-center text-white shadow-lg"><i data-lucide="users" className="w-4 h-4"></i></button>}
                                     {canManageOrders && <button onClick={() => setShowOrderManager(true)} className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg animate-pulse"><i data-lucide="clipboard-list" className="w-4 h-4"></i></button>}
                                     {canConfig && <button onClick={() => setShowVisibilityModal(true)} className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-slate-300"><i data-lucide="settings" className="w-4 h-4"></i></button>}
                                 </div>
@@ -1062,7 +1244,7 @@
                                         <div className={`rounded-lg p-2 border border-slate-700/50 ${isPlannedDay && !isHiddenDay ? 'bg-yellow-900/10' : 'bg-slate-900/50'}`}>
                                             {isPlannedDay && !isHiddenDay && <div className="text-[8px] text-yellow-400 text-center font-bold uppercase mb-1">{order.model}</div>}
                                             <div className="grid grid-cols-2 gap-2 mb-1"><div className="text-[9px] text-center font-bold text-blue-400 uppercase tracking-widest border-b border-blue-900 pb-1">Andrés</div><div className="text-[9px] text-center font-bold text-orange-400 uppercase tracking-widest border-b border-orange-900 pb-1">Balta</div></div>
-                                            <div className="grid grid-cols-2 gap-2">{[0,1].map(idx => (<div key={idx} className="h-16"><ProductionSlot slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} /></div>))}</div>
+                                            <div className="grid grid-cols-2 gap-2 flex-1 h-16">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
                                         </div>
                                     </div>
                                 );
@@ -1092,6 +1274,7 @@
                         <div className="flex items-center gap-4">
                             <div className="text-right px-3 py-1 bg-slate-900/50 rounded-lg border border-slate-700/50"><p className="text-sm font-bold text-blue-400">{user.name.toUpperCase()}</p><p className="text-[10px] text-slate-500 uppercase font-medium leading-none">{user.area}</p></div>
                             <div className="flex gap-2">
+                                {canManageUsers && <button onClick={() => setShowUserManagementModal(true)} className="bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 shadow-lg transition-all"><i data-lucide="users" className="w-4 h-4"></i> Usuarios</button>}
                                 {canManageOrders && <button onClick={() => setShowOrderManager(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 shadow-lg hover:scale-105 transition-all"><i data-lucide="clipboard-list" className="w-4 h-4"></i> Pedidos</button>}
                                 {canConfig && <button onClick={() => setShowVisibilityModal(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"><i data-lucide="settings" className="w-5 h-5"></i></button>}
                                 <button onClick={() => setUser(null)} className="p-2 text-red-400 hover:bg-red-900/20 rounded"><i data-lucide="log-out" className="w-5 h-5"></i></button>
@@ -1170,6 +1353,7 @@
                     {showOrderManager && <OrderManager onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} />}
                     {showVisibilityModal && <VisibilityModal onClose={() => setShowVisibilityModal(false)} currentHiddenMachines={visibilityConfig.machines || []} currentHiddenDays={visibilityConfig.days || []} onSaveVisibility={handleSaveVisibility} allRows={ALL_ROWS} />}
                     {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} onSelectDate={handleDateSelect} allRows={ALL_ROWS} />}
+                    {canManageUsers && showUserManagementModal && <UserManagementModal onClose={() => setShowUserManagementModal(false)} users={usersData} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />}
                     <div className="block md:hidden h-full"><MobileView /></div>
                     <div className="hidden md:block h-full"><DesktopView /></div>
                 </div>
