@@ -69,11 +69,10 @@
         };
 
         const USERS = {
-            '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración' },
+            '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración', canManageOrders: true },
             '0000': { name: 'Prisciliano Espinoza', role: ROLES.COMMENTATOR, area: 'Comentarios' },
             '2222': { name: 'Susana', role: ROLES.OBSERVER, area: 'Observación', canManageOrders: true }, 
             '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo', canManageOrders: true }, 
-            '9090': { name: 'Marco', role: ROLES.DEVELOPMENT, area: 'Planeación', canManageOrders: true }, // NUEVO USUARIO
             '3333': { name: 'Tejido', role: ROLES.OPERATOR, area: 'Operadores Gral' },
             '1392': { name: 'Andrés', role: ROLES.OPERATOR, area: 'Tejido (A)', allowedSlots: [0] },
             '7914': { name: 'Balta', role: ROLES.OPERATOR, area: 'Tejido (B)', allowedSlots: [1] }
@@ -125,23 +124,22 @@
             return f.month === l.month ? `${f.month} ${f.year}` : `${f.month} - ${l.month} ${l.year}`;
         };
 
-        // --- CÁLCULO PROYECCIÓN (Actualizado con días desactivados) ---
+        // --- CÁLCULO PROYECCIÓN ---
         const calculateOrderMetrics = (machineId, order, allProductionData, allRows, globalHiddenDays) => {
             if (!order || !order.totalQty || !order.timePerPieceMin || !order.startDate) {
                 return { isPlanned: false, finishDate: null, totalNeeded: 0, progress: 0, produced: 0 };
             }
             
             const totalQty = Number(order.totalQty);
-            // Calcular horas diarias basadas en operadores seleccionados (si existen) o dailyHours legacy
             let dailyHours = 0;
             if (order.operators && Array.isArray(order.operators)) {
-                dailyHours = order.operators.length * 12; // 1 op = 12h, 2 ops = 24h
+                dailyHours = order.operators.length * 12; 
             } else {
                 dailyHours = Number(order.dailyHours || 12);
             }
             
             const timePerPieceMin = Number(order.timePerPieceMin);
-            const disabledDates = order.disabledDates || []; // Días desactivados manualmente en el pedido
+            const disabledDates = order.disabledDates || []; 
 
             // 1. Producción Real
             let produced = 0;
@@ -166,7 +164,6 @@
             
             // 2. Proyección Futura
             let projRemaining = remainingQty;
-            // Empezamos a proyectar desde HOY o desde StartDate si es futuro
             let currentIdx = startIndex !== -1 ? startIndex : 0;
             const todayIdx = allRows.findIndex(r => r.isoDate >= new Date().toISOString().split('T')[0]);
             if (todayIdx > currentIdx) currentIdx = todayIdx;
@@ -175,7 +172,6 @@
 
             for (let i = currentIdx; i < allRows.length; i++) {
                 const row = allRows[i];
-                // Si el día está oculto globalmente O desactivado en el pedido
                 if (globalHiddenDays.includes(row.id) || disabledDates.includes(row.isoDate)) continue;
                 
                 projRemaining -= dailyCapacity; 
@@ -216,21 +212,19 @@
             );
         };
 
-        // --- GESTOR DE PEDIDOS (MODIFICADO) ---
+        // --- GESTOR DE PEDIDOS ---
         const OrderManager = ({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays }) => {
             const [step, setStep] = useState(1);
             const [viewMode, setViewMode] = useState('list'); 
             
-            // Estado del formulario
             const [modelName, setModelName] = useState('');
             const [selectedMachines, setSelectedMachines] = useState([]);
-            // Configuración
             const [config, setConfig] = useState({ 
                 totalQty: '', 
                 timePerPiece: '', 
                 startDate: new Date().toISOString().split('T')[0],
-                operators: ['Andrés', 'Balta'], // Por defecto ambos
-                disabledDates: [] // Días específicos desactivados
+                operators: ['Andrés', 'Balta'], 
+                disabledDates: []
             });
             const [isEditing, setIsEditing] = useState(false);
 
@@ -242,7 +236,6 @@
                 setConfig(prev => {
                     const current = prev.operators;
                     if (current.includes(op)) {
-                        // Evitar deseleccionar ambos
                         if (current.length === 1) return prev; 
                         return { ...prev, operators: current.filter(o => o !== op) };
                     }
@@ -283,7 +276,7 @@
             const handleStartEdit = (machineId, orderData) => {
                 setIsEditing(true);
                 setModelName(orderData.model);
-                setSelectedMachines([machineId]); // Al editar, nos enfocamos en una máquina, aunque el usuario puede añadir más
+                setSelectedMachines([machineId]); 
                 setConfig({
                     totalQty: orderData.totalQty,
                     timePerPiece: orderData.timePerPieceMin,
@@ -308,8 +301,8 @@
                         totalQty: Number(config.totalQty),
                         timePerPieceMin: Number(config.timePerPiece),
                         startDate: config.startDate,
-                        operators: config.operators, // Guardamos nombres
-                        dailyHours: config.operators.length * 12, // Guardamos horas para compatibilidad
+                        operators: config.operators, 
+                        dailyHours: config.operators.length * 12, 
                         disabledDates: config.disabledDates
                     };
                     onSaveOrders(mid, orderPayload);
@@ -317,20 +310,17 @@
                 setViewMode('list');
             };
 
-            // Helper para renderizar calendario simple
             const renderCalendarPicker = () => {
                 const finishDate = calculatePreview();
                 if (!finishDate) return <div className="text-center text-red-400">Datos insuficientes para calcular</div>;
                 
-                // Generar rango de días para mostrar
                 const startIdx = allRows.findIndex(r => r.isoDate === config.startDate);
                 if (startIdx === -1) return null;
 
-                // Mostramos un buffer de días (ej. 45 días o hasta el final + 1 semana)
                 let endIdx = allRows.findIndex(r => r.isoDate === finishDate);
-                if (finishDate === 'COMPLETADO') endIdx = startIdx + 1; // Solo visual
-                if (endIdx === -1) endIdx = startIdx + 60; // Default si se va muy lejos
-                else endIdx += 7; // Buffer visual
+                if (finishDate === 'COMPLETADO') endIdx = startIdx + 1; 
+                if (endIdx === -1) endIdx = startIdx + 60; 
+                else endIdx += 7; 
 
                 const daysToShow = allRows.slice(startIdx, Math.min(allRows.length, endIdx + 15));
 
@@ -340,13 +330,12 @@
                         {daysToShow.map(row => {
                             const isDisabled = config.disabledDates.includes(row.isoDate);
                             const isGlobalHidden = hiddenDays.includes(row.id);
-                            // Determinar si está dentro del rango productivo
                             const isWithinRange = !isDisabled && !isGlobalHidden && (finishDate !== 'COMPLETADO' && row.isoDate <= finishDate);
 
-                            let bgClass = 'bg-slate-800 text-slate-500'; // Default inactivo/futuro
+                            let bgClass = 'bg-slate-800 text-slate-500'; 
                             if (isGlobalHidden) bgClass = 'bg-slate-900 opacity-30 cursor-not-allowed';
-                            else if (isDisabled) bgClass = 'bg-red-900/40 text-red-500 border border-red-900'; // Desactivado manual
-                            else if (isWithinRange) bgClass = 'bg-green-600 text-white shadow shadow-green-900'; // Activo productivo
+                            else if (isDisabled) bgClass = 'bg-red-900/40 text-red-500 border border-red-900'; 
+                            else if (isWithinRange) bgClass = 'bg-green-600 text-white shadow shadow-green-900'; 
 
                             return (
                                 <button key={row.id} 
@@ -659,7 +648,6 @@
             };
 
             const handleDeleteOrder = async (machineId) => {
-                // Para "borrar" un pedido, actualizamos el campo con un objeto vacío o totalQty 0
                 await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, lastUpdated: serverTimestamp() } }, { merge: true });
             };
 
