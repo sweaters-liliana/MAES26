@@ -10,6 +10,32 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0f172a">
 
+    <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/b485675244763fa19286193bba49b7a5e5c60ec7/icon%20maes.svg">
+    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/b485675244763fa19286193bba49b7a5e5c60ec7/icon%20maes.svg">
+    
+    <script>
+        const manifestData = {
+            "name": "MAES26 Control",
+            "short_name": "MAES26",
+            "start_url": ".",
+            "display": "standalone",
+            "background_color": "#0f172a",
+            "theme_color": "#0f172a",
+            "icons": [{
+                "src": "https://raw.githubusercontent.com/sweaters-liliana/MAES26/b485675244763fa19286193bba49b7a5e5c60ec7/icon%20maes.svg",
+                "sizes": "any",
+                "type": "image/svg+xml"
+            }]
+        };
+        const stringManifest = JSON.stringify(manifestData);
+        const blob = new Blob([stringManifest], {type: 'application/json'});
+        const manifestURL = URL.createObjectURL(blob);
+        const link = document.createElement('link');
+        link.rel = 'manifest';
+        link.href = manifestURL;
+        document.head.appendChild(link);
+    </script>
+
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -98,7 +124,6 @@
             OPERATOR: 'operator'
         };
         
-        // La lista de usuarios inicial se ha movido a Firestore
         const DEFAULT_USERS = {
             '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración', canManageOrders: true },
             '0000': { name: 'Prisciliano Espinoza', role: ROLES.COMMENTATOR, area: 'Comentarios' },
@@ -353,26 +378,19 @@
         canManageOrders: editingUser ? editingUser.canManageOrders : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
         canViewGraph: editingUser ? editingUser.canViewGraph : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
         canManageUsers: editingUser ? editingUser.canManageUsers : role === ROLES.DEVELOPMENT,
-        // CORRECCI N CLAVE AQU : Inicializa siempre a [] si es operador, o toma el valor existente.
-        // Si no es operador y no tiene valor (new user), no incluimos el campo, o lo inicializamos a un array vac o [] si es necesario mantenerlo.
-        // Optaremos por inicializar a [] para simplificar la l gica de setDoc, ya que no hace da o que est  vac o.
+        
         allowedSlots: (editingUser?.allowedSlots && role !== ROLES.OPERATOR) 
             ? editingUser.allowedSlots 
-            : (role === ROLES.OPERATOR ? (editingUser?.allowedSlots || []) : []) // Si es OPERATOR, toma el existente o [], si no es OPERATOR, tambi n asignamos []
+            : (role === ROLES.OPERATOR ? (editingUser?.allowedSlots || []) : []) 
     };
     
-    // **OPCI N M S LIMPIA (Recomendada):** Eliminar el campo si no es necesario, para no enviar 'undefined'.
-    // Si el rol NO es OPERATOR, el campo allowedSlots es innecesario.
-    // Aunque tu error es por 'undefined', si no quieres el campo en Firestore para ADMIN/DEV, haz esto:
     if (role !== ROLES.OPERATOR) {
         delete payload.allowedSlots;
     } else {
-        // Asegura que, si es operador, el campo existe y es un array (vac o o con datos)
         payload.allowedSlots = editingUser?.allowedSlots || [];
     }
 
     onSaveUser(pin, payload);
-    // ... (reseteo de estados) ...
 };
 
             return (
@@ -1020,25 +1038,43 @@
             );
         };
 
-        const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall, users }) => {
+        const LoginScreen = ({ setAuthenticatedUser, installPrompt, setDeferredPrompt, users }) => {
             const [pin, setPin] = useState('');
+
             const handleLogin = (e) => {
                 e.preventDefault();
                 const user = users[pin]; 
                 if (user) setAuthenticatedUser({ ...user, id: pin }); 
                 else alert('PIN incorrecto');
             };
+
+            const handleInstallClick = async () => {
+                if (!installPrompt) return;
+                installPrompt.prompt();
+                const { outcome } = await installPrompt.userChoice;
+                // Si el usuario instaló o canceló, limpiamos el prompt para ocultar el botón
+                setDeferredPrompt(null);
+            };
+
             return (
                 <div className="flex items-center justify-center h-full bg-slate-900 p-4">
                     <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center border border-slate-700 relative">
-                        <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg"><i data-lucide="grid" className="w-8 h-8"></i></div>
+                        <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg overflow-hidden">
+                             <img src="https://raw.githubusercontent.com/sweaters-liliana/MAES26/b485675244763fa19286193bba49b7a5e5c60ec7/icon%20maes.svg" alt="MAES Logo" className="w-full h-full object-cover p-2" />
+                        </div>
                         <h2 className="text-2xl font-black text-white mb-2">MAES - TEJIDO</h2>
                         <p className="text-slate-400 mb-8">Control & Planeación</p>
                         <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
                             <input type="tel" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="• • • •" className="w-full text-center text-4xl p-4 bg-slate-900 border-2 border-slate-700 rounded-xl tracking-[0.2em] focus:border-blue-500 outline-none font-bold text-white password-mask" autoFocus />
                             <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-blue-500 shadow-lg">INGRESAR</button>
                         </form>
-                        {installPrompt && (<div className="mt-8 pt-6 border-t border-slate-700"><button onClick={onInstall} className="flex items-center justify-center gap-2 w-full bg-slate-700 text-slate-200 py-3 rounded-lg font-bold text-sm border border-slate-600"><i data-lucide="download" className="w-4 h-4"></i>Instalar App</button></div>)}
+                        {installPrompt && (
+                            <div className="mt-8 pt-6 border-t border-slate-700 fade-in">
+                                <button onClick={handleInstallClick} className="flex items-center justify-center gap-2 w-full bg-slate-700 text-slate-200 py-3 rounded-lg font-bold text-sm border border-slate-600 hover:bg-slate-600 hover:text-white transition-all">
+                                    <i data-lucide="download" className="w-4 h-4"></i>Instalar App
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             );
@@ -1104,7 +1140,16 @@
             const [deferredPrompt, setDeferredPrompt] = useState(null);
 
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
-            useEffect(() => { const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); }; window.addEventListener('beforeinstallprompt', handler); return () => window.removeEventListener('beforeinstallprompt', handler); }, []);
+            
+            // Escuchar el evento de instalación
+            useEffect(() => { 
+                const handler = (e) => { 
+                    e.preventDefault(); 
+                    setDeferredPrompt(e); 
+                }; 
+                window.addEventListener('beforeinstallprompt', handler); 
+                return () => window.removeEventListener('beforeinstallprompt', handler); 
+            }, []);
             
             useEffect(() => {
                 const unsubAuth = onAuthStateChanged(auth, (u) => {
@@ -1206,7 +1251,7 @@
                 return false; 
             };
 
-            if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={() => deferredPrompt?.prompt()} users={usersData} />;
+            if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} setDeferredPrompt={setDeferredPrompt} users={usersData} />;
             if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900"><i data-lucide="loader-2" className="animate-spin w-12 h-12 text-blue-500"></i></div>;
 
             const MobileView = () => {
