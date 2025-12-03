@@ -72,7 +72,7 @@
     <script type="text/babel" data-type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp, getDocs, writeBatch, addDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
         const { useState, useEffect, useMemo } = React;
 
@@ -98,6 +98,7 @@
             OPERATOR: 'operator'
         };
         
+        // La lista de usuarios inicial se ha movido a Firestore
         const DEFAULT_USERS = {
             '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración', canManageOrders: true },
             '0000': { name: 'Prisciliano Espinoza', role: ROLES.COMMENTATOR, area: 'Comentarios' },
@@ -124,8 +125,8 @@
         const generateCalendar = () => {
             const dates = [];
             const months = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-            // CORRECCIÓN: Inicio desde 1 de Diciembre de 2024
-            const start = new Date(2024, 11, 1); 
+            // Covering a period, e.g., 2025 to 2026 for flexibility
+            const start = new Date(2025, 8, 1); 
             const end = new Date(2026, 11, 31);
             let idx = 0;
             for (let d = start; d <= end; d.setDate(d.getDate() + 1)) {
@@ -147,6 +148,7 @@
         const INITIAL_STATE = (() => {
             const todayISO = new Date().toISOString().split('T')[0];
             const foundIndex = ALL_ROWS.findIndex(r => r.isoDate === todayISO);
+            // Default to start of the calendar if today is not found or index is too small
             const safeIndex = foundIndex !== -1 ? foundIndex : 0;
             return { weekOffset: Math.floor(safeIndex / 7), selectedDayIndex: safeIndex % 7 };
         })();
@@ -165,12 +167,15 @@
             const materials = order.materials || [];
             const waste = 1 + (Number(order.wastePercentage) / 100);
 
+            // 1. Total Needed (with waste)
             const totalYarnGramsNeeded = totalQty * pieceWeightGrams * waste;
             const totalYarnKilos = totalYarnGramsNeeded / 1000;
 
+            // 2. Produced (Consumed) Yarn
             const producedYarnGrams = producedQty * pieceWeightGrams * waste;
             const producedYarnKilos = producedYarnGrams / 1000;
             
+            // 3. Detailed Consumption (with waste)
             const consumption = materials
                 .filter(m => m.name && m.percentage)
                 .map(m => {
@@ -189,7 +194,7 @@
         };
 
 
-        // --- CÁLCULO PROYECCIÓN Y DESVIACIÓN (CORREGIDO) ---
+        // --- CÁLCULO PROYECCIÓN Y DESVIACIÓN ---
         const calculateOrderMetrics = (machineId, order, allProductionData, allRows, globalHiddenDays) => {
             const metrics = { 
                 isPlanned: false, finishDate: null, totalNeeded: 0, progress: 0, produced: 0, 
@@ -213,37 +218,40 @@
             const todayIndex = allRows.findIndex(r => r.isoDate === todayISO);
             
             if (startIndex !== -1) {
-                // CORRECCIÓN: Iterar hasta el final de la base de datos, no detenerse arbitrariamente.
+                // Production: Sum all 'actual' quantities from start date up to now
                 for (let i = startIndex; i < allRows.length; i++) {
                     const row = allRows[i];
-                    // Suma todo lo que haya en la base de datos para esta fecha, incluso si es futuro (si alguien adelantó trabajo)
                     produced += Number(allProductionData[row.id]?.[machineId]?.actual || 0);
 
-                    // Calculo de planeado solo hasta ayer/hoy
+                    // Calculate planned production up to *Yesterday*
                     if (i < todayIndex) {
                         if (!globalHiddenDays.includes(row.id) && !disabledDates.includes(row.isoDate)) {
                             plannedToDate += metrics.dailyCapacity;
                         }
                     }
+                    
+                    // Stop production sum after today, but allow past days to be included
+                    if (new Date(row.isoDate) >= new Date(todayISO) && new Date(row.isoDate).getDate() === new Date(todayISO).getDate()) break; 
                 }
             }
             
             metrics.produced = produced;
             metrics.plannedToDate = plannedToDate;
-            metrics.deviation = produced - plannedToDate;
+            metrics.deviation = produced - plannedToDate; // Negative means behind schedule
             metrics.progress = totalQty > 0 ? Math.min(100, (produced / totalQty) * 100) : 0;
             metrics.isPlanned = true;
 
-            if (metrics.deviation < -metrics.dailyCapacity * 1.5) {
+            // Set deviation status
+            if (metrics.deviation < -metrics.dailyCapacity * 1.5) { // Behind by more than 1.5 days
                 metrics.status = 'ATRASO CRÍTICO';
-            } else if (metrics.deviation < 0) {
+            } else if (metrics.deviation < 0) { // Behind by some quantity
                 metrics.status = 'ATRASO LEVE';
             }
 
             const remainingQty = Math.max(0, totalQty - produced);
             
             if (remainingQty <= 0) {
-                metrics.finishDate = todayISO;
+                metrics.finishDate = todayISO; // Usamos la fecha de hoy o la última fecha de producción
                 metrics.progress = 100;
                 metrics.status = 'COMPLETADO';
                 return metrics;
@@ -251,13 +259,14 @@
             
             metrics.totalNeeded = remainingQty;
             
-            // 2. Proyección Futura
+            // 2. Proyección Futura (starts from today or startDate if in future)
             let projRemaining = remainingQty;
             let currentIdx = startIndex !== -1 ? startIndex : 0;
             
+            // If the start date is in the past, start the projection from today
             if (todayIndex > currentIdx) currentIdx = todayIndex;
 
-            if (currentIdx === -1) { metrics.finishDate = todayISO; return metrics; }
+            if (currentIdx === -1) { metrics.finishDate = todayISO; return metrics; } // Fallback
 
             for (let i = currentIdx; i < allRows.length; i++) {
                 const row = allRows[i];
@@ -270,41 +279,44 @@
                 }
             }
 
-            metrics.finishDate = null; 
+            metrics.finishDate = null; // Indica que se necesita más de 60 días
             return metrics;
         };
 
-        // --- PRODUCTION SLOT ACTUALIZADO (Sin Input de Modelo) ---
         const ProductionSlot = ({ slotData, index, disabled, onUpdate }) => {
+            const [localModel, setLocalModel] = useState(slotData?.model || '');
             const [localQty, setLocalQty] = useState('');
             const [isDirty, setIsDirty] = useState(false);
 
             useEffect(() => {
                 if (!isDirty) { 
+                    setLocalModel(slotData?.model || ''); 
                     setLocalQty(slotData?.qty ?? ''); 
                 }
             }, [slotData, isDirty]);
 
             const handleSave = (e) => {
                 e?.preventDefault();
+                if (localModel !== (slotData?.model || '')) onUpdate(index, 'model', localModel);
                 if (String(localQty) !== String(slotData?.qty ?? '')) onUpdate(index, 'qty', localQty);
                 setIsDirty(false);
             };
 
-            const handleChange = (v) => { setLocalQty(v); setIsDirty(true); };
+            const handleChange = (f, v) => { if (f==='model') setLocalModel(v); else setLocalQty(v); setIsDirty(true); };
             const handleKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleSave(); e.target.blur(); } };
 
             return (
-                <div className={`flex flex-col border border-slate-700/50 rounded overflow-hidden h-full relative justify-center ${disabled ? 'bg-slate-900/20 opacity-40' : 'bg-slate-800'} ${isDirty ? 'border-yellow-500/50' : ''}`}>
-                    {/* Se eliminó el input de modelo "MOD" */}
-                    <input type="number" placeholder="-" value={localQty} onChange={(e) => handleChange(e.target.value)} onKeyDown={handleKeyDown} disabled={disabled} className="slot-input text-lg font-bold text-white h-full" />
+                <div className={`flex flex-col border border-slate-700/50 rounded overflow-hidden h-full relative ${disabled ? 'bg-slate-900/20 opacity-40' : 'bg-slate-800'} ${isDirty ? 'border-yellow-500/50' : ''}`}>
+                    <input type="text" placeholder="MOD" value={localModel} onChange={(e) => handleChange('model', e.target.value)} onKeyDown={handleKeyDown} disabled={disabled} className="slot-input text-[8px] text-yellow-500 uppercase border-b border-slate-700/50 h-1/2" />
+                    <input type="number" placeholder="CANT" value={localQty} onChange={(e) => handleChange('qty', e.target.value)} onKeyDown={handleKeyDown} disabled={disabled} className="slot-input text-[10px] text-white h-1/2" />
                     {isDirty && !disabled && (<div className="absolute inset-y-0 right-0 w-8 flex items-center justify-center bg-gradient-to-l from-slate-900 via-slate-900/80 to-transparent z-10 animate-zoom-in"><button onClick={handleSave} className="bg-green-600 text-white rounded-full p-1 shadow-lg hover:scale-110"><i data-lucide="check" className="w-3 h-3"></i></button></div>)}
                 </div>
             );
         };
 
+        // --- GESTIÓN DE USUARIOS MODAL ---
         const UserManagementModal = ({ onClose, users, onSaveUser, onDeleteUser }) => {
-            const [editingUser, setEditingUser] = useState(null); 
+            const [editingUser, setEditingUser] = useState(null); // { id: pin, name: '', role: '', area: '', ... }
             const [pin, setPin] = useState('');
             const [name, setName] = useState('');
             const [role, setRole] = useState(ROLES.OPERATOR);
@@ -322,21 +334,42 @@
             };
 
             const handleSave = () => {
-                if (!pin || !name || !role) { alert('Todos los campos son obligatorios'); return; }
-                if (pin.length !== 4 || isNaN(Number(pin))) { alert('El PIN debe ser un número de 4 dígitos.'); return; }
-                if (!editingUser && users[pin]) { alert('El PIN ya existe.'); return; }
+                if (!pin || !name || !role) {
+                    alert('Todos los campos son obligatorios (PIN, Nombre, Rol)');
+                    return;
+                }
+                if (pin.length !== 4 || isNaN(Number(pin))) {
+                    alert('El PIN debe ser un número de 4 dígitos.');
+                    return;
+                }
+                if (!editingUser && users[pin]) {
+                    alert('El PIN ya existe. Usa un PIN diferente o edita el usuario existente.');
+                    return;
+                }
 
                 const payload = { 
-                    name, role, area,
+                    name, 
+                    role, 
+                    area,
+                    // Mantener permisos existentes si se edita, o usar valores por defecto
                     canManageOrders: editingUser ? editingUser.canManageOrders : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
                     canViewGraph: editingUser ? editingUser.canViewGraph : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
                     canManageUsers: editingUser ? editingUser.canManageUsers : role === ROLES.DEVELOPMENT,
                 };
-                if (role === ROLES.OPERATOR) { payload.allowedSlots = editingUser?.allowedSlots || []; } 
+                
+                // CORRECCIÓN: Evitar enviar 'undefined' a Firestore.
+                if (role === ROLES.OPERATOR) {
+                    // Si es operador, el campo allowedSlots debe existir como array (vacío o con datos)
+                    payload.allowedSlots = editingUser?.allowedSlots || [];
+                } 
+                // Si el rol NO es OPERATOR, el campo allowedSlots simplemente no se incluye en el payload (no se usa 'undefined').
 
                 onSaveUser(pin, payload);
                 setEditingUser(null);
-                setPin(''); setName(''); setRole(ROLES.OPERATOR); setArea('');
+                setPin('');
+                setName('');
+                setRole(ROLES.OPERATOR);
+                setArea('');
             };
 
             return (
@@ -344,24 +377,51 @@
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
                             <h3 className="font-bold text-white uppercase tracking-wider text-sm flex items-center gap-2">
-                                <i data-lucide="users" className="w-5 h-5 text-yellow-400"></i> Gestión de Usuarios
+                                <i data-lucide="users" className="w-5 h-5 text-yellow-400"></i>
+                                Gestión de Usuarios
                             </h3>
                             <button onClick={onClose} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded"><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button>
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar flex gap-6">
+                            
+                            {/* Formulario de Creación/Edición */}
                             <div className="w-1/3 shrink-0 bg-slate-900 p-4 rounded-xl border border-slate-700 h-fit sticky top-0">
                                 <h4 className="text-lg font-bold text-white mb-4 border-b border-slate-700 pb-2">{editingUser ? `Editar: ${editingUser.name}` : 'Crear Nuevo Usuario'}</h4>
                                 <div className="space-y-3">
-                                    <div><label className="block text-xs font-bold text-blue-400 mb-1">PIN (4 Dígitos)</label><input type="number" value={pin} onChange={e => setPin(e.target.value.slice(0, 4))} disabled={!!editingUser} placeholder="Ej: 1352" className="w-full bg-slate-700 text-white p-2 rounded text-lg font-bold outline-none disabled:bg-slate-700/50 disabled:text-slate-400" /></div>
-                                    <div><label className="block text-xs font-bold text-blue-400 mb-1">Nombre</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Vallejo" className="w-full bg-slate-700 text-white p-2 rounded outline-none" /></div>
-                                    <div><label className="block text-xs font-bold text-blue-400 mb-1">Área (Opcional)</label><input type="text" value={area} onChange={e => setArea(e.target.value)} placeholder="Ej: Desarrollo" className="w-full bg-slate-700 text-white p-2 rounded outline-none" /></div>
-                                    <div><label className="block text-xs font-bold text-blue-400 mb-1">Rol</label><select value={role} onChange={e => setRole(e.target.value)} className="w-full bg-slate-700 text-white p-2 rounded outline-none">{availableRoles.map(r => (<option key={r} value={r} className="uppercase">{r}</option>))}</select></div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-blue-400 mb-1">PIN (4 Dígitos)</label>
+                                        <input type="number" value={pin} onChange={e => setPin(e.target.value.slice(0, 4))} disabled={!!editingUser} placeholder="Ej: 1352" className="w-full bg-slate-700 text-white p-2 rounded text-lg font-bold outline-none disabled:bg-slate-700/50 disabled:text-slate-400" />
+                                        {!!editingUser && <p className="text-[10px] text-red-400 mt-1">El PIN no se puede cambiar.</p>}
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-blue-400 mb-1">Nombre</label>
+                                        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Vallejo" className="w-full bg-slate-700 text-white p-2 rounded outline-none" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-blue-400 mb-1">Área (Opcional)</label>
+                                        <input type="text" value={area} onChange={e => setArea(e.target.value)} placeholder="Ej: Desarrollo" className="w-full bg-slate-700 text-white p-2 rounded outline-none" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-blue-400 mb-1">Rol</label>
+                                        <select value={role} onChange={e => setRole(e.target.value)} className="w-full bg-slate-700 text-white p-2 rounded outline-none">
+                                            {availableRoles.map(r => (<option key={r} value={r} className="uppercase">{r}</option>))}
+                                        </select>
+                                    </div>
                                 </div>
                                 <div className="mt-6 flex flex-col gap-2">
-                                    <button onClick={handleSave} className={`w-full py-2 rounded-lg font-bold text-sm ${editingUser ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white`}>{editingUser ? 'Guardar Cambios' : 'Crear Usuario'}</button>
+                                    <button onClick={handleSave} className={`w-full py-2 rounded-lg font-bold text-sm ${editingUser ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white`}>
+                                        {editingUser ? 'Guardar Cambios' : 'Crear Usuario'}
+                                    </button>
+                                    {editingUser && (
+                                        <button onClick={() => { setEditingUser(null); setPin(''); setName(''); setRole(ROLES.OPERATOR); setArea(''); }} className="w-full py-2 rounded-lg font-bold text-sm bg-slate-700 text-slate-300 hover:bg-slate-600">
+                                            Cancelar Edición
+                                        </button>
+                                    )}
                                 </div>
                             </div>
+
+                            {/* Lista de Usuarios */}
                             <div className="flex-1">
                                 <h4 className="text-lg font-bold text-white mb-4">Lista Actual ({allUsersArray.length})</h4>
                                 <div className="space-y-3">
@@ -369,7 +429,11 @@
                                         <div key={u.pin} className={`bg-slate-900 p-4 rounded-xl border ${editingUser?.pin === u.pin ? 'border-yellow-500' : 'border-slate-700'} flex justify-between items-center transition-all`}>
                                             <div className="flex-1">
                                                 <p className="text-lg font-bold text-white">{u.name}</p>
-                                                <div className="flex items-center gap-2 text-sm"><span className="text-blue-400 font-bold uppercase">{u.role}</span><span className="text-slate-500">|</span><span className="text-slate-500">{u.area || 'Sin Área'}</span></div>
+                                                <div className="flex items-center gap-2 text-sm">
+                                                    <span className="text-blue-400 font-bold uppercase">{u.role}</span>
+                                                    <span className="text-slate-500">|</span>
+                                                    <span className="text-slate-500">{u.area || 'Sin Área'}</span>
+                                                </div>
                                             </div>
                                             <div className="flex items-center gap-4 shrink-0">
                                                 <span className="text-3xl font-black text-yellow-500/80 tracking-widest">{u.pin}</span>
@@ -388,29 +452,62 @@
             );
         };
         
+        // --- REPORTE MODAL ---
         const ReportModal = ({ onClose, machineId, order, metrics, orderManagerRef }) => {
             if (!order || !machineId) return null;
+
             const machine = MACHINES.find(m => m.id === machineId);
             const consumptionData = calculateConsumptionDetails(order, metrics.produced);
             const consumptionBase = calculateConsumptionDetails({...order, wastePercentage: 0}, metrics.produced);
             const isCompleted = metrics.finishDate && metrics.status === 'COMPLETADO';
             
+            // Función para generar y descargar el archivo Word/DOC (usando HTML/MIME type)
             const handleDownloadWord = () => {
                 const reportContent = document.querySelector('.report-page').outerHTML;
-                const htmlContent = `<html><head><meta charset="UTF-8"><style>body { font-family: sans-serif; padding: 20px; color: #1e293b; } h1 { font-size: 24px; font-weight: bold; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 15px; color: #1e40af; } h2 { font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #1e40af; } .report-section { margin-bottom: 20px; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; } .report-data div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #cbd5e1; font-size: 14px; } .report-label { font-weight: 500; color: #475569; } .report-value { font-weight: 700; } .report-material-table { width: 100%; border-collapse: collapse; margin-top: 10px; } .report-material-table th, .report-material-table td { border: 1px solid #e2e8f0; padding: 8px; text-align: left; font-size: 13px; } .report-material-table th { background-color: #f1f5f9; color: #1e293b; }</style></head><body>${reportContent}</body></html>`;
+                const htmlContent = `
+                    <html>
+                        <head>
+                            <meta charset="UTF-8">
+                            <style>
+                                body { font-family: sans-serif; padding: 20px; color: #1e293b; }
+                                h1 { font-size: 24px; font-weight: bold; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 15px; color: #1e40af; }
+                                h2 { font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #1e40af; }
+                                .report-section { margin-bottom: 20px; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; }
+                                .report-data div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #cbd5e1; font-size: 14px; }
+                                .report-label { font-weight: 500; color: #475569; }
+                                .report-value { font-weight: 700; }
+                                .report-material-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                                .report-material-table th, .report-material-table td { border: 1px solid #e2e8f0; padding: 8px; text-align: left; font-size: 13px; }
+                                .report-material-table th { background-color: #f1f5f9; color: #1e293b; }
+                            </style>
+                        </head>
+                        <body>
+                            ${reportContent}
+                        </body>
+                    </html>
+                `;
+
                 const blob = new Blob([htmlContent], { type: 'application/msword;charset=utf-8' });
+                const fileName = `Reporte_${machine.name}_${order.model}_${new Date().toISOString().split('T')[0]}.doc`;
+
+                // Usamos una simulación de descarga (compatible con navegadores)
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(blob);
-                link.download = `Reporte_${machine.name}_${order.model}_${new Date().toISOString().split('T')[0]}.doc`;
+                link.download = fileName;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
             };
 
-            const handleDownloadPDF = () => { alert("Se abrirá el diálogo de impresión. Selecciona 'Guardar como PDF'."); window.print(); };
+            // Función para generar y descargar el archivo PDF (usando el diálogo de impresión y forzando PDF)
+            const handleDownloadPDF = () => {
+                alert("Se abrirá el diálogo de impresión. Por favor, selecciona 'Guardar como PDF' en las opciones de destino.");
+                window.print();
+            };
 
             const handleNewOrder = () => {
                 onClose();
+                // Llama a la función en OrderManager para iniciar la creación del siguiente pedido
                 orderManagerRef.current.startNewOrderChain(machineId);
             };
 
@@ -420,17 +517,74 @@
                         <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
                             <h3 className="font-bold text-white uppercase tracking-wider text-sm">Reporte de Producción: {machine.name} - {order.model}</h3>
                             <div className="flex gap-2">
-                                <button onClick={handleDownloadPDF} className="px-3 py-1 rounded bg-red-600 text-white font-bold flex items-center gap-1 hover:bg-red-500"><i data-lucide="file-text" className="w-4 h-4"></i> PDF</button>
-                                <button onClick={handleDownloadWord} className="px-3 py-1 rounded bg-blue-600 text-white font-bold flex items-center gap-1 hover:bg-blue-500"><i data-lucide="file-text" className="w-4 h-4"></i> DOC</button>
+                                <button onClick={handleDownloadPDF} className="px-3 py-1 rounded bg-red-600 text-white font-bold flex items-center gap-1 hover:bg-red-500"><i data-lucide="file-text" className="w-4 h-4"></i> Descargar PDF</button>
+                                <button onClick={handleDownloadWord} className="px-3 py-1 rounded bg-blue-600 text-white font-bold flex items-center gap-1 hover:bg-blue-500"><i data-lucide="file-text" className="w-4 h-4"></i> Descargar DOC</button>
                                 <button onClick={onClose} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded"><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button>
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto p-0 custom-scrollbar report-page">
-                            <div className="report-header"><h1>REPORTE DE PRODUCCIÓN - {order.model}</h1><p className="text-xs text-gray-500">Generado el: {new Date().toLocaleDateString('es-MX', {day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'})} por Sistema MAES</p></div>
-                            <div className="report-section"><h2>📋 Datos del Pedido</h2><div className="report-data"><div><span className="report-label">Máquina:</span><span className="report-value">{machine.name} ({machine.type})</span></div><div><span className="report-label">Modelo:</span><span className="report-value text-blue-700">{order.model}</span></div><div><span className="report-label">Cantidad Total:</span><span className="report-value">{Number(order.totalQty).toLocaleString()} piezas</span></div><div><span className="report-label">Inicio Planeado:</span><span className="report-value">{new Date(order.startDate).toLocaleDateString('es-MX')}</span></div><div><span className="report-label">Fin Estimado:</span><span className={`report-value ${isCompleted ? 'text-green-600' : (metrics.finishDate ? 'text-red-600' : 'text-orange-600')}`}>{isCompleted ? 'COMPLETADO' : (metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX') : 'PENDIENTE (+60 días)')}</span></div></div></div>
-                            <div className="report-section"><h2>📈 Avance y Desempeño</h2><div className="report-data"><div><span className="report-label">Piezas Producidas (Real):</span><span className="report-value text-green-700">{metrics.produced.toLocaleString()} piezas</span></div><div><span className="report-label">Piezas Faltantes:</span><span className="report-value">{metrics.totalNeeded.toLocaleString()} piezas</span></div><div><span className="report-label">Progreso (%):</span><span className="report-value text-blue-700">{metrics.progress.toFixed(1)}%</span></div><div><span className="report-label">Producción Planeada (hasta hoy):</span><span className="report-value">{metrics.plannedToDate.toLocaleString()} piezas</span></div><div><span className="report-label">Desviación (vs Plan):</span><span className={`report-value ${metrics.deviation < 0 ? 'text-red-700' : 'text-green-700'}`}>{metrics.deviation.toLocaleString()} piezas</span></div></div></div>
-                            <div className="report-section"><h2>🧵 Consumo de Materia Prima (KG)</h2><div className="report-data"><div><span className="report-label">Peso por Pieza:</span><span className="report-value">{order.pieceWeightGrams} gramos</span></div><div><span className="report-label">Merma Aplicada:</span><span className="report-value text-red-700">{order.wastePercentage}%</span></div><div><span className="report-label">**Total Hilo Requerido (con Merma):**</span><span className="report-value text-blue-700 text-lg">{consumptionData.totalYarnKilos.toFixed(2)} KG</span></div><div><span className="report-label">**Total Hilo Consumido (hasta hoy):**</span><span className="report-value text-green-700 text-lg">{consumptionData.producedYarnKilos.toFixed(2)} KG</span></div></div><h3 className="font-bold text-sm mt-4">Desglose por Hilatura (Kg):</h3><table className="report-material-table"><thead><tr><th>Hilatura (%)</th><th>Total Requerido</th><th>Consumido (Hoy)</th><th>Faltante</th></tr></thead><tbody>{consumptionData.consumption.map((m, i) => (<tr key={i}><td>{m.name} ({m.percentage}%)</td><td>{m.kilosNeeded.toFixed(2)} KG</td><td className="font-bold text-green-700">{m.kilosConsumed.toFixed(2)} KG</td><td>{(m.kilosNeeded - m.kilosConsumed).toFixed(2)} KG</td></tr>))}</tbody></table></div>
+                            {/* ... Contenido del Reporte ... */}
+                            <div className="report-header">
+                                <h1>REPORTE DE PRODUCCIÓN - {order.model}</h1>
+                                <p className="text-xs text-gray-500">Generado el: {new Date().toLocaleDateString('es-MX', {day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'})} por Sistema MAES</p>
+                            </div>
+
+                            <div className="report-section">
+                                <h2>📋 Datos del Pedido</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Máquina:</span><span className="report-value">{machine.name} ({machine.type})</span></div>
+                                    <div><span className="report-label">Modelo:</span><span className="report-value text-blue-700">{order.model}</span></div>
+                                    <div><span className="report-label">Cantidad Total:</span><span className="report-value">{Number(order.totalQty).toLocaleString()} piezas</span></div>
+                                    <div><span className="report-label">Inicio Planeado:</span><span className="report-value">{new Date(order.startDate).toLocaleDateString('es-MX')}</span></div>
+                                    <div><span className="report-label">Fin Estimado:</span><span className={`report-value ${isCompleted ? 'text-green-600' : (metrics.finishDate ? 'text-red-600' : 'text-orange-600')}`}>{isCompleted ? 'COMPLETADO' : (metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX') : 'PENDIENTE (+60 días)')}</span></div>
+                                </div>
+                            </div>
+
+                            <div className="report-section">
+                                <h2>📈 Avance y Desempeño</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Piezas Producidas (Real):</span><span className="report-value text-green-700">{metrics.produced.toLocaleString()} piezas</span></div>
+                                    <div><span className="report-label">Piezas Faltantes:</span><span className="report-value">{metrics.totalNeeded.toLocaleString()} piezas</span></div>
+                                    <div><span className="report-label">Progreso (%):</span><span className="report-value text-blue-700">{metrics.progress.toFixed(1)}%</span></div>
+                                    <div><span className="report-label">Producción Planeada (hasta hoy):</span><span className="report-value">{metrics.plannedToDate.toLocaleString()} piezas</span></div>
+                                    <div><span className="report-label">Desviación (vs Plan):</span><span className={`report-value ${metrics.deviation < 0 ? 'text-red-700' : 'text-green-700'}`}>{metrics.deviation.toLocaleString()} piezas</span></div>
+                                </div>
+                            </div>
+
+                            <div className="report-section">
+                                <h2>🧵 Consumo de Materia Prima (KG)</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Peso por Pieza:</span><span className="report-value">{order.pieceWeightGrams} gramos</span></div>
+                                    <div><span className="report-label">Merma Aplicada:</span><span className="report-value text-red-700">{order.wastePercentage}%</span></div>
+                                    <div><span className="report-label">**Total Hilo Requerido (con Merma):**</span><span className="report-value text-blue-700 text-lg">{consumptionData.totalYarnKilos.toFixed(2)} KG</span></div>
+                                    <div><span className="report-label">**Total Hilo Consumido (hasta hoy):**</span><span className="report-value text-green-700 text-lg">{consumptionData.producedYarnKilos.toFixed(2)} KG</span></div>
+                                    {order.wastePercentage > 0 && <div><span className="report-label text-red-500">Consumo Base (Sin Merma):</span><span className="report-value text-red-500">{consumptionBase.totalYarnKilos.toFixed(2)} KG</span></div>}
+                                </div>
+                                <h3 className="font-bold text-sm mt-4">Desglose por Hilatura (Kg):</h3>
+                                <table className="report-material-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Hilatura (%)</th>
+                                            <th>Total Requerido</th>
+                                            <th>Consumido (Hoy)</th>
+                                            <th>Faltante</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {consumptionData.consumption.map((m, i) => (
+                                            <tr key={i}>
+                                                <td>{m.name} ({m.percentage}%)</td>
+                                                <td>{m.kilosNeeded.toFixed(2)} KG</td>
+                                                <td className="font-bold text-green-700">{m.kilosConsumed.toFixed(2)} KG</td>
+                                                <td>{(m.kilosNeeded - m.kilosConsumed).toFixed(2)} KG</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
+                        
+                        {/* Botón para iniciar el siguiente pedido, solo si está completo */}
                         {isCompleted && (
                              <div className="p-4 border-t border-slate-700 flex justify-center bg-slate-900 no-print">
                                 <button onClick={handleNewOrder} className="px-6 py-2 rounded bg-yellow-600 text-white font-bold flex items-center gap-2 hover:bg-yellow-500 transition-transform hover:scale-105">
@@ -443,6 +597,8 @@
             );
         };
 
+
+        // --- GESTOR DE PEDIDOS ---
         const OrderManager = React.forwardRef(({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays }, ref) => {
             const [step, setStep] = useState(1);
             const [viewMode, setViewMode] = useState('list'); 
@@ -462,37 +618,72 @@
 
             const [config, setConfig] = useState(initialConfig);
 
+            // Funciones pasadas al ReportModal para encadenar pedidos
             const startNewOrderChain = (machineId) => {
                 const order = ordersData[machineId];
                 if (!order) return;
                 const metrics = calculateOrderMetrics(machineId, order, allProductionData, allRows, hiddenDays);
+                
+                // Si la fecha de finalización es válida (COMPLETADO o proyectada), úsala como inicio
                 const nextStartDate = metrics.finishDate && metrics.status === 'COMPLETADO' 
-                    ? new Date(new Date(metrics.finishDate).setDate(new Date(metrics.finishDate).getDate() + 1)).toISOString().split('T')[0]
-                    : (metrics.finishDate ? metrics.finishDate : new Date().toISOString().split('T')[0]);
+                    ? new Date(new Date(metrics.finishDate).setDate(new Date(metrics.finishDate).getDate() + 1)).toISOString().split('T')[0] // Día siguiente al completado
+                    : (metrics.finishDate ? metrics.finishDate : new Date().toISOString().split('T')[0]); // Fecha proyectada o hoy
 
                 setIsEditing(false);
                 setEditMachineId(null);
                 setModelName('');
                 setSelectedMachines([machineId]);
-                setConfig({ ...initialConfig, startDate: nextStartDate, materials: order.materials || initialConfig.materials, wastePercentage: order.wastePercentage || 0 });
+                setConfig({
+                    ...initialConfig,
+                    startDate: nextStartDate,
+                    // Reutilizar materiales del pedido anterior
+                    materials: order.materials || initialConfig.materials,
+                    wastePercentage: order.wastePercentage || 0,
+                });
                 setStep(1);
                 setViewMode('create');
-                alert(`Programando nuevo pedido en ${MACHINES.find(m => m.id === machineId).name}. Inicio: ${new Date(nextStartDate).toLocaleDateString('es-MX')}. El pedido anterior se archivará.`);
+                alert(`Programando nuevo pedido en ${MACHINES.find(m => m.id === machineId).name}. Fecha de inicio fijada en ${new Date(nextStartDate).toLocaleDateString('es-MX')}.`);
             };
 
-            React.useImperativeHandle(ref, () => ({ startNewOrderChain }));
+            // Exponer la función al padre a través de `useImperativeHandle`
+            React.useImperativeHandle(ref, () => ({
+                startNewOrderChain,
+            }));
 
             const toggleMachine = (id) => { setSelectedMachines(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]); };
-            const toggleOperator = (op) => { setConfig(prev => { const current = prev.operators; if (current.includes(op)) { if (current.length === 1) return prev; return { ...prev, operators: current.filter(o => o !== op) }; } return { ...prev, operators: [...current, op] }; }); };
-            const toggleDateDisabled = (isoDate) => { setConfig(prev => { const current = prev.disabledDates; if (current.includes(isoDate)) return { ...prev, disabledDates: current.filter(d => d !== isoDate) }; return { ...prev, disabledDates: [...current, isoDate] }; }); };
-            const handleMaterialChange = (index, field, value) => { setConfig(prev => { const newMaterials = [...prev.materials]; newMaterials[index] = {...newMaterials[index], [field]: value}; return {...prev, materials: newMaterials}; }); };
+            const toggleOperator = (op) => {
+                setConfig(prev => {
+                    const current = prev.operators;
+                    if (current.includes(op)) { if (current.length === 1) return prev; return { ...prev, operators: current.filter(o => o !== op) }; }
+                    return { ...prev, operators: [...current, op] };
+                });
+            };
+            const toggleDateDisabled = (isoDate) => {
+                setConfig(prev => {
+                    const current = prev.disabledDates;
+                    if (current.includes(isoDate)) return { ...prev, disabledDates: current.filter(d => d !== isoDate) };
+                    return { ...prev, disabledDates: [...current, isoDate] };
+                });
+            };
+            const handleMaterialChange = (index, field, value) => {
+                setConfig(prev => {
+                    const newMaterials = [...prev.materials];
+                    newMaterials[index] = {...newMaterials[index], [field]: value};
+                    return {...prev, materials: newMaterials};
+                });
+            };
             const addMaterial = () => { setConfig(prev => ({ ...prev, materials: [...prev.materials, { name: '', percentage: '' }] })); };
             const removeMaterial = (index) => { setConfig(prev => ({ ...prev, materials: prev.materials.filter((_, i) => i !== index) })); };
             const applyWaste = (percent) => { setConfig(prev => ({...prev, wastePercentage: percent})); };
 
+
             const calculatePreview = () => {
                 if (!config.totalQty || !config.timePerPiece) return null;
-                const dummyOrder = { totalQty: config.totalQty, timePerPieceMin: config.timePerPiece, startDate: config.startDate, operators: config.operators, disabledDates: config.disabledDates };
+                const dummyOrder = { 
+                    totalQty: config.totalQty, timePerPieceMin: config.timePerPiece, 
+                    startDate: config.startDate, operators: config.operators,
+                    disabledDates: config.disabledDates
+                };
                 const calc = calculateOrderMetrics('dummy', dummyOrder, {}, allRows, hiddenDays); 
                 return calc.finishDate;
             };
@@ -501,75 +692,423 @@
                 const totalQty = Number(config.totalQty);
                 const pieceWeightGrams = Number(config.pieceWeightGrams);
                 const waste = appliedWaste ? (1 + (config.wastePercentage / 100)) : 1;
+                
                 const totalYarnGrams = totalQty * pieceWeightGrams * waste;
                 const totalYarnKilos = totalYarnGrams / 1000;
-                const consumption = config.materials.filter(m => m.name && m.percentage).map(m => { const percent = Number(m.percentage) / 100; return { name: m.name, kilos: (totalYarnKilos * percent), percentage: m.percentage }; });
+                
+                const consumption = config.materials
+                    .filter(m => m.name && m.percentage)
+                    .map(m => {
+                        const percent = Number(m.percentage) / 100;
+                        const kilos = (totalYarnKilos * percent);
+                        return { name: m.name, kilos: kilos, percentage: m.percentage };
+                    });
+
                 return { totalYarnKilos, consumption };
             };
 
-            const handleStartCreate = () => { setIsEditing(false); setEditMachineId(null); setModelName(''); setSelectedMachines([]); setConfig(initialConfig); setStep(1); setViewMode('create'); };
-            const handleStartEdit = (machineId, orderData) => {
-                setIsEditing(true); setEditMachineId(machineId); setModelName(orderData.model); setSelectedMachines([machineId]); 
-                setConfig({
-                    totalQty: orderData.totalQty, timePerPiece: orderData.timePerPieceMin, startDate: orderData.startDate,
-                    operators: orderData.operators || ['Andrés'], disabledDates: orderData.disabledDates || [],
-                    pieceWeightGrams: orderData.pieceWeightGrams || '', materials: orderData.materials || [{name: 'LYCRA', percentage: ''}, {name: 'NYLON', percentage: ''}], wastePercentage: orderData.wastePercentage || 0,
-                });
-                setStep(1); setViewMode('create');
+            const handleStartCreate = () => {
+                setIsEditing(false);
+                setEditMachineId(null);
+                setModelName('');
+                setSelectedMachines([]);
+                setConfig(initialConfig);
+                setStep(1);
+                setViewMode('create');
             };
 
-            const handleDelete = (machineId) => { if(confirm('¿Seguro que quieres eliminar este pedido?')) onDeleteOrder(machineId); };
+            const handleStartEdit = (machineId, orderData) => {
+                setIsEditing(true);
+                setEditMachineId(machineId);
+                setModelName(orderData.model);
+                setSelectedMachines([machineId]); 
+                setConfig({
+                    totalQty: orderData.totalQty,
+                    timePerPiece: orderData.timePerPieceMin,
+                    startDate: orderData.startDate,
+                    operators: orderData.operators || (orderData.dailyHours == 24 ? ['Andrés', 'Balta'] : ['Andrés']),
+                    disabledDates: orderData.disabledDates || [],
+                    pieceWeightGrams: orderData.pieceWeightGrams || '',
+                    materials: orderData.materials || [{name: 'LYCRA', percentage: ''}, {name: 'NYLON', percentage: ''}],
+                    wastePercentage: orderData.wastePercentage || 0,
+                });
+                setStep(1);
+                setViewMode('create');
+            };
+
+            const handleDelete = (machineId) => {
+                if(confirm('¿Seguro que quieres eliminar este pedido? Se perderá el seguimiento.')) {
+                    onDeleteOrder(machineId);
+                }
+            };
 
             const handleFinalSave = () => {
-                if (selectedMachines.length === 0) { alert('Selecciona una máquina.'); return; }
+                if (selectedMachines.length === 0) {
+                     alert('Debes seleccionar al menos una máquina.');
+                     return;
+                }
+                
                 selectedMachines.forEach(mid => {
                     const consumptionData = calculateConsumption();
+                    
                     const orderPayload = {
-                        model: modelName, totalQty: Number(config.totalQty), timePerPieceMin: Number(config.timePerPiece), startDate: config.startDate,
-                        operators: config.operators, dailyHours: config.operators.length * 12, disabledDates: config.disabledDates, pieceWeightGrams: Number(config.pieceWeightGrams),
-                        materials: config.materials.filter(m => m.name && m.percentage), wastePercentage: config.wastePercentage, totalYarnKilos: consumptionData.totalYarnKilos, consumptionDetails: consumptionData.consumption,
+                        model: modelName,
+                        totalQty: Number(config.totalQty),
+                        timePerPieceMin: Number(config.timePerPiece),
+                        startDate: config.startDate,
+                        operators: config.operators, 
+                        dailyHours: config.operators.length * 12, 
+                        disabledDates: config.disabledDates,
+                        // New fields
+                        pieceWeightGrams: Number(config.pieceWeightGrams),
+                        materials: config.materials.filter(m => m.name && m.percentage),
+                        wastePercentage: config.wastePercentage,
+                        totalYarnKilos: consumptionData.totalYarnKilos,
+                        consumptionDetails: consumptionData.consumption,
                     };
                     onSaveOrders(mid, orderPayload);
                 });
                 setViewMode('list');
             };
             
+            // Step validation
             const validateStep = (s) => {
                 if (s === 1 && !modelName) return false;
                 if (s === 2 && selectedMachines.length === 0) return false;
                 if (s === 3 && (!config.totalQty || !config.timePerPiece || !config.pieceWeightGrams)) return false;
-                if (s === 5) return config.materials.reduce((sum, m) => sum + Number(m.percentage || 0), 0) === 100;
+                if (s === 5) {
+                    const totalPercentage = config.materials.reduce((sum, m) => sum + Number(m.percentage || 0), 0);
+                    return totalPercentage === 100;
+                }
                 return true;
             }
 
-            const handleOpenReport = (machineId, order, metrics) => { setReportConfig({ machineId, order, metrics }); setShowReportModal(true); };
+            const handleOpenReport = (machineId, order, metrics) => {
+                setReportConfig({ machineId, order, metrics });
+                setShowReportModal(true);
+            };
 
-            // Renderers (Calendar, Materials, Confirmation, Flow, List) - Shortened for brevity as logic is same, only structure fixed above
-            const renderCalendarPicker = () => { /* ...Same as before... */
-                 const finishDate = calculatePreview();
-                 if (!finishDate) return <div className="text-center text-red-400">Datos insuficientes</div>;
-                 const startIdx = allRows.findIndex(r => r.isoDate === config.startDate);
-                 if (startIdx === -1) return null;
-                 let endIdx = allRows.findIndex(r => r.isoDate === finishDate);
-                 if (!finishDate || endIdx === -1) endIdx = startIdx + 60;
-                 const daysToShow = allRows.slice(Math.max(0, startIdx - 7), Math.min(allRows.length, endIdx + 15));
-                 const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(daysToShow[0]?.shortDay) || 0;
-                 return (
+
+            // Renderers
+            const renderCalendarPicker = () => {
+                const finishDate = calculatePreview();
+                if (!finishDate) return <div className="text-center text-red-400">Datos insuficientes para calcular</div>;
+                
+                const startIdx = allRows.findIndex(r => r.isoDate === config.startDate);
+                if (startIdx === -1) return null;
+
+                let endIdx = allRows.findIndex(r => r.isoDate === finishDate);
+                if (!finishDate) endIdx = startIdx + 60; // Mostrar 60 días si no hay fecha de fin
+                if (endIdx === -1) endIdx = startIdx + 60; 
+
+                // Start view 7 days before the actual start date to give context
+                const viewStartIdx = Math.max(0, startIdx - 7);
+                const viewEndIdx = Math.min(allRows.length, endIdx + 15);
+
+                const daysToShow = allRows.slice(viewStartIdx, viewEndIdx);
+                const startDay = daysToShow[0];
+                const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(startDay?.shortDay) || 0;
+                const blanks = Array(startDayOffset).fill(null);
+
+                return (
                     <div className="grid grid-cols-7 gap-1">
                         {['D','L','M','M','J','V','S'].map(d => <div key={d} className="text-center text-[10px] text-slate-500 font-bold">{d}</div>)}
-                        {Array(startDayOffset).fill(null).map((_, i) => <div key={`b-${i}`}></div>)}
+                        {blanks.map((_, i) => <div key={`b-${i}`}></div>)}
                         {daysToShow.map(row => {
                             const isDisabled = config.disabledDates.includes(row.isoDate);
                             const isGlobalHidden = hiddenDays.includes(row.id);
+                            const isStartDay = row.isoDate === config.startDate;
+                            const isFinishDay = row.isoDate === finishDate;
                             const isWithinRange = !isDisabled && !isGlobalHidden && (row.isoDate >= config.startDate && row.isoDate <= finishDate);
+                            const isPast = new Date(row.isoDate) < new Date(config.startDate);
+
                             let bgClass = 'bg-slate-800 text-slate-500'; 
                             if (isGlobalHidden) bgClass = 'bg-slate-900 opacity-30 cursor-not-allowed';
-                            else if (row.isoDate === config.startDate) bgClass = 'bg-blue-600 border border-blue-400 text-white';
-                            else if (row.isoDate === finishDate) bgClass = 'bg-red-600 border border-red-400 text-white shadow shadow-red-900'; 
+                            else if (isStartDay) bgClass = 'bg-blue-600 border border-blue-400 text-white';
+                            else if (isFinishDay) bgClass = 'bg-red-600 border border-red-400 text-white shadow shadow-red-900'; 
                             else if (isDisabled) bgClass = 'bg-red-900/40 text-red-500 border border-red-900'; 
                             else if (isWithinRange) bgClass = 'bg-green-600 text-white shadow shadow-green-900';
-                            return <button key={row.id} onClick={() => !isGlobalHidden && row.isoDate > config.startDate && toggleDateDisabled(row.isoDate)} className={`p-1 rounded text-[10px] font-bold h-10 flex flex-col items-center justify-center transition-all ${bgClass}`}><span>{row.dateNum}</span><span className="text-[6px] uppercase">{row.month}</span></button>;
+                            else if (isPast) bgClass = 'bg-slate-900/50 text-slate-600 cursor-not-allowed';
+
+                            return (
+                                <button key={row.id} 
+                                    onClick={() => !isGlobalHidden && !isPast && !isStartDay && toggleDateDisabled(row.isoDate)}
+                                    className={`p-1 rounded text-[10px] font-bold h-10 flex flex-col items-center justify-center transition-all ${bgClass}`}>
+                                    <span>{row.dateNum}</span>
+                                    <span className="text-[6px] uppercase">{row.month}</span>
+                                </button>
+                            );
                         })}
+                    </div>
+                );
+            };
+
+            const renderMaterialConfig = () => {
+                const totalPercentage = config.materials.reduce((sum, m) => sum + Number(m.percentage || 0), 0);
+
+                return (
+                    <div className="space-y-4 fade-in">
+                        <h3 className="text-xl font-bold text-white text-center mb-6">Materia Prima y Merma</h3>
+
+                        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Hilaturas ({totalPercentage}%)</label>
+                            <div className="space-y-3">
+                                {config.materials.map((m, index) => (
+                                    <div key={index} className="flex gap-2 items-center">
+                                        <input type="text" value={m.name} onChange={e => handleMaterialChange(index, 'name', e.target.value.toUpperCase())} placeholder="NOMBRE (EJ: NYLON)" className="flex-1 bg-slate-900 text-sm text-white p-2 rounded border border-slate-600 outline-none uppercase" />
+                                        <input type="number" value={m.percentage} onChange={e => handleMaterialChange(index, 'percentage', Math.min(100, Math.max(0, e.target.value)))} placeholder="%" className="w-16 bg-slate-900 text-sm text-white p-2 rounded border border-slate-600 outline-none text-center" />
+                                        <button onClick={() => removeMaterial(index)} className="p-2 bg-red-900/50 rounded text-red-400"><i data-lucide="x" className="w-4 h-4"></i></button>
+                                    </div>
+                                ))}
+                            </div>
+                            <button onClick={addMaterial} className="mt-3 w-full bg-slate-700 text-white py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2"><i data-lucide="plus-circle" className="w-4 h-4"></i> Añadir Hilatura</button>
+
+                            {totalPercentage !== 100 && totalPercentage > 0 && (
+                                <div className="mt-4 p-3 bg-red-900/30 text-red-300 rounded-lg text-xs font-bold text-center">
+                                    ¡Atención! La suma de porcentajes debe ser 100%. (Actual: {totalPercentage}%)
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Merma</label>
+                            <div className="flex gap-4 justify-center">
+                                {[0, 5, 10].map(p => (
+                                    <button key={p} onClick={() => applyWaste(p)} className={`flex-1 py-2 rounded-lg border font-bold text-sm ${config.wastePercentage === p ? 'bg-green-600 border-green-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>
+                                        {p}% Merma
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderConfirmation = () => {
+                const { totalYarnKilos, consumption } = calculateConsumption(true);
+                const consumptionBase = calculateConsumption(false); 
+                
+                return (
+                    <div className="space-y-6 fade-in text-center">
+                        <h3 className="text-xl font-bold text-white">Confirmación y Consumo</h3>
+                        <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 inline-block text-left w-full">
+                            <div className="flex justify-between border-b border-slate-700 pb-2 mb-2">
+                                <span className="text-slate-400">Modelo:</span>
+                                <span className="font-bold text-yellow-400 text-lg">{modelName}</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-sm mb-4">
+                                <div className="flex justify-between"><span className="text-slate-400">Total Piezas:</span><span className="text-white">{Number(config.totalQty).toLocaleString()}</span></div>
+                                <div className="flex justify-between"><span className="text-slate-400">Peso/Pza:</span><span className="text-white">{config.pieceWeightGrams} g</span></div>
+                                <div className="flex justify-between"><span className="text-slate-400">Merma Aplicada:</span><span className={`font-bold ${config.wastePercentage > 0 ? 'text-red-400' : 'text-green-400'}`}>{config.wastePercentage}%</span></div>
+                            </div>
+                            
+                            <h4 className="text-xs font-bold text-blue-400 uppercase mt-4 mb-2 border-t border-slate-700 pt-2">Consumo Total de Hilatura</h4>
+                            <div className="text-3xl font-black text-center text-green-400 mb-4">{totalYarnKilos.toFixed(2)} KG</div>
+
+                            <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Desglose por Hilatura:</h4>
+                            <div className="space-y-1">
+                                {consumption.map((m, i) => (
+                                    <div key={i} className="flex justify-between text-sm">
+                                        <span className="text-white font-bold">{m.name} ({m.percentage}%)</span>
+                                        <span className="text-slate-300">{m.kilos.toFixed(2)} KG</span>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {config.wastePercentage > 0 && (
+                                <div className="text-[10px] text-red-400 mt-4 border-t border-red-900/50 pt-2">
+                                    Consumo base sin merma: {consumptionBase.totalYarnKilos.toFixed(2)} KG.
+                                </div>
+                            )}
+
+                        </div>
+                        <p className="text-sm text-slate-400">¿Deseas guardar esta planeación?</p>
+                    </div>
+                );
+            };
+
+            const renderCreateFlow = () => (
+                <div className="flex flex-col h-full">
+                    <div className="flex justify-between mb-6 px-2 no-print">
+                        {[1,2,3,4,5,6].map(s => (
+                            <div key={s} className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= s ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-500'}`}>{s}</div>
+                        ))}
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto custom-scrollbar px-2">
+                        {step === 1 && (
+                            <div className="space-y-4 fade-in">
+                                <h3 className="text-xl font-bold text-white text-center mb-6">{isEditing ? 'Editar Pedido' : 'Nuevo Pedido'}</h3>
+                                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                                    <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Ingresa el Modelo</label>
+                                    <input type="text" value={modelName} onChange={e => setModelName(e.target.value.toUpperCase())} placeholder="EJ: B001-EG" className="w-full bg-slate-900 text-2xl font-black text-white p-4 rounded-lg border border-slate-600 focus:border-blue-500 outline-none text-center uppercase" autoFocus />
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 2 && (
+                            <div className="fade-in">
+                                <h3 className="text-lg font-bold text-white text-center mb-4">Selecciona Máquinas</h3>
+                                <div className="grid grid-cols-4 gap-4 justify-items-center">
+                                    {MACHINES.map(m => {
+                                        const isSelected = selectedMachines.includes(m.id);
+                                        const hasActiveOrder = ordersData[m.id] && ordersData[m.id].totalQty > 0;
+                                        
+                                        // CORRECCIÓN: Se permite seleccionar siempre. El botón ya no está deshabilitado.
+                                        return (
+                                            <button key={m.id} onClick={() => {
+                                                toggleMachine(m.id);
+                                                // Si se selecciona una máquina con pedido activo, se sugiere usar la fecha de finalización como inicio
+                                                if (!isSelected && hasActiveOrder && selectedMachines.length === 0) {
+                                                    const order = ordersData[m.id];
+                                                    const metrics = calculateOrderMetrics(m.id, order, allProductionData, allRows, hiddenDays);
+                                                    
+                                                    let nextStartDate = new Date().toISOString().split('T')[0];
+                                                    if (metrics.finishDate) {
+                                                         // Sumar un día a la fecha de finalización
+                                                        const finishDateObj = new Date(metrics.finishDate);
+                                                        finishDateObj.setDate(finishDateObj.getDate() + 1);
+                                                        nextStartDate = finishDateObj.toISOString().split('T')[0];
+                                                    }
+                                                    
+                                                    setConfig(prev => ({...prev, startDate: nextStartDate}));
+                                                    alert(`Fecha de inicio sugerida: ${new Date(nextStartDate).toLocaleDateString('es-MX')} (Día siguiente a la finalización estimada de ${order.model})`);
+                                                }
+                                            }} 
+                                            className={`machine-circle w-14 h-14 rounded-full flex flex-col items-center justify-center border-2 shadow-lg relative ${isSelected ? 'bg-green-600 border-green-400 selected' : hasActiveOrder ? 'bg-red-600 border-red-400' : 'bg-slate-800 border-slate-600'}`}>
+                                                <span className="text-[10px] font-black text-white">{m.name.replace('MAQ ','')}</span>
+                                                {hasActiveOrder && <span className="text-[8px] text-yellow-300 font-bold absolute -bottom-1 bg-slate-900/80 px-1 rounded-full">{ordersData[m.id].model}</span>}
+                                                {isSelected && <div className="absolute -top-1 -right-1 bg-white text-green-600 rounded-full p-0.5"><i data-lucide="check" className="w-3 h-3"></i></div>}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 3 && (
+                            <div className="space-y-4 fade-in">
+                                <h3 className="text-lg font-bold text-white text-center mb-4">Configuración Producción</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="col-span-2">
+                                        <label className="text-xs text-slate-400 uppercase mb-2 block">Operadores (Turno)</label>
+                                        <div className="flex gap-2">
+                                            {['Andrés', 'Balta'].map(op => {
+                                                const active = config.operators.includes(op);
+                                                return (
+                                                    <button key={op} onClick={() => toggleOperator(op)} className={`flex-1 py-3 rounded-lg border font-bold text-sm flex items-center justify-center gap-2 ${active ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-800 border-slate-600 text-slate-500'}`}>
+                                                        {active ? <i data-lucide="check-circle" className="w-4 h-4"/> : <i data-lucide="circle" className="w-4 h-4"/>}
+                                                        {op}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                    <div><label className="text-xs text-slate-400 uppercase">Cantidad Total</label><input type="number" value={config.totalQty} onChange={e => setConfig({...config, totalQty: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="1000" /></div>
+                                    <div><label className="text-xs text-slate-400 uppercase">Minutos/Pieza</label><input type="number" value={config.timePerPiece} onChange={e => setConfig({...config, timePerPiece: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="1.5" /></div>
+                                    <div><label className="text-xs text-slate-400 uppercase">Peso/Pieza (Gramos)</label><input type="number" value={config.pieceWeightGrams} onChange={e => setConfig({...config, pieceWeightGrams: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="350 g" /></div>
+                                    <div><label className="text-xs text-slate-400 uppercase">Fecha Inicio</label><input type="date" value={config.startDate} onChange={e => setConfig({...config, startDate: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 4 && (
+                            <div className="space-y-4 fade-in">
+                                <h3 className="text-lg font-bold text-white text-center mb-1">Planeación Automática</h3>
+                                <p className="text-xs text-slate-400 text-center mb-4">Toca un día verde para desactivarlo (descanso/paro)</p>
+                                
+                                <div className="bg-slate-900 p-2 rounded-lg border border-slate-700 mb-4">
+                                    <div className="flex justify-between items-center text-sm">
+                                        <span className="text-slate-400">Fin Estimado:</span>
+                                        <span className="font-bold text-green-400 text-lg">{calculatePreview() ? new Date(calculatePreview()).toLocaleDateString() : '...'}</span>
+                                    </div>
+                                </div>
+                                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50 max-h-[300px] overflow-y-auto custom-scrollbar">
+                                    {renderCalendarPicker()}
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 5 && renderMaterialConfig()}
+
+                        {step === 6 && renderConfirmation()}
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-slate-700 flex justify-between no-print">
+                        {step > 1 ? <button onClick={() => setStep(s => s - 1)} className="px-4 py-2 rounded bg-slate-700 text-white">Atrás</button> : <button onClick={() => setViewMode('list')} className="px-4 py-2 rounded bg-slate-800 text-slate-400">Cancelar</button>}
+                        {step < 6 ? (
+                            <button onClick={() => {
+                                if (validateStep(step)) { setStep(s => s + 1); }
+                                else { alert(step === 5 ? '¡Error! La suma de porcentajes de hilaturas debe ser 100.' : 'Faltan datos obligatorios para continuar.'); }
+                            }} className="px-6 py-2 rounded bg-blue-600 text-white font-bold hover:bg-blue-500" disabled={!validateStep(step)}>Siguiente</button>
+                        ) : (
+                            <button onClick={handleFinalSave} className="px-6 py-2 rounded bg-green-600 text-white font-bold shadow-lg hover:bg-green-500 animate-pulse">CONFIRMAR</button>
+                        )}
+                    </div>
+                </div>
+            );
+
+            const renderListView = () => {
+                const activeMachines = MACHINES.filter(m => ordersData[m.id] && ordersData[m.id].totalQty > 0);
+                return (
+                    <div className="flex flex-col h-full">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-xl font-black text-white flex items-center gap-2"><i data-lucide="clipboard-list" className="text-yellow-400"></i> Pedidos Activos</h2>
+                            <div className="flex gap-3">
+                                <button onClick={handleStartCreate} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg transition-transform hover:scale-105"><i data-lucide="plus-circle" className="w-5 h-5"></i> Nuevo</button>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
+                            {activeMachines.length === 0 && <div className="text-center text-slate-500 py-10">No hay pedidos activos.</div>}
+                            {activeMachines.map(m => {
+                                const order = ordersData[m.id];
+                                const metrics = calculateOrderMetrics(m.id, order, allProductionData, ALL_ROWS, hiddenDays);
+                                
+                                return (
+                                    <div key={m.id} className="bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-md relative overflow-hidden group">
+                                        <div className="flex justify-between items-start mb-2 relative z-10">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-blue-400 text-sm">{m.name}</span>
+                                                    <span className="text-[10px] bg-slate-800 px-2 rounded text-slate-400">{m.type.split(' ')[0]}</span>
+                                                </div>
+                                                <h4 className="text-xl font-black text-yellow-400 uppercase mt-1">{order.model}</h4>
+                                            </div>
+                                            <div className="flex flex-col items-end gap-2">
+                                                <div className="flex gap-1">
+                                                     <button onClick={() => handleOpenReport(m.id, order, metrics)} className="p-1.5 bg-green-700/50 hover:bg-green-700 rounded text-green-400" title="Generar Reporte"><i data-lucide="file-text" className="w-4 h-4"></i></button>
+                                                     <button onClick={() => handleStartEdit(m.id, order)} className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-blue-400"><i data-lucide="pencil" className="w-4 h-4"></i></button>
+                                                     <button onClick={() => handleDelete(m.id)} className="p-1.5 bg-slate-800 hover:bg-red-900/50 rounded text-red-400"><i data-lucide="trash-2" className="w-4 h-4"></i></button>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className={`block text-xs font-bold ${metrics.status === 'COMPLETADO' ? 'text-green-500' : 'text-slate-400'}`}>{metrics.status === 'COMPLETADO' ? '¡LISTO!' : 'Fin Estimado'}</span>
+                                                    <span className="text-lg font-bold text-white">{metrics.status === 'COMPLETADO' ? <i data-lucide="check-circle" className="w-5 h-5 inline"/> : (metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}) : '-')}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {metrics.status !== 'OK' && metrics.status !== 'COMPLETADO' && (
+                                            <div className="flex items-center gap-2 p-2 mt-2 bg-red-900/30 border border-red-900 rounded-lg text-xs font-bold text-red-300 relative z-10">
+                                                <i data-lucide="alert-triangle" className="w-4 h-4 shrink-0"></i>
+                                                <span>{metrics.status}: Detrás por {Math.abs(metrics.deviation).toLocaleString()} pzas (Plneado: {metrics.plannedToDate.toLocaleString()}).</span>
+                                            </div>
+                                        )}
+
+                                        <div className="relative z-10 mt-3">
+                                            <div className="flex justify-between text-xs text-slate-400 mb-1">
+                                                <span>Progreso: {metrics.progress.toFixed(1)}%</span>
+                                                <span>{metrics.produced.toLocaleString()} / {Number(order.totalQty).toLocaleString()}</span>
+                                            </div>
+                                            <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden border border-slate-700">
+                                                <div className="h-full bg-gradient-to-r from-blue-600 to-cyan-400 transition-all duration-1000" style={{ width: `${metrics.progress}%` }}></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                        {showReportModal && reportConfig && <ReportModal onClose={() => setShowReportModal(false)} {...reportConfig} orderManagerRef={ref} />}
                     </div>
                 );
             };
@@ -582,63 +1121,32 @@
                             <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6 hover:text-white"></i></button>
                         </div>
                         <div className="flex-1 p-6 overflow-hidden">
-                            {viewMode === 'list' ? (
-                                <div className="flex flex-col h-full">
-                                    <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-black text-white flex items-center gap-2"><i data-lucide="clipboard-list" className="text-yellow-400"></i> Pedidos Activos</h2><button onClick={handleStartCreate} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg"><i data-lucide="plus-circle" className="w-5 h-5"></i> Nuevo</button></div>
-                                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
-                                        {MACHINES.filter(m => ordersData[m.id] && ordersData[m.id].totalQty > 0).map(m => {
-                                            const order = ordersData[m.id];
-                                            const metrics = calculateOrderMetrics(m.id, order, allProductionData, allRows, hiddenDays);
-                                            return (
-                                                <div key={m.id} className="bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-md relative overflow-hidden group">
-                                                    <div className="flex justify-between items-start mb-2 relative z-10">
-                                                        <div><div className="flex items-center gap-2"><span className="font-bold text-blue-400 text-sm">{m.name}</span><span className="text-[10px] bg-slate-800 px-2 rounded text-slate-400">{m.type.split(' ')[0]}</span></div><h4 className="text-xl font-black text-yellow-400 uppercase mt-1">{order.model}</h4></div>
-                                                        <div className="flex flex-col items-end gap-2">
-                                                            <div className="flex gap-1">
-                                                                <button onClick={() => handleOpenReport(m.id, order, metrics)} className="p-1.5 bg-green-700/50 hover:bg-green-700 rounded text-green-400"><i data-lucide="file-text" className="w-4 h-4"></i></button>
-                                                                <button onClick={() => handleStartEdit(m.id, order)} className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-blue-400"><i data-lucide="pencil" className="w-4 h-4"></i></button>
-                                                                <button onClick={() => handleDelete(m.id)} className="p-1.5 bg-slate-800 hover:bg-red-900/50 rounded text-red-400"><i data-lucide="trash-2" className="w-4 h-4"></i></button>
-                                                            </div>
-                                                            <div className="text-right"><span className={`block text-xs font-bold ${metrics.status === 'COMPLETADO' ? 'text-green-500' : 'text-slate-400'}`}>{metrics.status === 'COMPLETADO' ? '¡LISTO!' : 'Fin Estimado'}</span><span className="text-lg font-bold text-white">{metrics.status === 'COMPLETADO' ? <i data-lucide="check-circle" className="w-5 h-5 inline"/> : (metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}) : '-')}</span></div>
-                                                        </div>
-                                                    </div>
-                                                    {metrics.status !== 'OK' && metrics.status !== 'COMPLETADO' && <div className="flex items-center gap-2 p-2 mt-2 bg-red-900/30 border border-red-900 rounded-lg text-xs font-bold text-red-300 relative z-10"><i data-lucide="alert-triangle" className="w-4 h-4 shrink-0"></i><span>{metrics.status}: Detrás por {Math.abs(metrics.deviation).toLocaleString()} pzas.</span></div>}
-                                                    <div className="relative z-10 mt-3"><div className="flex justify-between text-xs text-slate-400 mb-1"><span>Progreso: {metrics.progress.toFixed(1)}%</span><span>{metrics.produced.toLocaleString()} / {Number(order.totalQty).toLocaleString()}</span></div><div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden border border-slate-700"><div className="h-full bg-gradient-to-r from-blue-600 to-cyan-400 transition-all duration-1000" style={{ width: `${metrics.progress}%` }}></div></div></div>
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                    {showReportModal && reportConfig && <ReportModal onClose={() => setShowReportModal(false)} {...reportConfig} orderManagerRef={ref} />}
-                                </div>
-                            ) : (
-                                <div className="flex flex-col h-full">
-                                    <div className="flex justify-between mb-6 px-2 no-print">{[1,2,3,4,5,6].map(s => <div key={s} className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= s ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-500'}`}>{s}</div>)}</div>
-                                    <div className="flex-1 overflow-y-auto custom-scrollbar px-2">
-                                        {step === 1 && <div className="space-y-4 fade-in"><h3 className="text-xl font-bold text-white text-center mb-6">{isEditing ? 'Editar Pedido' : 'Nuevo Pedido'}</h3><div className="bg-slate-800 p-6 rounded-xl border border-slate-700"><label className="block text-blue-400 font-bold uppercase text-xs mb-2">Modelo</label><input type="text" value={modelName} onChange={e => setModelName(e.target.value.toUpperCase())} className="w-full bg-slate-900 text-2xl font-black text-white p-4 rounded-lg border border-slate-600 outline-none text-center uppercase" autoFocus /></div></div>}
-                                        {step === 2 && <div className="fade-in"><h3 className="text-lg font-bold text-white text-center mb-4">Selecciona Máquinas</h3><div className="grid grid-cols-4 gap-4 justify-items-center">{MACHINES.map(m => { const isSelected = selectedMachines.includes(m.id); const hasActiveOrder = ordersData[m.id] && ordersData[m.id].totalQty > 0; return (<button key={m.id} onClick={() => { toggleMachine(m.id); if (!isSelected && hasActiveOrder && selectedMachines.length === 0) { const order = ordersData[m.id]; alert(`Atención: Hay un pedido activo (${order.model}). Si continúas, se archivará y comenzará el nuevo.`); } }} className={`machine-circle w-14 h-14 rounded-full flex flex-col items-center justify-center border-2 shadow-lg relative ${isSelected ? 'bg-green-600 border-green-400 selected' : hasActiveOrder ? 'bg-red-600 border-red-400' : 'bg-slate-800 border-slate-600'}`}><span className="text-[10px] font-black text-white">{m.name.replace('MAQ ','')}</span>{hasActiveOrder && <span className="text-[8px] text-yellow-300 font-bold absolute -bottom-1 bg-slate-900/80 px-1 rounded-full">{ordersData[m.id].model}</span>}{isSelected && <div className="absolute -top-1 -right-1 bg-white text-green-600 rounded-full p-0.5"><i data-lucide="check" className="w-3 h-3"></i></div>}</button>) })}</div></div>}
-                                        {step === 3 && <div className="space-y-4 fade-in"><h3 className="text-lg font-bold text-white text-center mb-4">Configuración</h3><div className="grid grid-cols-2 gap-4"><div className="col-span-2"><label className="text-xs text-slate-400 uppercase mb-2 block">Operadores</label><div className="flex gap-2">{['Andrés', 'Balta'].map(op => <button key={op} onClick={() => toggleOperator(op)} className={`flex-1 py-3 rounded-lg border font-bold text-sm flex items-center justify-center gap-2 ${config.operators.includes(op) ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-800 border-slate-600 text-slate-500'}`}>{op}</button>)}</div></div><div><label className="text-xs text-slate-400 uppercase">Cantidad</label><input type="number" value={config.totalQty} onChange={e => setConfig({...config, totalQty: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div><div><label className="text-xs text-slate-400 uppercase">Min/Pza</label><input type="number" value={config.timePerPiece} onChange={e => setConfig({...config, timePerPiece: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div><div><label className="text-xs text-slate-400 uppercase">Peso/Pza (g)</label><input type="number" value={config.pieceWeightGrams} onChange={e => setConfig({...config, pieceWeightGrams: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div><div><label className="text-xs text-slate-400 uppercase">Inicio</label><input type="date" value={config.startDate} onChange={e => setConfig({...config, startDate: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div></div></div>}
-                                        {step === 4 && <div className="space-y-4 fade-in"><h3 className="text-lg font-bold text-white text-center mb-1">Planeación</h3><p className="text-xs text-slate-400 text-center mb-4">Toca un día verde para desactivarlo</p><div className="bg-slate-900 p-2 rounded-lg border border-slate-700 mb-4"><div className="flex justify-between items-center text-sm"><span className="text-slate-400">Fin Estimado:</span><span className="font-bold text-green-400 text-lg">{calculatePreview() ? new Date(calculatePreview()).toLocaleDateString() : '...'}</span></div></div><div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50 max-h-[300px] overflow-y-auto custom-scrollbar">{renderCalendarPicker()}</div></div>}
-                                        {step === 5 && <div className="space-y-4 fade-in"><h3 className="text-xl font-bold text-white text-center mb-6">Materia Prima</h3><div className="bg-slate-800 p-4 rounded-xl border border-slate-700"><label className="block text-blue-400 font-bold uppercase text-xs mb-2">Hilaturas</label><div className="space-y-3">{config.materials.map((m, index) => (<div key={index} className="flex gap-2 items-center"><input type="text" value={m.name} onChange={e => handleMaterialChange(index, 'name', e.target.value.toUpperCase())} placeholder="NOMBRE" className="flex-1 bg-slate-900 text-sm text-white p-2 rounded border border-slate-600 outline-none uppercase" /><input type="number" value={m.percentage} onChange={e => handleMaterialChange(index, 'percentage', Math.min(100, Math.max(0, e.target.value)))} placeholder="%" className="w-16 bg-slate-900 text-sm text-white p-2 rounded border border-slate-600 outline-none text-center" /><button onClick={() => removeMaterial(index)} className="p-2 bg-red-900/50 rounded text-red-400"><i data-lucide="x" className="w-4 h-4"></i></button></div>))}</div><button onClick={addMaterial} className="mt-3 w-full bg-slate-700 text-white py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2"><i data-lucide="plus-circle" className="w-4 h-4"></i> Añadir Hilatura</button></div><div className="bg-slate-800 p-4 rounded-xl border border-slate-700"><label className="block text-blue-400 font-bold uppercase text-xs mb-2">Merma</label><div className="flex gap-4 justify-center">{[0, 5, 10].map(p => (<button key={p} onClick={() => applyWaste(p)} className={`flex-1 py-2 rounded-lg border font-bold text-sm ${config.wastePercentage === p ? 'bg-green-600 border-green-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>{p}% Merma</button>))}</div></div></div>}
-                                        {step === 6 && <div className="space-y-6 fade-in text-center"><h3 className="text-xl font-bold text-white">Confirmación</h3><div className="bg-slate-900 p-4 rounded-xl border border-slate-700 inline-block text-left w-full"><div className="flex justify-between border-b border-slate-700 pb-2 mb-2"><span className="text-slate-400">Modelo:</span><span className="font-bold text-yellow-400 text-lg">{modelName}</span></div><div className="grid grid-cols-2 gap-2 text-sm mb-4"><div className="flex justify-between"><span className="text-slate-400">Total Piezas:</span><span className="text-white">{Number(config.totalQty).toLocaleString()}</span></div><div className="flex justify-between"><span className="text-slate-400">Hilo Total:</span><span className="text-white">{calculateConsumption(true).totalYarnKilos.toFixed(2)} KG</span></div></div></div></div>}
-                                    </div>
-                                    <div className="mt-4 pt-4 border-t border-slate-700 flex justify-between no-print">{step > 1 ? <button onClick={() => setStep(s => s - 1)} className="px-4 py-2 rounded bg-slate-700 text-white">Atrás</button> : <button onClick={() => setViewMode('list')} className="px-4 py-2 rounded bg-slate-800 text-slate-400">Cancelar</button>}{step < 6 ? <button onClick={() => validateStep(step) ? setStep(s => s + 1) : alert('Faltan datos')} className="px-6 py-2 rounded bg-blue-600 text-white font-bold hover:bg-blue-500">Siguiente</button> : <button onClick={handleFinalSave} className="px-6 py-2 rounded bg-green-600 text-white font-bold shadow-lg hover:bg-green-500 animate-pulse">CONFIRMAR</button>}</div>
-                                </div>
-                            )}
+                            {viewMode === 'list' ? renderListView() : renderCreateFlow()}
                         </div>
                     </div>
                 </div>
             );
         });
 
+
         const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall, users }) => {
             const [pin, setPin] = useState('');
-            const handleLogin = (e) => { e.preventDefault(); const user = users[pin]; if (user) setAuthenticatedUser({ ...user, id: pin }); else alert('PIN incorrecto'); };
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const user = users[pin]; 
+                if (user) setAuthenticatedUser({ ...user, id: pin }); 
+                else alert('PIN incorrecto');
+            };
             return (
                 <div className="flex items-center justify-center h-full bg-slate-900 p-4">
                     <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center border border-slate-700 relative">
                         <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg"><i data-lucide="grid" className="w-8 h-8"></i></div>
-                        <h2 className="text-2xl font-black text-white mb-2">MAES - TEJIDO</h2><p className="text-slate-400 mb-8">Control & Planeación</p>
-                        <form onSubmit={handleLogin} className="space-y-4" autoComplete="off"><input type="tel" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="• • • •" className="w-full text-center text-4xl p-4 bg-slate-900 border-2 border-slate-700 rounded-xl tracking-[0.2em] focus:border-blue-500 outline-none font-bold text-white password-mask" autoFocus /><button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-blue-500 shadow-lg">INGRESAR</button></form>
+                        <h2 className="text-2xl font-black text-white mb-2">MAES - TEJIDO</h2>
+                        <p className="text-slate-400 mb-8">Control & Planeación</p>
+                        <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
+                            <input type="tel" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="• • • •" className="w-full text-center text-4xl p-4 bg-slate-900 border-2 border-slate-700 rounded-xl tracking-[0.2em] focus:border-blue-500 outline-none font-bold text-white password-mask" autoFocus />
+                            <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-blue-500 shadow-lg">INGRESAR</button>
+                        </form>
                         {installPrompt && (<div className="mt-8 pt-6 border-t border-slate-700"><button onClick={onInstall} className="flex items-center justify-center gap-2 w-full bg-slate-700 text-slate-200 py-3 rounded-lg font-bold text-sm border border-slate-600"><i data-lucide="download" className="w-4 h-4"></i>Instalar App</button></div>)}
                     </div>
                 </div>
@@ -660,7 +1168,7 @@
                         <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl"><h3 className="font-bold text-lg text-white">Configuración Global</h3><button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6"></i></button></div>
                         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-6">
                             <div><h4 className="text-xs font-bold text-blue-400 uppercase mb-2">Visibilidad Máquinas</h4><div className="grid grid-cols-2 gap-2">{MACHINES.map(m => { const isHidden = hiddenM.includes(m.id); return (<button key={m.id} onClick={() => toggleMachine(m.id)} className={`flex items-center justify-between p-2 rounded border text-sm ${isHidden ? 'bg-red-900/30 border-red-500/50 text-red-300' : 'bg-slate-900 border-slate-700 text-slate-300'}`}><span>{m.name}</span>{isHidden ? <i data-lucide="eye-off" className="w-4 h-4"></i> : <i data-lucide="eye" className="w-4 h-4 text-green-500/50"></i>}</button>) })}</div></div>
-                            <div><h4 className="text-xs font-bold text-blue-400 uppercase mb-2">Ocultar Días (Feriados)</h4><div className="flex gap-2 mb-3"><input type="date" value={dateToHide} onChange={e => setDateToHide(e.target.value)} className="bg-slate-900 text-white border border-slate-600 rounded p-2 flex-1 text-sm" /><button onClick={hideDate} className="bg-slate-700 px-3 rounded text-white text-sm">Ocultar</button></div>{hiddenD.map(rid => (<div key={rid} className="flex justify-between items-center text-sm p-2 bg-slate-800 rounded mb-1"><span className="text-slate-300">{rid}</span><button onClick={() => unhideDate(rid)} className="text-red-400 text-xs font-bold">Mostrar</button></div>))}</div>
+                            <div><h4 className="text-xs font-bold text-blue-400 uppercase mb-2">Ocultar Días (Feriados Globales)</h4><div className="flex gap-2 mb-3"><input type="date" value={dateToHide} onChange={e => setDateToHide(e.target.value)} className="bg-slate-900 text-white border border-slate-600 rounded p-2 flex-1 text-sm" /><button onClick={hideDate} className="bg-slate-700 px-3 rounded text-white text-sm">Ocultar</button></div>{hiddenD.map(rid => (<div key={rid} className="flex justify-between items-center text-sm p-2 bg-slate-800 rounded mb-1"><span className="text-slate-300">{rid}</span><button onClick={() => unhideDate(rid)} className="text-red-400 text-xs font-bold">Mostrar</button></div>))}</div>
                         </div>
                         <div className="p-4 border-t border-slate-700 bg-slate-900 rounded-b-2xl"><button onClick={handleSave} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold">Guardar</button></div>
                     </div>
@@ -673,12 +1181,14 @@
             const handleMonthChange = (delta) => { const d = new Date(viewDate); d.setMonth(d.getMonth() + delta); setViewDate(d); };
             const monthRows = allRows.filter(r => r.monthIndex === viewDate.getMonth() && r.year === viewDate.getFullYear());
             const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(monthRows[0]?.shortDay) || 0;
+            const blanks = Array(startDayOffset).fill(null);
+
             return (
                 <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-700 p-4" onClick={e => e.stopPropagation()}>
                         <div className="flex justify-between items-center mb-4"><button onClick={() => handleMonthChange(-1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-left" className="text-white w-5 h-5"></i></button><span className="font-bold text-white uppercase">{viewDate.toLocaleString('es-MX', { month: 'long', year: 'numeric' })}</span><button onClick={() => handleMonthChange(1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-right" className="text-white w-5 h-5"></i></button></div>
                         <div className="grid grid-cols-7 gap-1 text-center mb-2">{['D','L','M','M','J','V','S'].map((d,i) => <div key={i} className="text-xs text-slate-500 font-bold">{d}</div>)}</div>
-                        <div className="grid grid-cols-7 gap-1">{Array(startDayOffset).fill(null).map((_, i) => <div key={`b-${i}`}></div>)}{monthRows.map(row => (<button key={row.id} onClick={() => onSelectDate(row)} className="aspect-square flex items-center justify-center rounded-lg hover:bg-blue-600 bg-slate-900 text-slate-200 text-sm font-bold border border-slate-700">{row.dateNum}</button>))}</div>
+                        <div className="grid grid-cols-7 gap-1">{blanks.map((_, i) => <div key={`b-${i}`}></div>)}{monthRows.map(row => (<button key={row.id} onClick={() => onSelectDate(row)} className="aspect-square flex items-center justify-center rounded-lg hover:bg-blue-600 bg-slate-900 text-slate-200 text-sm font-bold border border-slate-700">{row.dateNum}</button>))}</div>
                         <button onClick={onClose} className="w-full mt-4 bg-slate-700 py-2 rounded-lg text-white font-bold text-sm">Cerrar</button>
                     </div>
                 </div>
@@ -687,7 +1197,7 @@
 
         const App = () => {
             const [user, setUser] = useState(null);
-            const [usersData, setUsersData] = useState(DEFAULT_USERS);
+            const [usersData, setUsersData] = useState(DEFAULT_USERS); // Dynamic users data
             const [data, setData] = useState({});
             const [ordersData, setOrdersData] = useState({});
             const [visibilityConfig, setVisibilityConfig] = useState({ machines: [], days: [] });
@@ -695,11 +1205,14 @@
             const [weekOffset, setWeekOffset] = useState(INITIAL_STATE.weekOffset);
             const [selectedDayIndex, setSelectedDayIndex] = useState(INITIAL_STATE.selectedDayIndex); 
             
+            // Modales
             const [showOrderManager, setShowOrderManager] = useState(false);
             const [showVisibilityModal, setShowVisibilityModal] = useState(false);
             const [showCalendar, setShowCalendar] = useState(false);
             const [showUserManagementModal, setShowUserManagementModal] = useState(false);
             const [deferredPrompt, setDeferredPrompt] = useState(null);
+
+            // Ref para el OrderManager para acceder a sus funciones internas (ej: encadenar pedidos)
             const orderManagerRef = React.useRef(); 
 
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
@@ -711,12 +1224,15 @@
                         const unsubDb = onSnapshot(collection(db, 'produccion_2026'), (snap) => { const d = {}; snap.forEach(doc => d[doc.id] = doc.data()); setData(d); setLoading(false); });
                         const unsubSettings = onSnapshot(doc(db, 'settings', 'visibility'), (docSnap) => { if (docSnap.exists()) setVisibilityConfig(docSnap.data()); });
                         const unsubOrders = onSnapshot(doc(db, 'settings', 'orders'), (docSnap) => { if (docSnap.exists()) setOrdersData(docSnap.data()); });
+                        // New: Listen for dynamic users data
                         const unsubUsers = onSnapshot(doc(db, 'settings', 'users'), (docSnap) => { 
                             if (docSnap.exists()) {
                                 const fetchedUsers = docSnap.data();
                                 setUsersData(fetchedUsers); 
+                                // Si el usuario actual no tiene rol, se desloguea (seguridad)
                                 if (user && !fetchedUsers[user.id]) setUser(null); 
                             } else {
+                                // Initialize users if not found (First run)
                                 setDoc(doc(db, 'settings', 'users'), DEFAULT_USERS);
                             }
                         });
@@ -724,113 +1240,85 @@
                     } else signInAnonymously(auth);
                 });
                 return () => unsubAuth();
-            }, [user]);
+            }, [user]); // Dependencia 'user' para re-evaluar si se necesita desloguear
 
-            // MODIFICADO: Actualiza el Slot y guarda el modelo actual para persistencia
-            const handleUpdateSlot = async (rowId, machineId, slotIndex, field, value, activeModel) => {
+            const handleUpdateSlot = async (rowId, machineId, slotIndex, field, value) => {
                 const currentMachineData = data[rowId]?.[machineId] || {};
                 const currentSlots = currentMachineData.slots || [{}, {}, {}, {}];
                 const updatedSlots = [...currentSlots];
                 if (!updatedSlots[slotIndex]) updatedSlots[slotIndex] = {};
-                
-                if (field === 'qty') {
-                    updatedSlots[slotIndex].qty = value === '' ? '' : Number(value);
-                    // IMPORTANTE: Guardamos el modelo activo en este momento. 
-                    // Si cambia el pedido mañana, esta celda recordará que se hizo con el modelo antiguo.
-                    if (activeModel) updatedSlots[slotIndex].model = activeModel;
-                }
-                
+                if (field === 'qty') updatedSlots[slotIndex].qty = value === '' ? '' : Number(value);
+                else updatedSlots[slotIndex].model = value;
                 const newTotalActual = updatedSlots.reduce((acc, s) => acc + (Number(s?.qty) || 0), 0);
                 const updatedMachine = { ...currentMachineData, slots: updatedSlots, actual: newTotalActual };
                 await setDoc(doc(db, 'produccion_2026', rowId), { [machineId]: updatedMachine }, { merge: true });
             };
 
             const handleSaveOrder = async (machineId, orderData) => {
-                // ARCHIVADO AUTOMÁTICO DE PEDIDOS ANTERIORES
-                // Si ya existe un pedido activo para esta máquina, lo guardamos en 'history_orders' antes de sobrescribir
-                if (ordersData[machineId] && ordersData[machineId].totalQty > 0) {
-                     // Solo archivamos si es un modelo diferente o si explícitamente se está creando uno nuevo (esto lo maneja la UI)
-                     // En este caso, simplemente guardamos una copia con un timestamp
-                     try {
-                        const oldOrder = { ...ordersData[machineId], machineId, archivedAt: serverTimestamp(), archivedBy: user.name };
-                        await addDoc(collection(db, 'history_orders'), oldOrder);
-                        console.log("Pedido anterior archivado correctamente.");
-                     } catch (e) {
-                         console.error("Error al archivar pedido anterior", e);
-                     }
-                }
                 await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { ...orderData, lastUpdated: serverTimestamp(), updatedBy: user.name } }, { merge: true });
             };
 
             const handleDeleteOrder = async (machineId) => {
+                // Para "eliminar" un pedido sin borrar el historial, simplemente se establece la cantidad a 0.
+                // Esto mantiene la máquina visible en el OrderManager, pero sin afectar la planeación.
+                // Si quieres que el pedido desaparezca de la lista de activos, podrías borrar el campo completo:
+                // await updateDoc(doc(db, 'settings', 'orders'), { [machineId]: deleteField() });
+                // Pero, por ahora, usamos la lógica de setDoc para mantener la estructura y solo poner totalQty a 0
                 await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, lastUpdated: serverTimestamp() } }, { merge: true });
             };
+
             const handleSaveVisibility = async (hiddenMachines, hiddenDays) => { await setDoc(doc(db, 'settings', 'visibility'), { machines: hiddenMachines, days: hiddenDays }, { merge: true }); };
-            const handleSaveUser = async (pin, userData) => { await setDoc(doc(db, 'settings', 'users'), { ...usersData, [pin]: userData }); if (user.id === pin) setUser({...userData, id: pin}); };
-            const handleDeleteUser = async (pin) => { if (pin === user.id) return alert('No puedes borrarte a ti mismo'); if(confirm('¿Borrar usuario?')) { const {[pin]: _, ...rest} = usersData; await setDoc(doc(db, 'settings', 'users'), rest); }};
+
+            const handleSaveUser = async (pin, userData) => {
+                try {
+                    // Crea el nuevo objeto de usuarios
+                    const newUsers = { ...usersData, [pin]: userData };
+                    // Sobrescribe el documento 'users' con la lista completa de usuarios
+                    await setDoc(doc(db, 'settings', 'users'), newUsers);
+                    
+                    // Si el usuario actual fue editado, refresca sus permisos
+                    if (user.id === pin) setUser({...userData, id: pin});
+                    
+                    console.log(`✅ Usuario ${pin} - ${userData.name} guardado/actualizado con éxito.`);
+                    alert(`Usuario ${userData.name} guardado con éxito!`);
+                } catch (error) {
+                    console.error("Error al guardar usuario:", error);
+                    alert(`Error al guardar usuario: ${error.message}`);
+                }
+            };
+
+            const handleDeleteUser = async (pinToDelete) => {
+                if (pinToDelete === user.id) {
+                    alert('No puedes eliminar tu propio usuario mientras estás logueado.');
+                    return;
+                }
+                if (confirm(`¿Estás seguro de que deseas eliminar al usuario con PIN: ${pinToDelete}?`)) {
+                    try {
+                        // Crea el nuevo objeto sin el PIN a eliminar
+                        const { [pinToDelete]: _, ...newUsers } = usersData;
+                        // Sobrescribe la lista completa de usuarios en Firestore
+                        await setDoc(doc(db, 'settings', 'users'), newUsers);
+
+                        console.log(`✅ Usuario con PIN ${pinToDelete} eliminado con éxito.`);
+                        alert(`Usuario con PIN ${pinToDelete} eliminado con éxito.`);
+                    } catch (error) {
+                        console.error("Error al eliminar usuario:", error);
+                        alert(`Error al eliminar usuario: ${error.message}`);
+                    }
+                }
+            };
+
             const handleDateSelect = (row) => { setWeekOffset(Math.floor(row.index / 7)); setShowCalendar(false); };
 
-            // HERRAMIENTAS DE DESARROLLADOR
-            const handleResetDb = async () => {
-                if (!confirm("⚠️ ¡PELIGRO! ⚠️\n\n¿Estás seguro de que deseas FORMATEAR la base de datos?\n\nSe borrarán TODOS los registros de producción y pedidos activos.\nEsta acción NO se puede deshacer.")) return;
-                if (!confirm("Confirma nuevamente: ¿Borrar TODO?")) return;
-                
-                setLoading(true);
-                try {
-                    // Borrar producción
-                    const prodSnapshot = await getDocs(collection(db, 'produccion_2026'));
-                    const batch = writeBatch(db);
-                    prodSnapshot.forEach((doc) => { batch.delete(doc.ref); });
-                    
-                    // Resetear Pedidos (No borrar el documento, solo vaciarlo o ponerlo en default)
-                    batch.set(doc(db, 'settings', 'orders'), {});
-                    
-                    await batch.commit();
-                    alert("Base de datos formateada correctamente.");
-                } catch (e) {
-                    alert("Error al formatear: " + e.message);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            const handleBackup = async () => {
-                setLoading(true);
-                try {
-                    const prodSnapshot = await getDocs(collection(db, 'produccion_2026'));
-                    const prodData = {};
-                    prodSnapshot.forEach(doc => prodData[doc.id] = doc.data());
-                    
-                    const backupData = {
-                        date: new Date().toISOString(),
-                        production: prodData,
-                        orders: ordersData,
-                        users: usersData
-                    };
-                    
-                    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-                    const link = document.createElement('a');
-                    link.href = URL.createObjectURL(blob);
-                    link.download = `MAES_Backup_${new Date().toISOString().split('T')[0]}.json`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                } catch (e) {
-                    alert("Error al crear respaldo: " + e.message);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-
             const canViewGraph = user && (user.canViewGraph || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT || user.role === ROLES.OBSERVER);
-            const canManageUsers = user && user.role === ROLES.DEVELOPMENT; 
-            const canManageOrders = user && (user.canManageOrders || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT); 
-            const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
+            const canManageUsers = user && user.role === ROLES.DEVELOPMENT; // Explicitly for developer
+            
             const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
             const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7); }, [weekOffset]);
             const weekLabel = useMemo(() => getWeekLabel(currentWeekRows), [currentWeekRows]);
             
+            const canManageOrders = user && (user.canManageOrders || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT); 
+            const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
             const canEditSlot = (machineId, slotIndex) => {
                 if (!user) return false;
                 if (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) return true;
@@ -886,7 +1374,7 @@
                                         <div className={`rounded-lg p-2 border border-slate-700/50 ${isPlannedDay && !isHiddenDay ? 'bg-yellow-900/10' : 'bg-slate-900/50'}`}>
                                             {isPlannedDay && !isHiddenDay && <div className="text-[8px] text-yellow-400 text-center font-bold uppercase mb-1">{order.model}</div>}
                                             <div className="grid grid-cols-2 gap-2 mb-1"><div className="text-[9px] text-center font-bold text-blue-400 uppercase tracking-widest border-b border-blue-900 pb-1">Andrés</div><div className="text-[9px] text-center font-bold text-orange-400 uppercase tracking-widest border-b border-orange-900 pb-1">Balta</div></div>
-                                            <div className="grid grid-cols-2 gap-2 flex-1 h-16">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val, order ? order.model : null)} />))}</div>
+                                            <div className="grid grid-cols-2 gap-2 flex-1 h-16">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
                                         </div>
                                     </div>
                                 );
@@ -914,14 +1402,6 @@
                             </div>
                         </div>
                         <div className="flex items-center gap-4">
-                            {/* BOTONES DEVELOPER */}
-                            {user.role === ROLES.DEVELOPMENT && (
-                                <div className="flex gap-2 mr-4 border-r border-slate-700 pr-4">
-                                    <button onClick={handleBackup} className="bg-slate-700 text-slate-300 p-1.5 rounded hover:bg-slate-600 text-xs flex items-center gap-1"><i data-lucide="download" className="w-3 h-3"></i> Backup</button>
-                                    <button onClick={handleResetDb} className="bg-red-900/50 text-red-400 p-1.5 rounded hover:bg-red-800/50 text-xs flex items-center gap-1"><i data-lucide="alert-octagon" className="w-3 h-3"></i> Format</button>
-                                </div>
-                            )}
-
                             <div className="text-right px-3 py-1 bg-slate-900/50 rounded-lg border border-slate-700/50"><p className="text-sm font-bold text-blue-400">{user.name.toUpperCase()}</p><p className="text-[10px] text-slate-500 uppercase font-medium leading-none">{user.area}</p></div>
                             <div className="flex gap-2">
                                 {canManageUsers && <button onClick={() => setShowUserManagementModal(true)} className="bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 shadow-lg transition-all"><i data-lucide="users" className="w-4 h-4"></i> Usuarios</button>}
@@ -977,17 +1457,12 @@
                                                         const isFinishDay = metrics.finishDate === row.isoDate && metrics.status !== 'COMPLETADO';
                                                         const isPlannedDay = metrics.isPlanned && new Date(order.startDate).toISOString().split('T')[0] <= row.isoDate && (metrics.finishDate === null || metrics.finishDate >= row.isoDate);
                                                         
-                                                        // Lógica para mostrar modelo histórico si existe en la celda
-                                                        const historicalModel0 = slots[0]?.model;
-                                                        const historicalModel1 = slots[1]?.model;
-                                                        const displayModel = historicalModel0 || historicalModel1 || (isPlannedDay ? order.model : null);
-
                                                         return (
                                                             <td key={m.id} className={`p-1 border-r border-slate-700 relative h-[80px] ${isFinishDay ? 'bg-red-900/30 border-red-500/50' : ''} ${isPlannedDay && !isHiddenDay ? 'bg-yellow-900/10' : ''}`}>
-                                                                {displayModel && !isHiddenDay && <div className="planning-info">{displayModel}</div>}
+                                                                {isPlannedDay && !isHiddenDay && <div className="planning-info">{order.model}</div>}
                                                                 <div className="flex flex-col h-full">
                                                                     <div className="grid grid-cols-2 gap-1 mb-0.5"><div className="text-[8px] text-center text-blue-400 font-bold bg-slate-900/50 rounded">A</div><div className="text-[8px] text-center text-orange-400 font-bold bg-slate-900/50 rounded">B</div></div>
-                                                                    <div className="grid grid-cols-2 gap-1 flex-1">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val, order ? order.model : null)} />))}</div>
+                                                                    <div className="grid grid-cols-2 gap-1 flex-1">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
                                                                 </div>
                                                             </td>
                                                         );
@@ -1005,6 +1480,7 @@
 
             return (
                 <div className="h-full relative">
+                    {/* Se pasa la referencia al OrderManager */}
                     {showOrderManager && <OrderManager ref={orderManagerRef} onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} />}
                     {showVisibilityModal && <VisibilityModal onClose={() => setShowVisibilityModal(false)} currentHiddenMachines={visibilityConfig.machines || []} currentHiddenDays={visibilityConfig.days || []} onSaveVisibility={handleSaveVisibility} allRows={ALL_ROWS} />}
                     {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} onSelectDate={handleDateSelect} allRows={ALL_ROWS} />}
