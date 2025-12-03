@@ -1,0 +1,9 @@
+NOTICE:
+The included index.html contains Firebase configuration values (apiKey, projectId, etc.)
+These are embedded in the HTML. If this repository will be public, consider removing
+or relocating these credentials to environment variables or use a separate config file
+excluded from version control.
+
+If you want, I can:
+- Strip the firebase config from the repo.
+- Move it into a .env.example and add instructions in README.
