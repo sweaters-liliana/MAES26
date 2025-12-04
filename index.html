@@ -6,9 +6,25 @@
     
     <title>MAES26 Control Total</title>
 
+    <link rel="icon" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/main/icon%20maes.svg">
+    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/main/icon%20maes.svg">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0f172a">
+    
+    <link rel="manifest" href='data:application/manifest+json,{
+        "name": "MAES26 Control",
+        "short_name": "MAES26",
+        "start_url": ".",
+        "display": "standalone",
+        "background_color": "#0f172a",
+        "theme_color": "#0f172a",
+        "icons": [{
+            "src": "https://raw.githubusercontent.com/sweaters-liliana/MAES26/main/icon%20maes.svg",
+            "sizes": "192x192 512x512",
+            "type": "image/svg+xml"
+        }]
+    }' />
 
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -46,12 +62,7 @@
         .planning-info { color: #facc15; background-color: rgba(120, 53, 15, 0.1); border-radius: 4px; padding: 1px 3px; font-weight: bold; font-size: 8px; }
         
         /* Report Modal Styles */
-        .report-page {
-            background-color: #f8fafc;
-            color: #1e293b;
-            padding: 30px;
-            font-family: sans-serif;
-        }
+        .report-page { background-color: #f8fafc; color: #1e293b; padding: 30px; font-family: sans-serif; }
         .report-header h1 { font-size: 24px; font-weight: bold; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 10px; }
         .report-section { margin-bottom: 20px; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; }
         .report-section h2 { font-size: 18px; font-weight: bold; color: #1e40af; margin-bottom: 10px; }
@@ -162,32 +173,24 @@
                 dailyCapacity: 0, plannedToDate: 0, deviation: 0, status: 'OK',
                 activePart: null, partsStatus: [], totalYarnConsumedGrams: 0, verifiedCountTotal: 0
             };
-            
             if (!order || !order.startDate) return metrics;
-            
             const verifiedCounts = order.verifiedCounts || [];
-            
             const dailyHours = order.operators && Array.isArray(order.operators) ? order.operators.length * 12 : Number(order.dailyHours || 12);
             const dailyMinutesCapacity = dailyHours * 60;
             const disabledDates = order.disabledDates || [];
             metrics.dailyCapacity = dailyMinutesCapacity; 
             metrics.isPlanned = true;
-
             const isComposite = order.parts && order.parts.length > 0;
             let totalMinutesNeeded = 0;
-            
             if (isComposite) {
                 order.parts.forEach(p => { totalMinutesNeeded += Number(p.qty) * Number(p.time); });
             } else {
                 totalMinutesNeeded = Number(order.totalQty) * Number(order.timePerPieceMin);
             }
-
             let totalMinutesProduced = 0;
             let totalItemsProduced = 0;
             let totalYarnConsumedGrams = 0;
-            
             let partsTracker = isComposite ? order.parts.map(p => ({...p, produced: 0})) : [];
-
             verifiedCounts.forEach(vc => {
                 const qty = Number(vc.qty || 0);
                 if (isComposite) {
@@ -206,22 +209,17 @@
                     totalYarnConsumedGrams += (qty * Number(order.pieceWeightGrams));
                 }
             });
-
             const wasteMult = 1 + (Number(order.wastePercentage || 0) / 100);
-            
             metrics.produced = totalItemsProduced; 
             metrics.progress = totalMinutesNeeded > 0 ? Math.min(100, (totalMinutesProduced / totalMinutesNeeded) * 100) : 0;
             metrics.partsStatus = partsTracker;
             metrics.totalYarnConsumedGrams = totalYarnConsumedGrams * wasteMult; 
-
             if (isComposite) {
                 metrics.activePart = partsTracker.find(p => p.produced < p.qty) || null;
             }
-
             const todayISO = new Date().toISOString().split('T')[0];
             const startIndex = allRows.findIndex(r => r.isoDate === order.startDate);
             const todayIndex = allRows.findIndex(r => r.isoDate === todayISO);
-
             let plannedMinutesToDate = 0;
             if (startIndex !== -1) {
                 for (let i = startIndex; i < todayIndex; i++) { 
@@ -231,15 +229,12 @@
                      }
                 }
             }
-            
             const minutesDeviation = totalMinutesProduced - plannedMinutesToDate;
             metrics.deviation = isComposite ? Math.round(minutesDeviation / 60) : (totalItemsProduced - (plannedMinutesToDate / Number(order.timePerPieceMin))); 
             metrics.plannedToDate = isComposite ? Math.round(plannedMinutesToDate / 60) + ' hrs' : Math.floor(plannedMinutesToDate / Number(order.timePerPieceMin));
-
             const criticalDelayMinutes = dailyMinutesCapacity * 1.5; 
             if (minutesDeviation < -criticalDelayMinutes) metrics.status = 'ATRASO CRÍTICO';
             else if (minutesDeviation < 0) metrics.status = 'ATRASO LEVE';
-            
             const remainingMinutes = Math.max(0, totalMinutesNeeded - totalMinutesProduced);
             if (remainingMinutes <= 0) {
                 metrics.finishDate = todayISO;
@@ -248,13 +243,10 @@
                 metrics.totalNeeded = 0;
                 return metrics;
             }
-            
             metrics.totalNeeded = isComposite ? 0 : (Number(order.totalQty) - totalItemsProduced);
-
             let projMinutes = remainingMinutes;
             let currentIdx = startIndex !== -1 ? startIndex : 0;
             if (todayIndex > currentIdx) currentIdx = todayIndex;
-
             for (let i = currentIdx; i < allRows.length; i++) {
                 const row = allRows[i];
                 if (globalHiddenDays.includes(row.id) || disabledDates.includes(row.isoDate)) continue;
@@ -264,7 +256,6 @@
                     return metrics;
                 }
             }
-
             metrics.finishDate = null; 
             return metrics;
         };
@@ -297,6 +288,56 @@
                         <div className="flex gap-3">
                             <button onClick={onClose} className="flex-1 py-3 bg-slate-700 rounded-lg text-white font-bold hover:bg-slate-600">Cancelar</button>
                             <button onClick={onConfirm} className="flex-1 py-3 bg-green-600 rounded-lg text-white font-bold hover:bg-green-500 shadow-lg shadow-green-900/50">CONFIRMAR</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- NUEVO COMPONENTE: GRÁFICAS DE ESTADÍSTICAS ---
+        const StatsModal = ({ onClose, dailyTotals, machineTotals }) => {
+            const maxDaily = Math.max(...dailyTotals.map(d => d.sum), 1);
+            const maxMachine = Math.max(...machineTotals.map(m => m.sum), 1);
+
+            return (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
+                            <h3 className="font-bold text-white uppercase tracking-wider text-sm flex items-center gap-2"><i data-lucide="bar-chart-2" className="w-5 h-5 text-purple-400"></i> Estadísticas de Producción (Semanal)</h3>
+                            <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-8">
+                            
+                            {/* Gráfica por Día */}
+                            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                                <h4 className="text-blue-400 font-bold mb-4 uppercase text-xs">Producción por Día</h4>
+                                <div className="flex items-end gap-2 h-48 border-b border-slate-600 pb-2">
+                                    {dailyTotals.map((d, i) => (
+                                        <div key={i} className="flex-1 flex flex-col items-center group">
+                                            <div className="text-[10px] font-bold text-white mb-1 opacity-0 group-hover:opacity-100 transition-opacity">{d.sum}</div>
+                                            <div className="w-full bg-blue-600 rounded-t hover:bg-blue-500 transition-all relative" style={{height: `${(d.sum / maxDaily) * 100}%`}}></div>
+                                            <div className="text-[10px] text-slate-400 mt-2 font-bold uppercase">{d.date}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Gráfica por Máquina */}
+                            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                                <h4 className="text-purple-400 font-bold mb-4 uppercase text-xs">Producción por Máquina</h4>
+                                <div className="space-y-2">
+                                    {machineTotals.sort((a,b) => b.sum - a.sum).map((m, i) => (
+                                        <div key={i} className="flex items-center gap-2">
+                                            <div className="w-12 text-[10px] font-bold text-slate-400 text-right shrink-0">{m.name}</div>
+                                            <div className="flex-1 h-6 bg-slate-800 rounded-full overflow-hidden relative">
+                                                <div className="h-full bg-purple-600" style={{width: `${(m.sum / maxMachine) * 100}%`}}></div>
+                                                <span className="absolute inset-0 flex items-center pl-2 text-[10px] font-bold text-white shadow-black drop-shadow-md">{m.sum} pzas</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -980,9 +1021,12 @@
             const [showUserManagementModal, setShowUserManagementModal] = useState(false);
             const [deferredPrompt, setDeferredPrompt] = useState(null);
             
-            // --- NUEVO: Estado para el modal de archivar ---
+            // Modal de Archivo
             const [showArchiveModal, setShowArchiveModal] = useState(false);
             const [orderToArchive, setOrderToArchive] = useState(null);
+
+            // Modal de Estadísticas
+            const [showStatsModal, setShowStatsModal] = useState(false);
 
             const orderManagerRef = React.useRef(); 
 
@@ -1018,7 +1062,6 @@
 
             const handleSaveOrder = async (machineId, orderData) => { await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { ...orderData, lastUpdated: serverTimestamp(), updatedBy: user.name } }, { merge: true }); };
             const handleDeleteOrder = async (machineId) => { 
-                // Al borrar pedido también limpiamos conteos
                 await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, parts: [], verifiedCounts: [], lastUpdated: serverTimestamp() } }, { merge: true }); 
             };
             
@@ -1029,49 +1072,20 @@
                  await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { verifiedCounts: newCounts } }, { merge: true });
             };
 
-            // --- NUEVO: PREPARAR ARCHIVADO (SOLO ABRE MODAL) ---
             const handleRequestArchive = (machineId, order) => {
                 const machineName = MACHINES.find(m => m.id === machineId)?.name || machineId;
                 setOrderToArchive({ machineId, order, machineName });
                 setShowArchiveModal(true);
             };
 
-            // --- NUEVO: CONFIRMAR ARCHIVADO (LÓGICA REAL) ---
             const handleConfirmArchive = async () => {
                 if (!orderToArchive) return;
                 const { machineId, order } = orderToArchive;
-
                 try {
-                    // 1. Guardar en historial
-                    await addDoc(collection(db, 'completed_orders'), {
-                        ...order,
-                        machineId,
-                        archivedAt: serverTimestamp(),
-                        archivedBy: user.name,
-                        finalStatus: 'COMPLETED'
-                    });
-                    
-                    // 2. LIMPIEZA PROFUNDA: Borrar TODO rastro del pedido en la configuración activa.
-                    // CRUCIAL: 'verifiedCounts': [] es lo que soluciona el bug.
-                    await setDoc(doc(db, 'settings', 'orders'), { 
-                        [machineId]: { 
-                            totalQty: 0, 
-                            parts: [], 
-                            model: '', 
-                            startDate: '', 
-                            verifiedCounts: [], // <-- ESTO EVITA QUE EL NUEVO PEDIDO HEREDE CONTEOS
-                            materials: [],
-                            operators: [],
-                            lastUpdated: serverTimestamp() 
-                        } 
-                    }, { merge: true });
-                    
-                    setShowArchiveModal(false);
-                    setOrderToArchive(null);
-                } catch (e) {
-                    console.error(e);
-                    alert('Error al archivar: ' + e.message);
-                }
+                    await addDoc(collection(db, 'completed_orders'), { ...order, machineId, archivedAt: serverTimestamp(), archivedBy: user.name, finalStatus: 'COMPLETED' });
+                    await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, parts: [], model: '', startDate: '', verifiedCounts: [], materials: [], operators: [], lastUpdated: serverTimestamp() } }, { merge: true });
+                    setShowArchiveModal(false); setOrderToArchive(null);
+                } catch (e) { alert('Error al archivar: ' + e.message); }
             };
 
             const handleSaveVisibility = async (hiddenMachines, hiddenDays) => { await setDoc(doc(db, 'settings', 'visibility'), { machines: hiddenMachines, days: hiddenDays }, { merge: true }); };
@@ -1087,6 +1101,34 @@
             const canManageOrders = user && (user.canManageOrders || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT || user.role === ROLES.PRE_COUNT); 
             const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
             const canEditSlot = (machineId, slotIndex) => { if (!user) return false; if (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) return true; if (user.allowedSlots) return user.allowedSlots.includes(slotIndex); return false; };
+
+            // Cálculos para Totales y Gráficas (Basado en inputs de operadores)
+            const dailyTotals = useMemo(() => {
+                return currentWeekRows.map(row => {
+                    const rowId = row.id;
+                    const rowData = data[rowId] || {};
+                    let sum = 0;
+                    visibleMachines.forEach(m => {
+                        const mData = rowData[m.id] || {};
+                        const slots = mData.slots || [];
+                        slots.forEach(s => sum += (Number(s.qty) || 0));
+                    });
+                    return { date: row.shortDay, sum };
+                });
+            }, [currentWeekRows, data, visibleMachines]);
+
+            const machineTotals = useMemo(() => {
+                return visibleMachines.map(m => {
+                    let sum = 0;
+                    currentWeekRows.forEach(row => {
+                        const rowData = data[row.id] || {};
+                        const mData = rowData[m.id] || {};
+                        const slots = mData.slots || [];
+                        slots.forEach(s => sum += (Number(s.qty) || 0));
+                    });
+                    return { name: m.name.replace('MAQ ', ''), sum };
+                });
+            }, [visibleMachines, currentWeekRows, data]);
 
             if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={() => deferredPrompt?.prompt()} users={usersData} />;
             if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900"><i data-lucide="loader-2" className="animate-spin w-12 h-12 text-blue-500"></i></div>;
@@ -1166,6 +1208,7 @@
                             </div>
                         </div>
                         <div className="flex items-center gap-4">
+                            <button onClick={() => setShowStatsModal(true)} className="bg-slate-700 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 shadow-lg transition-all border border-purple-500/30"><i data-lucide="bar-chart-2" className="w-4 h-4 text-purple-400"></i> Estadísticas</button>
                             <div className="text-right px-3 py-1 bg-slate-900/50 rounded-lg border border-slate-700/50"><p className="text-sm font-bold text-blue-400">{user.name.toUpperCase()}</p><p className="text-[10px] text-slate-500 uppercase font-medium leading-none">{user.area}</p></div>
                             <div className="flex gap-2">
                                 {canManageUsers && <button onClick={() => setShowUserManagementModal(true)} className="bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 shadow-lg transition-all"><i data-lucide="users" className="w-4 h-4"></i> Usuarios</button>}
@@ -1201,13 +1244,16 @@
                                                     </th>
                                                 );
                                             })}
+                                            <th className="sticky right-0 z-30 bg-slate-900 p-3 min-w-[80px] text-center border-l border-slate-700 text-xs font-bold text-green-400">TOTAL</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {currentWeekRows.map(row => {
+                                        {currentWeekRows.map((row, rIdx) => {
                                             const rowId = row.id; 
                                             const rowData = data[rowId] || {};
                                             const isHiddenDay = visibilityConfig.days?.includes(rowId);
+                                            const dailyTotal = dailyTotals[rIdx]?.sum || 0; // Total por día calculado anteriormente
+
                                             return (
                                                 <tr key={rowId} className={`border-b border-slate-700 hover:bg-slate-700/50 transition-colors ${isHiddenDay ? 'opacity-30' : ''}`}>
                                                     <td className="sticky left-0 bg-slate-800 p-2 border-r border-slate-700 text-xs font-bold text-slate-400 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">{row.shortDay} <br/> <span className="text-lg text-slate-200">{row.dateNum}</span></td>
@@ -1229,10 +1275,27 @@
                                                             </td>
                                                         );
                                                     })}
+                                                    <td className="sticky right-0 bg-slate-800 p-2 border-l border-slate-700 text-center shadow-[-2px_0_5px_rgba(0,0,0,0.3)]">
+                                                        <span className="text-xl font-black text-green-400">{dailyTotal}</span>
+                                                    </td>
                                                 </tr>
                                             );
                                         })}
                                     </tbody>
+                                    {/* Footer con Totales por Máquina */}
+                                    <tfoot className="bg-slate-900 border-t-2 border-slate-600 sticky bottom-0 z-20 shadow-lg">
+                                        <tr>
+                                            <td className="sticky left-0 z-30 bg-slate-900 p-3 text-right font-bold text-white border-r border-slate-700">TOTALES:</td>
+                                            {visibleMachines.map((m, i) => (
+                                                <td key={i} className="p-3 text-center font-bold text-white border-r border-slate-700 bg-slate-900/80">
+                                                    {machineTotals.find(mt => mt.name === m.name.replace('MAQ ', ''))?.sum || 0}
+                                                </td>
+                                            ))}
+                                            <td className="sticky right-0 z-30 bg-slate-800 p-3 text-center font-black text-yellow-400 text-lg border-l border-slate-700">
+                                                {dailyTotals.reduce((a, b) => a + b.sum, 0)}
+                                            </td>
+                                        </tr>
+                                    </tfoot>
                                 </table>
                             </div>
                         </div>
@@ -1247,6 +1310,7 @@
                     {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} onSelectDate={handleDateSelect} allRows={ALL_ROWS} />}
                     {canManageUsers && showUserManagementModal && <UserManagementModal onClose={() => setShowUserManagementModal(false)} users={usersData} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />}
                     {showArchiveModal && orderToArchive && <ArchiveModal onClose={() => setShowArchiveModal(false)} onConfirm={handleConfirmArchive} machineName={orderToArchive.machineName} orderModel={orderToArchive.order.model} />}
+                    {showStatsModal && <StatsModal onClose={() => setShowStatsModal(false)} dailyTotals={dailyTotals} machineTotals={machineTotals} />}
                     <div className="block md:hidden h-full"><MobileView /></div>
                     <div className="hidden md:block h-full"><DesktopView /></div>
                 </div>
