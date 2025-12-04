@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
-    <title>MAES26 Control + Conteo Real</title>
+    <title>MAES26 Control Total</title>
 
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -70,7 +70,7 @@
     <script type="text/babel" data-type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp, updateDoc, arrayUnion } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getFirestore, collection, doc, setDoc, addDoc, deleteDoc, onSnapshot, serverTimestamp, updateDoc, query, orderBy, limit, getDocs } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
         const { useState, useEffect, useMemo, useRef } = React;
 
@@ -156,7 +156,6 @@
             return f.month === l.month ? `${f.month} ${f.year}` : `${f.month} - ${l.month} ${l.year}`;
         };
 
-        // --- CÁLCULO DE MÉTRICAS (BASADO SOLO EN CONTEO VERIFICADO) ---
         const calculateOrderMetrics = (machineId, order, allProductionData, allRows, globalHiddenDays) => {
             const metrics = { 
                 isPlanned: false, finishDate: null, totalNeeded: 0, progress: 0, produced: 0, 
@@ -168,7 +167,6 @@
             
             const verifiedCounts = order.verifiedCounts || [];
             
-            // 1. Capacidad Planeada
             const dailyHours = order.operators && Array.isArray(order.operators) ? order.operators.length * 12 : Number(order.dailyHours || 12);
             const dailyMinutesCapacity = dailyHours * 60;
             const disabledDates = order.disabledDates || [];
@@ -178,57 +176,48 @@
             const isComposite = order.parts && order.parts.length > 0;
             let totalMinutesNeeded = 0;
             
-            // 2. Definir Metas
             if (isComposite) {
                 order.parts.forEach(p => { totalMinutesNeeded += Number(p.qty) * Number(p.time); });
             } else {
                 totalMinutesNeeded = Number(order.totalQty) * Number(order.timePerPieceMin);
             }
 
-            // 3. Calcular Producción Real (SOLO DESDE VERIFIED COUNTS)
             let totalMinutesProduced = 0;
             let totalItemsProduced = 0;
             let totalYarnConsumedGrams = 0;
             
-            // Inicializar status de partes
             let partsTracker = isComposite ? order.parts.map(p => ({...p, produced: 0})) : [];
 
             verifiedCounts.forEach(vc => {
                 const qty = Number(vc.qty || 0);
                 if (isComposite) {
-                    // Buscar la parte en el tracker
                     const partIdx = partsTracker.findIndex(p => p.name.toUpperCase() === (vc.partName || '').toUpperCase());
                     if (partIdx !== -1) {
                         partsTracker[partIdx].produced += qty;
                         totalMinutesProduced += (qty * Number(partsTracker[partIdx].time));
-                        totalItemsProduced += qty; // Suma de partes mixtas
+                        totalItemsProduced += qty; 
                         totalYarnConsumedGrams += (qty * Number(partsTracker[partIdx].weight));
                     } else {
-                        // Fallback si la parte no se encuentra (no debería pasar si se selecciona bien)
-                        // Asumimos promedio o ignoramos para tiempo, pero sumamos a items
                         totalItemsProduced += qty;
                     }
                 } else {
-                    // Pedido Simple
                     totalMinutesProduced += (qty * Number(order.timePerPieceMin));
                     totalItemsProduced += qty;
                     totalYarnConsumedGrams += (qty * Number(order.pieceWeightGrams));
                 }
             });
 
-            // Aplicar Merma al consumo real calculado
             const wasteMult = 1 + (Number(order.wastePercentage || 0) / 100);
             
             metrics.produced = totalItemsProduced; 
             metrics.progress = totalMinutesNeeded > 0 ? Math.min(100, (totalMinutesProduced / totalMinutesNeeded) * 100) : 0;
             metrics.partsStatus = partsTracker;
-            metrics.totalYarnConsumedGrams = totalYarnConsumedGrams * wasteMult; // Gramos con merma
+            metrics.totalYarnConsumedGrams = totalYarnConsumedGrams * wasteMult; 
 
             if (isComposite) {
                 metrics.activePart = partsTracker.find(p => p.produced < p.qty) || null;
             }
 
-            // 4. Calcular Planeado vs Real (Deviation)
             const todayISO = new Date().toISOString().split('T')[0];
             const startIndex = allRows.findIndex(r => r.isoDate === order.startDate);
             const todayIndex = allRows.findIndex(r => r.isoDate === todayISO);
@@ -251,7 +240,6 @@
             if (minutesDeviation < -criticalDelayMinutes) metrics.status = 'ATRASO CRÍTICO';
             else if (minutesDeviation < 0) metrics.status = 'ATRASO LEVE';
             
-            // 5. Proyección Fecha Fin (Basado en ritmo ideal restante)
             const remainingMinutes = Math.max(0, totalMinutesNeeded - totalMinutesProduced);
             if (remainingMinutes <= 0) {
                 metrics.finishDate = todayISO;
@@ -281,19 +269,12 @@
             return metrics;
         };
 
-        // --- CÁLCULO DE CONSUMOS DESGLOSADO ---
         const calculateDetailedConsumption = (order, totalYarnConsumedGrams) => {
              const materials = order.materials || [];
-             // El totalYarnConsumedGrams ya incluye la merma desde la función de métricas
              const totalKilos = totalYarnConsumedGrams / 1000;
-
              return materials.map(m => {
                  const pct = Number(m.percentage) / 100;
-                 return {
-                     name: m.name,
-                     percentage: m.percentage,
-                     kilosConsumed: totalKilos * pct
-                 };
+                 return { name: m.name, percentage: m.percentage, kilosConsumed: totalKilos * pct };
              });
         };
 
@@ -328,18 +309,14 @@
             );
         };
 
-        // --- CONTEO MODAL (IPAD PRE) ---
         const ConteoModal = ({ onClose, machineId, order, onSaveConteo }) => {
             const isComposite = order.parts && order.parts.length > 0;
-            
-            // Step 0: Select Part (if composite), Step 1: Date, Step 2: Operator, Step 3: Qty
             const [step, setStep] = useState(isComposite ? 0 : 1); 
             const [selectedPart, setSelectedPart] = useState(isComposite ? '' : (order.model || 'General'));
             const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
             const [operator, setOperator] = useState('');
             const [qty, setQty] = useState('');
             const qtyInputRef = useRef(null);
-
             const operators = order.operators || ['Andrés', 'Balta'];
 
             const handleNext = () => {
@@ -353,12 +330,7 @@
 
             const handleSave = () => {
                 if (!qty) return alert('Ingresa cantidad');
-                onSaveConteo(machineId, { 
-                    date, 
-                    operator, 
-                    qty: Number(qty),
-                    partName: isComposite ? selectedPart : null 
-                });
+                onSaveConteo(machineId, { date, operator, qty: Number(qty), partName: isComposite ? selectedPart : null });
                 onClose();
             };
 
@@ -377,28 +349,19 @@
                             <button onClick={onClose}><i data-lucide="x" className="text-white w-6 h-6"></i></button>
                         </div>
                         <div className="p-6 text-center">
-                            
-                            {/* PASO 0: SELECCIONAR PARTE (SOLO COMPUESTOS) */}
                             {step === 0 && isComposite && (
                                 <div className="space-y-4 animate-zoom-in">
                                     <p className="text-slate-400 uppercase text-xs font-bold mb-4">Paso 1: ¿Qué pieza estamos contando?</p>
                                     <div className="grid grid-cols-1 gap-2 max-h-[60vh] overflow-y-auto custom-scrollbar">
                                         {order.parts.map((p, i) => (
-                                            <button key={i} onClick={() => { setSelectedPart(p.name); setTimeout(()=>handleNext(), 50); }} className="p-4 bg-slate-700 hover:bg-blue-600 rounded-xl text-white font-bold text-lg uppercase border border-slate-600 hover:border-blue-400 transition-all">
-                                                {p.name}
-                                            </button>
+                                            <button key={i} onClick={() => { setSelectedPart(p.name); setTimeout(()=>handleNext(), 50); }} className="p-4 bg-slate-700 hover:bg-blue-600 rounded-xl text-white font-bold text-lg uppercase border border-slate-600 hover:border-blue-400 transition-all">{p.name}</button>
                                         ))}
                                     </div>
                                 </div>
                             )}
-
-                            {/* Si no es compuesto, el paso 0 se salta automaticamente y selectedPart es el modelo */}
-
                             {step === 1 && (
                                 <div className="space-y-4 animate-zoom-in">
-                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">
-                                        {selectedPart}
-                                    </div>
+                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">{selectedPart}</div>
                                     <p className="text-slate-400 uppercase text-xs font-bold">Fecha de Producción</p>
                                     <input type="date" value={date} onChange={e => setDate(e.target.value)} onKeyDown={handleKeyDown} className="w-full bg-slate-900 text-white text-2xl p-4 rounded-xl border border-slate-600 text-center" autoFocus />
                                     <button onClick={handleNext} className="w-full bg-blue-600 py-3 rounded-xl text-white font-bold text-lg mt-4">Siguiente</button>
@@ -406,24 +369,18 @@
                             )}
                             {step === 2 && (
                                 <div className="space-y-4 animate-zoom-in">
-                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">
-                                        {selectedPart} <span className="text-slate-500 mx-2">|</span> {date}
-                                    </div>
+                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">{selectedPart} <span className="text-slate-500 mx-2">|</span> {date}</div>
                                     <p className="text-slate-400 uppercase text-xs font-bold">Operador</p>
                                     <div className="grid grid-cols-2 gap-4">
                                         {operators.map(op => (
-                                            <button key={op} onClick={() => { setOperator(op); setTimeout(()=>handleNext(), 50); }} className={`p-6 rounded-xl border-2 font-bold text-lg transition-all ${operator === op ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}>
-                                                {op}
-                                            </button>
+                                            <button key={op} onClick={() => { setOperator(op); setTimeout(()=>handleNext(), 50); }} className={`p-6 rounded-xl border-2 font-bold text-lg transition-all ${operator === op ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}>{op}</button>
                                         ))}
                                     </div>
                                 </div>
                             )}
                             {step === 3 && (
                                 <div className="space-y-4 animate-zoom-in">
-                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">
-                                        {selectedPart} <span className="text-slate-500 mx-2">|</span> {operator}
-                                    </div>
+                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">{selectedPart} <span className="text-slate-500 mx-2">|</span> {operator}</div>
                                     <p className="text-slate-400 uppercase text-xs font-bold">Cantidad Final (Piezas)</p>
                                     <input ref={qtyInputRef} type="number" value={qty} onChange={e => setQty(e.target.value)} onKeyDown={handleKeyDown} placeholder="0" className="w-full bg-slate-900 text-white text-5xl p-6 rounded-xl border border-slate-600 text-center font-bold" />
                                     <button onClick={handleSave} className="w-full bg-green-600 py-4 rounded-xl text-white font-bold text-lg mt-4 shadow-lg hover:scale-105 transition-transform">GUARDAR CONTEO</button>
@@ -437,14 +394,9 @@
 
         const ReportModal = ({ onClose, machineId, order, metrics }) => {
             if (!order || !machineId) return null;
-
-            const machine = MACHINES.find(m => m.id === machineId);
+            const machine = MACHINES.find(m => m.id === machineId) || {name: machineId};
             const isComposite = order.parts && order.parts.length > 0;
-            
-            // Consumo Detallado
             const detailedConsumption = calculateDetailedConsumption(order, metrics.totalYarnConsumedGrams);
-
-            // Datos de Conteo Físico
             const verifiedCounts = order.verifiedCounts || [];
             const hasVerifiedData = verifiedCounts.length > 0;
 
@@ -474,10 +426,10 @@
                                     <div><span className="report-label">Máquina:</span><span className="report-value">{machine.name}</span></div>
                                     <div><span className="report-label">Modelo:</span><span className="report-value text-blue-700">{order.model}</span></div>
                                     <div><span className="report-label">Inicio:</span><span className="report-value">{order.startDate}</span></div>
+                                    {order.finalStatus === 'COMPLETED' && <div><span className="report-label">Estado:</span><span className="report-value text-green-700 font-bold">FINALIZADO</span></div>}
                                 </div>
                             </div>
 
-                            {/* Sección Conteo Físico (Nuevo) */}
                             {hasVerifiedData && (
                                 <div className="report-section" style={{borderColor: '#22c55e', backgroundColor: '#f0fdf4'}}>
                                     <h2 style={{color: '#15803d'}}>✅ Registro de Conteo (Producción Real)</h2>
@@ -487,17 +439,9 @@
                                                 <thead><tr><th>Fecha</th><th>Pieza/Parte</th><th>Operador</th><th className="text-right">Cantidad</th></tr></thead>
                                                 <tbody>
                                                     {verifiedCounts.map((vc, idx) => (
-                                                        <tr key={idx}>
-                                                            <td>{vc.date}</td>
-                                                            <td>{vc.partName || '-'}</td>
-                                                            <td>{vc.operator}</td>
-                                                            <td className="text-right font-bold">{vc.qty}</td>
-                                                        </tr>
+                                                        <tr key={idx}><td>{vc.date}</td><td>{vc.partName || '-'}</td><td>{vc.operator}</td><td className="text-right font-bold">{vc.qty}</td></tr>
                                                     ))}
-                                                    <tr style={{backgroundColor: '#dcfce7', fontWeight: 'bold'}}>
-                                                        <td colSpan="3" className="text-right">TOTAL PRODUCIDO:</td>
-                                                        <td className="text-right text-lg">{metrics.produced}</td>
-                                                    </tr>
+                                                    <tr style={{backgroundColor: '#dcfce7', fontWeight: 'bold'}}><td colSpan="3" className="text-right">TOTAL PRODUCIDO:</td><td className="text-right text-lg">{metrics.produced}</td></tr>
                                                 </tbody>
                                             </table>
                                         </div>
@@ -507,17 +451,12 @@
 
                             {isComposite && (
                                 <div className="report-section">
-                                    <h2>🧩 Desglose de Partes (Estado Actual)</h2>
+                                    <h2>🧩 Desglose de Partes</h2>
                                     <table className="report-material-table">
                                         <thead><tr><th>Parte</th><th>Total Req.</th><th>Producido (Conteo)</th><th>Faltante</th></tr></thead>
                                         <tbody>
                                             {metrics.partsStatus.map((p, i) => (
-                                                <tr key={i}>
-                                                    <td>{p.name}</td>
-                                                    <td>{p.qty}</td>
-                                                    <td className={p.produced >= p.qty ? 'text-green-600 font-bold' : ''}>{p.produced}</td>
-                                                    <td>{Math.max(0, p.qty - p.produced)}</td>
-                                                </tr>
+                                                <tr key={i}><td>{p.name}</td><td>{p.qty}</td><td className={p.produced >= p.qty ? 'text-green-600 font-bold' : ''}>{p.produced}</td><td>{Math.max(0, p.qty - p.produced)}</td></tr>
                                             ))}
                                         </tbody>
                                     </table>
@@ -528,7 +467,7 @@
                                 <h2>📈 Métricas de Avance</h2>
                                 <div className="report-data">
                                     <div><span className="report-label">Progreso Global:</span><span className="report-value text-blue-700">{metrics.progress.toFixed(1)}%</span></div>
-                                    <div><span className="report-label">Desviación (Tiempo):</span><span className={metrics.deviation < 0 ? 'text-red-700' : 'text-green-700'}>{metrics.deviation} {isComposite ? 'Horas aprox' : 'Piezas'}</span></div>
+                                    <div><span className="report-label">Desviación:</span><span className={metrics.deviation < 0 ? 'text-red-700' : 'text-green-700'}>{metrics.deviation} {isComposite ? 'Horas aprox' : 'Piezas'}</span></div>
                                 </div>
                             </div>
 
@@ -539,16 +478,9 @@
                                     <thead><tr><th>Material</th><th>% Mezcla</th><th className="text-right">Total Consumido (KG)</th></tr></thead>
                                     <tbody>
                                         {detailedConsumption.map((mat, idx) => (
-                                            <tr key={idx}>
-                                                <td>{mat.name}</td>
-                                                <td>{mat.percentage}%</td>
-                                                <td className="text-right font-bold">{mat.kilosConsumed.toFixed(3)} kg</td>
-                                            </tr>
+                                            <tr key={idx}><td>{mat.name}</td><td>{mat.percentage}%</td><td className="text-right font-bold">{mat.kilosConsumed.toFixed(3)} kg</td></tr>
                                         ))}
-                                        <tr style={{backgroundColor:'#f1f5f9', fontWeight:'bold'}}>
-                                            <td colSpan="2" className="text-right">TOTAL GENERAL:</td>
-                                            <td className="text-right">{(metrics.totalYarnConsumedGrams / 1000).toFixed(3)} kg</td>
-                                        </tr>
+                                        <tr style={{backgroundColor:'#f1f5f9', fontWeight:'bold'}}><td colSpan="2" className="text-right">TOTAL GENERAL:</td><td className="text-right">{(metrics.totalYarnConsumedGrams / 1000).toFixed(3)} kg</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -558,9 +490,10 @@
             );
         };
 
-        const OrderManager = React.forwardRef(({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays, user, onSaveConteo }, ref) => {
+        const OrderManager = React.forwardRef(({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays, user, onSaveConteo, onArchiveOrder }, ref) => {
             const [step, setStep] = useState(1);
             const [viewMode, setViewMode] = useState('list'); 
+            const [historyOrders, setHistoryOrders] = useState([]);
             const [modelName, setModelName] = useState('');
             const [selectedMachines, setSelectedMachines] = useState([]);
             const [isEditing, setIsEditing] = useState(false);
@@ -579,6 +512,18 @@
             }), []);
 
             const [config, setConfig] = useState(initialConfig);
+
+            // Fetch history only when viewing history
+            useEffect(() => {
+                if (viewMode === 'history') {
+                    const q = query(collection(db, 'completed_orders'), orderBy('archivedAt', 'desc'), limit(50));
+                    getDocs(q).then(snap => {
+                        const h = [];
+                        snap.forEach(d => h.push({id: d.id, ...d.data()}));
+                        setHistoryOrders(h);
+                    });
+                }
+            }, [viewMode]);
 
             const addPart = () => setParts([...parts, { name: '', qty: '', time: '', weight: '' }]);
             const removePart = (idx) => setParts(parts.filter((_, i) => i !== idx));
@@ -668,15 +613,13 @@
             }
 
             const canDoConteo = user.role === ROLES.DEVELOPMENT || user.role === ROLES.PRE_COUNT;
+            const canViewHistory = user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT;
 
-            // Renderizado Configs...
+            // Renderizado
             const renderPartsConfig = () => (
                 <div className="space-y-4 fade-in">
                     <h3 className="text-lg font-bold text-white text-center mb-4">Configuración de Partes</h3>
-                    <div className="bg-blue-900/20 p-3 rounded-lg text-xs text-blue-200 mb-4 border border-blue-800">
-                        <i data-lucide="info" className="inline w-4 h-4 mr-1"></i>
-                        Define cada parte (Ej: Cuerpo, Manga).
-                    </div>
+                    <div className="bg-blue-900/20 p-3 rounded-lg text-xs text-blue-200 mb-4 border border-blue-800"><i data-lucide="info" className="inline w-4 h-4 mr-1"></i>Define cada parte (Ej: Cuerpo, Manga).</div>
                     <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                         {parts.map((p, i) => (
                             <div key={i} className="bg-slate-800 p-3 rounded border border-slate-700 flex flex-col gap-2 relative">
@@ -717,11 +660,31 @@
                 <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
-                            <span className="font-bold text-white uppercase">Gestión de Producción</span>
-                            <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6"></i></button>
+                            <span className="font-bold text-white uppercase">{viewMode === 'history' ? 'Historial Terminados' : 'Gestión de Producción'}</span>
+                            <div className="flex gap-2">
+                                {canViewHistory && viewMode === 'list' && <button onClick={() => setViewMode('history')} className="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300">Ver Historial</button>}
+                                {viewMode === 'history' && <button onClick={() => setViewMode('list')} className="text-xs bg-blue-600 px-2 py-1 rounded text-white">Ver Activos</button>}
+                                <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6"></i></button>
+                            </div>
                         </div>
                         <div className="flex-1 p-6 overflow-hidden">
-                            {viewMode === 'list' ? (
+                            {viewMode === 'history' ? (
+                                <div className="h-full overflow-y-auto custom-scrollbar">
+                                    <div className="space-y-2">
+                                        {historyOrders.map(ho => (
+                                            <div key={ho.id} className="bg-slate-900 p-3 rounded border border-slate-700/50 flex justify-between items-center opacity-70 hover:opacity-100 transition-opacity">
+                                                <div>
+                                                    <h4 className="font-bold text-white">{ho.model}</h4>
+                                                    <p className="text-xs text-slate-500">Terminado: {new Date(ho.archivedAt?.seconds * 1000).toLocaleDateString()}</p>
+                                                </div>
+                                                <button onClick={() => { setActiveOrderForAction({ machineId: ho.machineId, order: ho, metrics: calculateOrderMetrics(ho.machineId, ho, allProductionData, allRows, hiddenDays) }); setShowReportModal(true); }} className="text-blue-400 hover:bg-slate-800 p-2 rounded"><i data-lucide="file-text" className="w-4 h-4"></i></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {historyOrders.length === 0 && <p className="text-center text-slate-500 mt-10">No hay pedidos terminados.</p>}
+                                    {showReportModal && activeOrderForAction && <ReportModal onClose={() => setShowReportModal(false)} machineId={activeOrderForAction.machineId} order={activeOrderForAction.order} metrics={activeOrderForAction.metrics} />}
+                                </div>
+                            ) : viewMode === 'list' ? (
                                 <div className="h-full flex flex-col">
                                     <div className="flex justify-between mb-4"><h2 className="text-xl font-bold">Pedidos Activos</h2><button onClick={handleStartCreate} className="bg-blue-600 px-4 py-2 rounded text-white font-bold">Nuevo</button></div>
                                     <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
@@ -729,8 +692,9 @@
                                             const order = ordersData[m.id];
                                             const metrics = calculateOrderMetrics(m.id, order, allProductionData, allRows, hiddenDays);
                                             const isComp = !!order.parts?.length;
+                                            const isComplete = metrics.progress >= 100;
                                             return (
-                                                <div key={m.id} className="bg-slate-900 p-4 rounded border border-slate-700">
+                                                <div key={m.id} className={`p-4 rounded border transition-all ${isComplete ? 'bg-green-900/20 border-green-500/50' : 'bg-slate-900 border-slate-700'}`}>
                                                     <div className="flex justify-between">
                                                         <div>
                                                             <span className="text-blue-400 font-bold">{m.name}</span>
@@ -738,10 +702,20 @@
                                                         </div>
                                                         <div className="text-right">
                                                             <span className="block text-xs font-bold text-slate-400">Avance</span>
-                                                            <span className="text-lg font-bold text-white">{metrics.progress.toFixed(0)}%</span>
+                                                            <span className={`text-lg font-bold ${isComplete ? 'text-green-400' : 'text-white'}`}>{metrics.progress.toFixed(0)}%</span>
                                                         </div>
                                                     </div>
                                                     {isComp && metrics.activePart && <div className="mt-2 text-xs text-green-400 font-bold">Trabajando: {metrics.activePart.name}</div>}
+                                                    
+                                                    {isComplete && (
+                                                        <div className="mt-2 mb-2 p-2 bg-green-600/20 border border-green-500 rounded text-center">
+                                                            <p className="text-xs text-green-300 font-bold mb-1">¡PEDIDO AL 100%!</p>
+                                                            <button onClick={() => { if(confirm('¿Finalizar y archivar pedido? Desaparecerá de la lista activa.')) onArchiveOrder(m.id, order); }} className="bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2 px-4 rounded w-full flex items-center justify-center gap-2">
+                                                                <i data-lucide="archive" className="w-3 h-3"></i> FINALIZAR Y ARCHIVAR
+                                                            </button>
+                                                        </div>
+                                                    )}
+
                                                     <div className="flex gap-2 mt-3 justify-end">
                                                         {canDoConteo && (
                                                             <button onClick={() => { setActiveOrderForAction({ machineId: m.id, order }); setShowConteoModal(true); }} className="p-2 bg-slate-800 text-purple-400 rounded hover:bg-slate-700 font-bold flex items-center gap-1 border border-purple-500/30">
@@ -829,375 +803,6 @@
                             )}
                         </div>
                     </div>
-                </div>
-            );
-        });
-
-        const UserManagementModal = ({ onClose, users, onSaveUser, onDeleteUser }) => {
-            const [editingUser, setEditingUser] = useState(null);
-            const [pin, setPin] = useState('');
-            const [name, setName] = useState('');
-            const [role, setRole] = useState(ROLES.OPERATOR);
-            const [area, setArea] = useState('');
-
-            const allUsersArray = Object.entries(users).map(([pin, data]) => ({ pin, ...data }));
-            const availableRoles = Object.values(ROLES);
-
-            const startEdit = (user) => {
-                setEditingUser(user);
-                setPin(user.pin);
-                setName(user.name);
-                setRole(user.role);
-                setArea(user.area || '');
-            };
-
-            const handleSave = () => {
-                if (!pin || !name || !role) { alert('Todos los campos son obligatorios'); return; }
-                if (pin.length !== 4 || isNaN(Number(pin))) { alert('PIN debe ser 4 dígitos'); return; }
-                
-                const payload = { 
-                    name, role, area,
-                    canManageOrders: editingUser ? editingUser.canManageOrders : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
-                    canViewGraph: editingUser ? editingUser.canViewGraph : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
-                    canManageUsers: editingUser ? editingUser.canManageUsers : role === ROLES.DEVELOPMENT,
-                };
-                if (role === ROLES.OPERATOR) payload.allowedSlots = editingUser?.allowedSlots || [];
-
-                onSaveUser(pin, payload);
-                setEditingUser(null); setPin(''); setName(''); setRole(ROLES.OPERATOR); setArea('');
-            };
-
-            return (
-                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
-                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
-                            <h3 className="font-bold text-white uppercase tracking-wider text-sm flex items-center gap-2"><i data-lucide="users" className="w-5 h-5 text-yellow-400"></i> Gestión de Usuarios</h3>
-                            <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar flex gap-6">
-                            <div className="w-1/3 shrink-0 bg-slate-900 p-4 rounded-xl border border-slate-700 h-fit sticky top-0">
-                                <h4 className="text-lg font-bold text-white mb-4">{editingUser ? 'Editar' : 'Crear'}</h4>
-                                <div className="space-y-3">
-                                    <input type="number" value={pin} onChange={e => setPin(e.target.value.slice(0, 4))} disabled={!!editingUser} placeholder="PIN" className="w-full bg-slate-700 text-white p-2 rounded" />
-                                    <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" className="w-full bg-slate-700 text-white p-2 rounded" />
-                                    <input type="text" value={area} onChange={e => setArea(e.target.value)} placeholder="Área" className="w-full bg-slate-700 text-white p-2 rounded" />
-                                    <select value={role} onChange={e => setRole(e.target.value)} className="w-full bg-slate-700 text-white p-2 rounded">
-                                        <option value={ROLES.OPERATOR}>Operador</option>
-                                        <option value={ROLES.ADMIN}>Admin</option>
-                                        <option value={ROLES.PRE_COUNT}>iPad Pre (Conteo)</option>
-                                    </select>
-                                </div>
-                                <button onClick={handleSave} className="mt-4 w-full bg-green-600 text-white py-2 rounded font-bold">Guardar</button>
-                            </div>
-                            <div className="flex-1 space-y-3">
-                                {allUsersArray.map(u => (
-                                    <div key={u.pin} className="bg-slate-900 p-4 rounded border border-slate-700 flex justify-between items-center">
-                                        <div><p className="font-bold text-white">{u.name}</p><p className="text-sm text-blue-400">{u.role}</p></div>
-                                        <div className="flex gap-2"><button onClick={() => startEdit(u)} className="p-2 bg-slate-700 rounded"><i data-lucide="pencil" className="w-4 h-4 text-blue-400"></i></button><button onClick={() => onDeleteUser(u.pin)} className="p-2 bg-red-900/50 rounded"><i data-lucide="trash-2" className="w-4 h-4 text-red-400"></i></button></div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall, users }) => {
-            const [pin, setPin] = useState('');
-            const handleLogin = (e) => {
-                e.preventDefault();
-                const user = users[pin]; 
-                if (user) setAuthenticatedUser({ ...user, id: pin }); 
-                else alert('PIN incorrecto');
-            };
-            return (
-                <div className="flex items-center justify-center h-full bg-slate-900 p-4">
-                    <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center border border-slate-700 relative">
-                        <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg"><i data-lucide="grid" className="w-8 h-8"></i></div>
-                        <h2 className="text-2xl font-black text-white mb-2">MAES - TEJIDO</h2>
-                        <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
-                            <input type="tel" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="• • • •" className="w-full text-center text-4xl p-4 bg-slate-900 border-2 border-slate-700 rounded-xl tracking-[0.2em] focus:border-blue-500 outline-none font-bold text-white password-mask" autoFocus />
-                            <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-blue-500 shadow-lg">INGRESAR</button>
-                        </form>
-                    </div>
-                </div>
-            );
-        };
-
-        const VisibilityModal = ({ onClose, currentHiddenMachines, currentHiddenDays, onSaveVisibility, allRows }) => {
-            const [hiddenM, setHiddenM] = useState([...currentHiddenMachines]);
-            const [hiddenD, setHiddenD] = useState([...currentHiddenDays]);
-            const [dateToHide, setDateToHide] = useState('');
-            const toggleMachine = (mid) => { if (hiddenM.includes(mid)) setHiddenM(prev => prev.filter(id => id !== mid)); else setHiddenM(prev => [...prev, mid]); };
-            const hideDate = () => { if (!dateToHide) return; const row = allRows.find(r => r.isoDate === dateToHide); if (row && !hiddenD.includes(row.id)) setHiddenD(prev => [...prev, row.id]); setDateToHide(''); };
-            const unhideDate = (rowId) => { setHiddenD(prev => prev.filter(id => id !== rowId)) };
-            const handleSave = () => { onSaveVisibility(hiddenM, hiddenD); onClose(); };
-
-            return (
-                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
-                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg h-[85vh] flex flex-col border border-slate-700" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl"><h3 className="font-bold text-lg text-white">Configuración Global</h3><button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6"></i></button></div>
-                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-6">
-                            <div><h4 className="text-xs font-bold text-blue-400 uppercase mb-2">Visibilidad Máquinas</h4><div className="grid grid-cols-2 gap-2">{MACHINES.map(m => { const isHidden = hiddenM.includes(m.id); return (<button key={m.id} onClick={() => toggleMachine(m.id)} className={`flex items-center justify-between p-2 rounded border text-sm ${isHidden ? 'bg-red-900/30 border-red-500/50 text-red-300' : 'bg-slate-900 border-slate-700 text-slate-300'}`}><span>{m.name}</span>{isHidden ? <i data-lucide="eye-off" className="w-4 h-4"></i> : <i data-lucide="eye" className="w-4 h-4 text-green-500/50"></i>}</button>) })}</div></div>
-                            <div><h4 className="text-xs font-bold text-blue-400 uppercase mb-2">Ocultar Días (Feriados Globales)</h4><div className="flex gap-2 mb-3"><input type="date" value={dateToHide} onChange={e => setDateToHide(e.target.value)} className="bg-slate-900 text-white border border-slate-600 rounded p-2 flex-1 text-sm" /><button onClick={hideDate} className="bg-slate-700 px-3 rounded text-white text-sm">Ocultar</button></div>{hiddenD.map(rid => (<div key={rid} className="flex justify-between items-center text-sm p-2 bg-slate-800 rounded mb-1"><span className="text-slate-300">{rid}</span><button onClick={() => unhideDate(rid)} className="text-red-400 text-xs font-bold">Mostrar</button></div>))}</div>
-                        </div>
-                        <div className="p-4 border-t border-slate-700 bg-slate-900 rounded-b-2xl"><button onClick={handleSave} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold">Guardar</button></div>
-                    </div>
-                </div>
-            )
-        };
-
-        const CalendarModal = ({ onClose, onSelectDate, allRows }) => {
-            const [viewDate, setViewDate] = useState(new Date()); 
-            const handleMonthChange = (delta) => { const d = new Date(viewDate); d.setMonth(d.getMonth() + delta); setViewDate(d); };
-            const monthRows = allRows.filter(r => r.monthIndex === viewDate.getMonth() && r.year === viewDate.getFullYear());
-            const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(monthRows[0]?.shortDay) || 0;
-
-            return (
-                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
-                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-700 p-4" onClick={e => e.stopPropagation()}>
-                        <div className="flex justify-between items-center mb-4"><button onClick={() => handleMonthChange(-1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-left" className="text-white w-5 h-5"></i></button><span className="font-bold text-white uppercase">{viewDate.toLocaleString('es-MX', { month: 'long', year: 'numeric' })}</span><button onClick={() => handleMonthChange(1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-right" className="text-white w-5 h-5"></i></button></div>
-                        <div className="grid grid-cols-7 gap-1 text-center mb-2">{['D','L','M','M','J','V','S'].map((d,i) => <div key={i} className="text-xs text-slate-500 font-bold">{d}</div>)}</div>
-                        <div className="grid grid-cols-7 gap-1">{Array(startDayOffset).fill(null).map((_, i) => <div key={`b-${i}`}></div>)}{monthRows.map(row => (<button key={row.id} onClick={() => onSelectDate(row)} className="aspect-square flex items-center justify-center rounded-lg hover:bg-blue-600 bg-slate-900 text-slate-200 text-sm font-bold border border-slate-700">{row.dateNum}</button>))}</div>
-                        <button onClick={onClose} className="w-full mt-4 bg-slate-700 py-2 rounded-lg text-white font-bold text-sm">Cerrar</button>
-                    </div>
-                </div>
-            );
-        };
-
-        const App = () => {
-            const [user, setUser] = useState(null);
-            const [usersData, setUsersData] = useState(DEFAULT_USERS); 
-            const [data, setData] = useState({});
-            const [ordersData, setOrdersData] = useState({});
-            const [visibilityConfig, setVisibilityConfig] = useState({ machines: [], days: [] });
-            const [loading, setLoading] = useState(true);
-            const [weekOffset, setWeekOffset] = useState(INITIAL_STATE.weekOffset);
-            const [selectedDayIndex, setSelectedDayIndex] = useState(INITIAL_STATE.selectedDayIndex); 
-            const [showOrderManager, setShowOrderManager] = useState(false);
-            const [showVisibilityModal, setShowVisibilityModal] = useState(false);
-            const [showCalendar, setShowCalendar] = useState(false);
-            const [showUserManagementModal, setShowUserManagementModal] = useState(false);
-            const [deferredPrompt, setDeferredPrompt] = useState(null);
-            const orderManagerRef = React.useRef(); 
-
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
-            useEffect(() => { const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); }; window.addEventListener('beforeinstallprompt', handler); return () => window.removeEventListener('beforeinstallprompt', handler); }, []);
-            
-            useEffect(() => {
-                const unsubAuth = onAuthStateChanged(auth, (u) => {
-                    if (u) {
-                        const unsubDb = onSnapshot(collection(db, 'produccion_2026'), (snap) => { const d = {}; snap.forEach(doc => d[doc.id] = doc.data()); setData(d); setLoading(false); });
-                        const unsubSettings = onSnapshot(doc(db, 'settings', 'visibility'), (docSnap) => { if (docSnap.exists()) setVisibilityConfig(docSnap.data()); });
-                        const unsubOrders = onSnapshot(doc(db, 'settings', 'orders'), (docSnap) => { if (docSnap.exists()) setOrdersData(docSnap.data()); });
-                        const unsubUsers = onSnapshot(doc(db, 'settings', 'users'), (docSnap) => { 
-                            if (docSnap.exists()) { const fetchedUsers = docSnap.data(); setUsersData(fetchedUsers); if (user && !fetchedUsers[user.id]) setUser(null); } else { setDoc(doc(db, 'settings', 'users'), DEFAULT_USERS); }
-                        });
-                        return () => { unsubDb(); unsubSettings(); unsubOrders(); unsubUsers(); };
-                    } else signInAnonymously(auth);
-                });
-                return () => unsubAuth();
-            }, [user]);
-
-            const handleUpdateSlot = async (rowId, machineId, slotIndex, field, value) => {
-                const currentMachineData = data[rowId]?.[machineId] || {};
-                const currentSlots = currentMachineData.slots || [{}, {}, {}, {}];
-                const updatedSlots = [...currentSlots];
-                if (!updatedSlots[slotIndex]) updatedSlots[slotIndex] = {};
-                if (field === 'qty') updatedSlots[slotIndex].qty = value === '' ? '' : Number(value);
-                else updatedSlots[slotIndex].model = value;
-                const newTotalActual = updatedSlots.reduce((acc, s) => acc + (Number(s?.qty) || 0), 0);
-                const updatedMachine = { ...currentMachineData, slots: updatedSlots, actual: newTotalActual };
-                await setDoc(doc(db, 'produccion_2026', rowId), { [machineId]: updatedMachine }, { merge: true });
-            };
-
-            const handleSaveOrder = async (machineId, orderData) => { await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { ...orderData, lastUpdated: serverTimestamp(), updatedBy: user.name } }, { merge: true }); };
-            const handleDeleteOrder = async (machineId) => { await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, parts: [], lastUpdated: serverTimestamp() } }, { merge: true }); };
-            
-            // --- NUEVO: GUARDAR CONTEO ---
-            const handleSaveConteo = async (machineId, conteoData) => {
-                 // Estructura: array de conteos en el objeto de la orden
-                 const currentOrder = ordersData[machineId];
-                 if (!currentOrder) return;
-                 const newCounts = [...(currentOrder.verifiedCounts || []), { ...conteoData, timestamp: new Date().toISOString() }];
-                 await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { verifiedCounts: newCounts } }, { merge: true });
-            };
-
-            const handleSaveVisibility = async (hiddenMachines, hiddenDays) => { await setDoc(doc(db, 'settings', 'visibility'), { machines: hiddenMachines, days: hiddenDays }, { merge: true }); };
-            const handleSaveUser = async (pin, userData) => { try { await setDoc(doc(db, 'settings', 'users'), { ...usersData, [pin]: userData }); if (user.id === pin) setUser({...userData, id: pin}); alert('Usuario guardado'); } catch (error) { alert('Error: ' + error.message); } };
-            const handleDeleteUser = async (pinToDelete) => { if (pinToDelete === user.id) return; if (confirm(`¿Eliminar ${pinToDelete}?`)) { const { [pinToDelete]: _, ...newUsers } = usersData; await setDoc(doc(db, 'settings', 'users'), newUsers); } };
-            const handleDateSelect = (row) => { setWeekOffset(Math.floor(row.index / 7)); setShowCalendar(false); };
-
-            const canViewGraph = user && (user.canViewGraph || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT || user.role === ROLES.OBSERVER || user.role === ROLES.PRE_COUNT);
-            const canManageUsers = user && user.role === ROLES.DEVELOPMENT; 
-            const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
-            const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7); }, [weekOffset]);
-            const weekLabel = useMemo(() => getWeekLabel(currentWeekRows), [currentWeekRows]);
-            const canManageOrders = user && (user.canManageOrders || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT || user.role === ROLES.PRE_COUNT); 
-            const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
-            const canEditSlot = (machineId, slotIndex) => { if (!user) return false; if (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) return true; if (user.allowedSlots) return user.allowedSlots.includes(slotIndex); return false; };
-
-            if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={() => deferredPrompt?.prompt()} users={usersData} />;
-            if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900"><i data-lucide="loader-2" className="animate-spin w-12 h-12 text-blue-500"></i></div>;
-
-            const MobileView = () => {
-                const safeIndex = selectedDayIndex >= currentWeekRows.length ? 0 : selectedDayIndex;
-                const selectedDay = currentWeekRows[safeIndex];
-                if (!selectedDay) return <div className="p-10 text-center text-slate-500">Semana sin días visibles</div>;
-                const rowId = selectedDay.id;
-                const dayData = data[rowId] || {};
-                const isHiddenDay = visibilityConfig.days?.includes(rowId);
-                
-                return (
-                    <div className="flex flex-col h-full bg-slate-900">
-                        <div className="bg-slate-800 shadow-sm z-20 shrink-0 border-b border-slate-700">
-                             <div className="p-3 flex justify-between items-center bg-slate-900/50"> 
-                                <div className="flex items-center gap-2"><i data-lucide="user-check" className="w-5 h-5 text-blue-400"></i><div><p className="text-sm font-bold text-slate-100">{user.name.split(' ')[0]}</p><p className="text-[10px] text-slate-500 uppercase font-medium">{user.area}</p></div></div>
-                                <div className="flex gap-2">
-                                    {canManageUsers && <button onClick={() => setShowUserManagementModal(true)} className="w-8 h-8 bg-yellow-600 rounded-lg flex items-center justify-center text-white"><i data-lucide="users" className="w-4 h-4"></i></button>}
-                                    {canManageOrders && <button onClick={() => setShowOrderManager(true)} className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><i data-lucide="clipboard-list" className="w-4 h-4"></i></button>}
-                                    {canConfig && <button onClick={() => setShowVisibilityModal(true)} className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-slate-300"><i data-lucide="settings" className="w-4 h-4"></i></button>}
-                                </div>
-                            </div>
-                            <div className="flex overflow-x-auto custom-scrollbar pb-1 px-1 gap-1 bg-slate-900/50">{currentWeekRows.map((day, idx) => (<button key={day.id} onClick={() => setSelectedDayIndex(idx)} className={`flex-shrink-0 flex flex-col items-center justify-center p-2 min-w-[60px] rounded-lg my-2 transition-all ${idx === safeIndex ? 'bg-slate-700 shadow border-b-4 border-blue-500 scale-105' : 'text-slate-500 hover:bg-slate-800'}`}><span className="text-[10px] font-bold uppercase mb-0.5 text-blue-400">{day.shortDay}</span><span className={`text-lg font-black leading-none ${idx === safeIndex ? 'text-white' : 'text-slate-600'}`}>{day.dateNum}</span></button>))}</div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-3 pb-24 custom-scrollbar">
-                            {isHiddenDay && <div className="p-4 bg-red-900/30 text-red-300 rounded-lg text-center font-bold mb-3">Día Oculto / Feriado</div>}
-                            {visibleMachines.map(m => { 
-                                const mData = dayData[m.id] || {};
-                                const slots = mData.slots || [{}, {}, {}, {}];
-                                const order = ordersData[m.id];
-                                const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days || []);
-                                const isPlannedDay = metrics.isPlanned && new Date(order.startDate).toISOString().split('T')[0] <= selectedDay.isoDate && (metrics.finishDate === null || metrics.finishDate >= selectedDay.isoDate);
-                                const isComposite = order?.parts?.length > 0;
-                                
-                                return (
-                                    <div key={m.id} className="bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-700 relative overflow-hidden mb-3">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center"><i data-lucide="cpu" className="w-5 h-5 opacity-50"></i></div><div><h3 className="font-black text-slate-200 text-sm">{m.name.replace('MAQ ','M-')}</h3><p className="text-[10px] text-slate-500 font-medium">{m.type}</p></div></div>
-                                            {(metrics.progress > 0 || isPlannedDay) && <div className="text-[10px] font-bold text-blue-400 bg-blue-900/30 px-2 py-0.5 rounded">{metrics.progress.toFixed(0)}%</div>}
-                                        </div>
-                                        {order && (order.totalQty > 0 || isComposite) && canViewGraph && (
-                                            <div className="mb-3">
-                                                <div className="text-[10px] text-yellow-500 font-bold uppercase flex justify-between border-b border-slate-700 pb-1"><span>{order.model}</span><span>{isComposite ? 'MULTI' : order.totalQty}</span></div>
-                                                {isComposite && metrics.activePart && <div className="text-[9px] text-green-400 mt-1">Prod: {metrics.activePart.name}</div>}
-                                                <div className="h-1 w-full bg-slate-700 mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
-                                            </div>
-                                        )}
-                                        <div className={`rounded-lg p-2 border border-slate-700/50 ${isPlannedDay && !isHiddenDay ? 'bg-yellow-900/10' : 'bg-slate-900/50'}`}>
-                                            {isPlannedDay && !isHiddenDay && <div className="text-[8px] text-yellow-400 text-center font-bold uppercase mb-1">{order.model}</div>}
-                                            <div className="grid grid-cols-2 gap-2 mb-1"><div className="text-[9px] text-center font-bold text-blue-400 uppercase tracking-widest border-b border-blue-900 pb-1">Andrés</div><div className="text-[9px] text-center font-bold text-orange-400 uppercase tracking-widest border-b border-orange-900 pb-1">Balta</div></div>
-                                            <div className="grid grid-cols-2 gap-2 flex-1 h-16">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                        <div className="fixed bottom-0 left-0 w-full bg-slate-900/90 backdrop-blur border-t border-slate-700 p-3 flex justify-between items-center z-30">
-                             <button onClick={() => setWeekOffset(prev => Math.max(0, prev - 1))} className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400"><i data-lucide="chevron-left" className="w-5 h-5"></i></button>
-                             <div className="text-center"><span className="block text-xs font-bold text-blue-400 uppercase tracking-wide">{weekLabel}</span></div>
-                             <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400"><i data-lucide="chevron-right" className="w-5 h-5"></i></button>
-                        </div>
-                    </div>
-                );
-            };
-
-            const DesktopView = () => (
-                <div className="h-full flex flex-col bg-slate-900 overflow-hidden relative">
-                    <header className="bg-slate-800 shadow-sm border-b border-slate-700 p-3 flex justify-between items-center z-20 shrink-0">
-                        <div className="flex items-center gap-4">
-                            <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-2 rounded-lg text-white shadow-lg"><i data-lucide="factory" className="w-5 h-5"></i></div>
-                            <h1 className="font-bold text-slate-200 hidden md:block">Control MAES - Tejido</h1>
-                            <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700/50 ml-6">
-                                <button onClick={() => setWeekOffset(prev => Math.max(0, prev - 1))} className="p-1 hover:bg-slate-700 rounded text-slate-400"><i data-lucide="chevron-left" className="w-5 h-5"></i></button>
-                                <div className="flex items-center gap-2 px-2 cursor-pointer" onClick={() => setShowCalendar(true)}><i data-lucide="calendar" className="w-4 h-4 text-blue-400"></i><span className="text-sm font-bold text-white uppercase w-32 text-center select-none">{weekLabel}</span></div>
-                                <button onClick={() => setWeekOffset(prev => prev + 1)} className="p-1 hover:bg-slate-700 rounded text-slate-400"><i data-lucide="chevron-right" className="w-5 h-5"></i></button>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                            <div className="text-right px-3 py-1 bg-slate-900/50 rounded-lg border border-slate-700/50"><p className="text-sm font-bold text-blue-400">{user.name.toUpperCase()}</p><p className="text-[10px] text-slate-500 uppercase font-medium leading-none">{user.area}</p></div>
-                            <div className="flex gap-2">
-                                {canManageUsers && <button onClick={() => setShowUserManagementModal(true)} className="bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 shadow-lg transition-all"><i data-lucide="users" className="w-4 h-4"></i> Usuarios</button>}
-                                {canManageOrders && <button onClick={() => setShowOrderManager(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 shadow-lg hover:scale-105 transition-all"><i data-lucide="clipboard-list" className="w-4 h-4"></i> Pedidos</button>}
-                                {canConfig && <button onClick={() => setShowVisibilityModal(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"><i data-lucide="settings" className="w-5 h-5"></i></button>}
-                                <button onClick={() => setUser(null)} className="p-2 text-red-400 hover:bg-red-900/20 rounded"><i data-lucide="log-out" className="w-5 h-5"></i></button>
-                            </div>
-                        </div>
-                    </header>
-                    <main className="flex-1 overflow-auto p-2 custom-scrollbar relative">
-                        <div className="bg-slate-800 rounded-xl shadow border border-slate-700 overflow-hidden h-full">
-                            <div className="overflow-auto custom-scrollbar h-full relative">
-                                <table className="w-full border-collapse">
-                                    <thead className="sticky top-0 z-20 bg-slate-900 shadow-sm border-b border-slate-700">
-                                        <tr>
-                                            <th className="sticky left-0 z-30 bg-slate-900 p-3 min-w-[120px] text-left border-r border-slate-700 text-xs font-bold text-slate-500">FECHA</th>
-                                            {visibleMachines.map(m => {
-                                                const order = ordersData[m.id];
-                                                const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days || []);
-                                                const isComp = order?.parts?.length > 0;
-                                                return (
-                                                    <th key={m.id} className={`min-w-[160px] p-2 border-r border-slate-700 ${metrics.isPlanned ? 'bg-yellow-900/10' : ''}`}>
-                                                        <div className="flex flex-col items-center">
-                                                            <span className="text-xs font-bold text-blue-400">{m.name.replace('MAQ ','')}</span>
-                                                            {order && (order.totalQty > 0 || isComp) ? (
-                                                                <div className="mt-1 w-full px-2">
-                                                                    <div className="flex justify-between items-center text-[9px] font-black text-yellow-400 uppercase leading-none mb-1"><span>{order.model}</span><span>{metrics.progress.toFixed(0)}%</span></div>
-                                                                    {canViewGraph && <div className="h-1 bg-slate-700 rounded-full overflow-hidden w-full"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>}
-                                                                    <span className="block text-[8px] text-slate-500 mt-1 font-bold">Fin: <span className={metrics.status === 'COMPLETADO' ? 'text-green-400' : 'text-red-400'}>{metrics.status === 'COMPLETADO' ? 'OK' : (metrics.finishDate || '-')}</span></span>
-                                                                </div>
-                                                            ) : <span className="text-[9px] text-slate-600">Sin Orden</span>}
-                                                        </div>
-                                                    </th>
-                                                );
-                                            })}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {currentWeekRows.map(row => {
-                                            const rowId = row.id; 
-                                            const rowData = data[rowId] || {};
-                                            const isHiddenDay = visibilityConfig.days?.includes(rowId);
-                                            return (
-                                                <tr key={rowId} className={`border-b border-slate-700 hover:bg-slate-700/50 transition-colors ${isHiddenDay ? 'opacity-30' : ''}`}>
-                                                    <td className="sticky left-0 bg-slate-800 p-2 border-r border-slate-700 text-xs font-bold text-slate-400 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">{row.shortDay} <br/> <span className="text-lg text-slate-200">{row.dateNum}</span></td>
-                                                    {visibleMachines.map(m => {
-                                                        const mData = rowData[m.id] || {}; 
-                                                        const slots = mData.slots || [{}, {}, {}, {}];
-                                                        const order = ordersData[m.id];
-                                                        const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days || []);
-                                                        const isFinishDay = metrics.finishDate === row.isoDate && metrics.status !== 'COMPLETADO';
-                                                        const isPlannedDay = metrics.isPlanned && new Date(order.startDate).toISOString().split('T')[0] <= row.isoDate && (metrics.finishDate === null || metrics.finishDate >= row.isoDate);
-                                                        
-                                                        return (
-                                                            <td key={m.id} className={`p-1 border-r border-slate-700 relative h-[80px] ${isFinishDay ? 'bg-red-900/30 border-red-500/50' : ''} ${isPlannedDay && !isHiddenDay ? 'bg-yellow-900/10' : ''}`}>
-                                                                {isPlannedDay && !isHiddenDay && <div className="planning-info">{order.model}</div>}
-                                                                <div className="flex flex-col h-full">
-                                                                    <div className="grid grid-cols-2 gap-1 mb-0.5"><div className="text-[8px] text-center text-blue-400 font-bold bg-slate-900/50 rounded">A</div><div className="text-[8px] text-center text-orange-400 font-bold bg-slate-900/50 rounded">B</div></div>
-                                                                    <div className="grid grid-cols-2 gap-1 flex-1">{[0,1].map(idx => (<ProductionSlot key={idx} slotData={slots[idx]} index={idx} disabled={!canEditSlot(m.id, idx) || isHiddenDay} onUpdate={(idx, field, val) => handleUpdateSlot(rowId, m.id, idx, field, val)} />))}</div>
-                                                                </div>
-                                                            </td>
-                                                        );
-                                                    })}
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </main>
-                </div>
-            );
-
-            return (
-                <div className="h-full relative">
-                    {showOrderManager && <OrderManager ref={orderManagerRef} onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} user={user} onSaveConteo={handleSaveConteo} />}
-                    {showVisibilityModal && <VisibilityModal onClose={() => setShowVisibilityModal(false)} currentHiddenMachines={visibilityConfig.machines || []} currentHiddenDays={visibilityConfig.days || []} onSaveVisibility={handleSaveVisibility} allRows={ALL_ROWS} />}
-                    {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} onSelectDate={handleDateSelect} allRows={ALL_ROWS} />}
-                    {canManageUsers && showUserManagementModal && <UserManagementModal onClose={() => setShowUserManagementModal(false)} users={usersData} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />}
-                    <div className="block md:hidden h-full"><MobileView /></div>
-                    <div className="hidden md:block h-full"><DesktopView /></div>
                 </div>
             );
         };
