@@ -32,8 +32,17 @@
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
-        /* Aspect Ratio 4:6 enforcement for cells */
-        .cell-ratio { aspect-ratio: 4/6; }
+        /* Report Modal Styles */
+        .report-page { background-color: #f8fafc; color: #1e293b; padding: 30px; font-family: sans-serif; }
+        .report-header h1 { font-size: 24px; font-weight: bold; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 10px; }
+        .report-section { margin-bottom: 20px; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; }
+        .report-section h2 { font-size: 18px; font-weight: bold; color: #1e40af; margin-bottom: 10px; }
+        .report-data div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #cbd5e1; font-size: 14px; }
+        .report-label { font-weight: 500; color: #475569; }
+        .report-value { font-weight: 700; }
+        .report-material-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .report-material-table th, .report-material-table td { border: 1px solid #e2e8f0; padding: 8px; text-align: left; font-size: 13px; }
+        .report-material-table th { background-color: #f1f5f9; color: #1e293b; }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-200 font-sans fixed inset-0 overflow-hidden">
@@ -71,11 +80,11 @@
         };
         
         const DEFAULT_USERS = {
-            '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración' },
+            '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración', canManageOrders: true },
             '0000': { name: 'Prisciliano Espinoza', role: ROLES.COMMENTATOR, area: 'Comentarios' },
-            '2222': { name: 'Susana', role: ROLES.OBSERVER, area: 'Observación', canJustify: true }, 
-            '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo', canJustify: true, canManageUsers: true }, 
-            '5555': { name: 'IPAD PRE', role: ROLES.PRE_COUNT, area: 'Conteo Físico' }
+            '2222': { name: 'Susana', role: ROLES.OBSERVER, area: 'Observación', canManageOrders: true }, 
+            '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo', canManageOrders: true, canManageUsers: true }, 
+            '5555': { name: 'IPAD PRE', role: ROLES.PRE_COUNT, area: 'Conteo Físico', canCount: true }
         };
 
         const MACHINES = [
@@ -124,9 +133,298 @@
 
         const ALL_ROWS = generateCalendar();
 
-        // --- COMPONENTES ---
+        const calculateOrderMetrics = (machineId, order, allRows, globalHiddenDays) => {
+            if (!order || !order.startDate) return { progress: 0, status: 'N/A' };
+            
+            const verifiedCounts = order.verifiedCounts || [];
+            let totalItemsProduced = 0;
+            let totalMinutesProduced = 0;
+            const isComposite = order.parts && order.parts.length > 0;
+            const dailyHours = order.operators ? order.operators.length * 12 : 12;
+            const dailyMinutesCapacity = dailyHours * 60;
+            
+            // Calc Needed
+            let totalMinutesNeeded = 0;
+            if (isComposite) {
+                order.parts.forEach(p => totalMinutesNeeded += (Number(p.qty) * Number(p.time)));
+            } else {
+                totalMinutesNeeded = Number(order.totalQty) * Number(order.timePerPieceMin);
+            }
 
-        // Modal para Detalle de Celda y Justificaciones
+            // Calc Produced
+            verifiedCounts.forEach(vc => {
+                const qty = Number(vc.qty || 0);
+                if (isComposite) {
+                     const part = order.parts.find(p => p.name === vc.partName);
+                     if(part) totalMinutesProduced += (qty * Number(part.time));
+                } else {
+                    totalMinutesProduced += (qty * Number(order.timePerPieceMin));
+                }
+                totalItemsProduced += qty;
+            });
+
+            // Calc Progress
+            const progress = totalMinutesNeeded > 0 ? Math.min(100, (totalMinutesProduced / totalMinutesNeeded) * 100) : 0;
+            
+            // Estimate Status (Simplified for dashboard speed)
+            const todayISO = new Date().toISOString().split('T')[0];
+            const startDate = order.startDate;
+            
+            // Simple logic: if progress < expected by date
+            let status = 'OK';
+            if (progress < 100 && order.finalStatus !== 'COMPLETED') {
+                // ... logic de atraso simple ...
+            } else if (progress >= 100) {
+                status = 'COMPLETADO';
+            }
+
+            return { 
+                progress, status, produced: totalItemsProduced, 
+                totalYarnConsumedGrams: totalItemsProduced * (order.pieceWeightGrams || 0), // Aprox
+                isPlanned: true 
+            };
+        };
+
+        const calculateDetailedConsumption = (order, totalYarnConsumedGrams) => {
+             const materials = order.materials || [];
+             const totalKilos = totalYarnConsumedGrams / 1000;
+             return materials.map(m => {
+                 const pct = Number(m.percentage) / 100;
+                 return { name: m.name, percentage: m.percentage, kilosConsumed: totalKilos * pct };
+             });
+        };
+
+        // --- COMPONENTES MODALES (Restaurados) ---
+
+        const ArchiveModal = ({ onClose, onConfirm, machineName, orderModel }) => {
+            return (
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-sm flex items-center justify-center z-[70] p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm border border-slate-600 p-6 text-center" onClick={e => e.stopPropagation()}>
+                        <div className="bg-green-600/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500">
+                            <i data-lucide="archive" className="w-8 h-8 text-green-400"></i>
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-2">¿Confirmar Archivado?</h3>
+                        <p className="text-slate-400 text-sm mb-6">Finalizar pedido <b>{orderModel}</b> en <b>{machineName}</b>.</p>
+                        <div className="flex gap-3">
+                            <button onClick={onClose} className="flex-1 py-3 bg-slate-700 rounded-lg text-white font-bold">Cancelar</button>
+                            <button onClick={onConfirm} className="flex-1 py-3 bg-green-600 rounded-lg text-white font-bold">CONFIRMAR</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ConteoModal = ({ onClose, machineId, order, onSaveConteo }) => {
+            const isComposite = order.parts && order.parts.length > 0;
+            const [step, setStep] = useState(isComposite ? 0 : 1); 
+            const [selectedPart, setSelectedPart] = useState(isComposite ? '' : (order.model || 'General'));
+            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+            const [operator, setOperator] = useState('');
+            const [qty, setQty] = useState('');
+            const operators = order.operators || ['Andrés', 'Balta'];
+
+            const handleSave = () => {
+                if (!qty) return alert('Ingresa cantidad');
+                onSaveConteo(machineId, { date, operator, qty: Number(qty), partName: isComposite ? selectedPart : null });
+                onClose();
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-[80] p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700 p-6" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-white font-bold uppercase mb-4 text-center">Conteo Físico (iPad Pre)</h3>
+                        {step === 0 && isComposite && (
+                            <div className="grid grid-cols-1 gap-2">
+                                {order.parts.map(p => <button key={p.name} onClick={() => { setSelectedPart(p.name); setStep(1); }} className="p-3 bg-slate-700 text-white rounded font-bold">{p.name}</button>)}
+                            </div>
+                        )}
+                        {step === 1 && (
+                            <div className="space-y-4">
+                                <div><label className="text-xs text-slate-400">Fecha</label><input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-slate-900 text-white p-3 rounded border border-slate-600"/></div>
+                                <div><label className="text-xs text-slate-400">Operador</label><div className="flex gap-2">{operators.map(op => <button key={op} onClick={() => setOperator(op)} className={`flex-1 p-3 rounded font-bold border ${operator===op ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-900 border-slate-600 text-slate-400'}`}>{op}</button>)}</div></div>
+                                <div><label className="text-xs text-slate-400">Cantidad (Piezas)</label><input type="number" value={qty} onChange={e => setQty(e.target.value)} className="w-full bg-slate-900 text-white text-3xl font-black p-4 rounded border border-slate-600 text-center" autoFocus/></div>
+                                <button onClick={handleSave} className="w-full bg-green-600 py-3 rounded text-white font-bold mt-2">GUARDAR</button>
+                            </div>
+                        )}
+                        <button onClick={onClose} className="w-full mt-4 text-slate-500 text-sm">Cancelar</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const ReportModal = ({ onClose, machineId, order, metrics }) => {
+            const machine = MACHINES.find(m => m.id === machineId) || {name: machineId};
+            const isComposite = order.parts && order.parts.length > 0;
+            const detailedConsumption = calculateDetailedConsumption(order, metrics.totalYarnConsumedGrams);
+            const verifiedCounts = order.verifiedCounts || [];
+
+            const handleDownloadWord = () => {
+                const reportContent = document.querySelector('.report-page').outerHTML;
+                const htmlContent = `<html><head><meta charset="UTF-8"></head><body>${reportContent}</body></html>`;
+                const blob = new Blob([htmlContent], { type: 'application/msword;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `Reporte_${machine.name}_${order.model}.doc`;
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-[90] p-4 fade-in no-print" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[95vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
+                            <h3 className="font-bold text-white uppercase tracking-wider text-sm">Reporte Final</h3>
+                            <div className="flex gap-2"><button onClick={handleDownloadWord} className="px-3 bg-blue-600 rounded text-white font-bold text-sm">Descargar DOC</button><button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button></div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-0 custom-scrollbar report-page">
+                            <div className="report-header"><h1>REPORTE - {order.model}</h1></div>
+                            <div className="report-section">
+                                <h2>📋 Resumen</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Máquina:</span><span className="report-value">{machine.name}</span></div>
+                                    <div><span className="report-label">Total Producido:</span><span className="report-value">{metrics.produced} pzas</span></div>
+                                </div>
+                            </div>
+                            <div className="report-section">
+                                <h2>🧵 Consumo Materiales</h2>
+                                <table className="report-material-table">
+                                    <thead><tr><th>Material</th><th>%</th><th>Total (KG)</th></tr></thead>
+                                    <tbody>
+                                        {detailedConsumption.map((mat, idx) => (
+                                            <tr key={idx}><td>{mat.name}</td><td>{mat.percentage}%</td><td className="text-right">{mat.kilosConsumed.toFixed(3)} kg</td></tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="report-section">
+                                <h2>✅ Historial de Conteo (iPad Pre)</h2>
+                                <table className="report-material-table">
+                                    <thead><tr><th>Fecha</th><th>Op</th><th>Cant</th></tr></thead>
+                                    <tbody>
+                                        {verifiedCounts.map((vc, i) => (
+                                            <tr key={i}><td>{vc.date}</td><td>{vc.operator}</td><td className="text-right font-bold">{vc.qty}</td></tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const OrderManager = ({ onClose, onSaveOrders, onDeleteOrder, ordersData, allRows, user, onSaveConteo, onRequestArchive }) => {
+            const [viewMode, setViewMode] = useState('list');
+            const [activeAction, setActiveAction] = useState(null); // { type: 'conteo'|'report', machineId, order }
+            
+            // Estado para crear pedido
+            const [model, setModel] = useState('');
+            const [selectedMachines, setSelectedMachines] = useState([]);
+            const [qty, setQty] = useState('');
+            const [time, setTime] = useState('');
+
+            const handleCreate = () => {
+                if(!model || selectedMachines.length===0 || !qty || !time) return alert("Faltan datos");
+                selectedMachines.forEach(mid => {
+                    onSaveOrders(mid, { 
+                        model: model.toUpperCase(), totalQty: Number(qty), timePerPieceMin: Number(time), 
+                        startDate: new Date().toISOString().split('T')[0], operators: ['Andrés','Balta'],
+                        verifiedCounts: []
+                    });
+                });
+                setViewMode('list');
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
+                            <span className="font-bold text-white uppercase">Gestión de Pedidos</span>
+                            <div className="flex gap-2">
+                                <button onClick={() => setViewMode(viewMode==='list'?'create':'list')} className="bg-blue-600 px-3 py-1 rounded text-white font-bold text-sm">{viewMode==='list' ? '+ Nuevo Pedido' : 'Ver Lista'}</button>
+                                <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6"></i></button>
+                            </div>
+                        </div>
+                        
+                        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar">
+                            {viewMode === 'list' && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {MACHINES.map(m => {
+                                        const order = ordersData[m.id];
+                                        const hasOrder = order && order.totalQty > 0;
+                                        const metrics = calculateOrderMetrics(m.id, order, allRows, []);
+                                        
+                                        if (!hasOrder) return (
+                                            <div key={m.id} className="bg-slate-900/50 p-4 rounded border border-slate-700 border-dashed opacity-50 hover:opacity-100 transition-opacity">
+                                                <h4 className="font-bold text-slate-400">{m.name}</h4>
+                                                <p className="text-xs text-slate-600">Disponible</p>
+                                            </div>
+                                        );
+
+                                        return (
+                                            <div key={m.id} className="bg-slate-900 p-4 rounded border border-slate-700 shadow-lg relative overflow-hidden group">
+                                                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                                                <div className="flex justify-between items-start mb-2 pl-2">
+                                                    <div>
+                                                        <span className="text-xs font-bold text-blue-400">{m.name}</span>
+                                                        <h3 className="font-black text-white text-lg">{order.model}</h3>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <span className="text-2xl font-bold text-green-400">{metrics.progress.toFixed(0)}%</span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="flex flex-wrap gap-2 mt-4 pl-2">
+                                                    {(user.role === ROLES.ADMIN || user.role === ROLES.PRE_COUNT || user.role === ROLES.DEVELOPMENT) && (
+                                                        <button onClick={() => setActiveAction({ type: 'conteo', machineId: m.id, order })} className="flex-1 bg-purple-900/50 hover:bg-purple-800 text-purple-200 border border-purple-500/30 py-2 rounded text-xs font-bold flex items-center justify-center gap-1">
+                                                            <i data-lucide="clipboard-check" className="w-3 h-3"></i> CONTEO
+                                                        </button>
+                                                    )}
+                                                    <button onClick={() => setActiveAction({ type: 'report', machineId: m.id, order, metrics })} className="bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-600 py-2 px-3 rounded text-xs">
+                                                        <i data-lucide="file-text" className="w-4 h-4"></i>
+                                                    </button>
+                                                    {(user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) && (
+                                                        <>
+                                                            <button onClick={() => onRequestArchive(m.id, order)} className="bg-slate-800 hover:bg-green-900/30 text-green-400 border border-slate-600 py-2 px-3 rounded text-xs"><i data-lucide="archive" className="w-4 h-4"></i></button>
+                                                            <button onClick={() => onDeleteOrder(m.id)} className="bg-slate-800 hover:bg-red-900/30 text-red-400 border border-slate-600 py-2 px-3 rounded text-xs"><i data-lucide="trash-2" className="w-4 h-4"></i></button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {viewMode === 'create' && (
+                                <div className="max-w-md mx-auto space-y-4">
+                                    <h3 className="text-center font-bold text-white text-lg mb-4">Nuevo Pedido Simple</h3>
+                                    <input type="text" placeholder="MODELO" value={model} onChange={e => setModel(e.target.value.toUpperCase())} className="w-full bg-slate-900 text-white p-3 rounded border border-slate-600 uppercase" />
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <input type="number" placeholder="CANTIDAD TOTAL" value={qty} onChange={e => setQty(e.target.value)} className="w-full bg-slate-900 text-white p-3 rounded border border-slate-600" />
+                                        <input type="number" placeholder="MINUTOS/PIEZA" value={time} onChange={e => setTime(e.target.value)} className="w-full bg-slate-900 text-white p-3 rounded border border-slate-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-slate-400 mb-2">Seleccionar Máquinas:</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {MACHINES.map(m => (
+                                                <button key={m.id} onClick={() => setSelectedMachines(p => p.includes(m.id) ? p.filter(x => x!==m.id) : [...p, m.id])} className={`p-2 rounded text-xs font-bold border ${selectedMachines.includes(m.id) ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}>
+                                                    {m.name.replace('MAQ ','')}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <button onClick={handleCreate} className="w-full bg-green-600 py-3 rounded font-bold text-white mt-4">CREAR PEDIDOS</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    {activeAction?.type === 'conteo' && <ConteoModal onClose={() => setActiveAction(null)} machineId={activeAction.machineId} order={activeAction.order} onSaveConteo={onSaveConteo} />}
+                    {activeAction?.type === 'report' && <ReportModal onClose={() => setActiveAction(null)} machineId={activeAction.machineId} order={activeAction.order} metrics={activeAction.metrics} />}
+                </div>
+            );
+        };
+
+        // Modal para Detalle de Celda y Justificaciones (Dashboard Click)
         const CellDetailModal = ({ onClose, machine, dateRow, dailyEntries, metrics, justifications, onSaveJustification, user, order }) => {
             const [minutes, setMinutes] = useState('');
             const [reason, setReason] = useState('');
@@ -160,7 +458,7 @@
                             
                             {/* Resumen de Entradas */}
                             <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
-                                <h4 className="text-blue-400 font-bold uppercase text-xs mb-3 flex items-center gap-2"><i data-lucide="list"></i> Entradas del Día</h4>
+                                <h4 className="text-blue-400 font-bold uppercase text-xs mb-3 flex items-center gap-2"><i data-lucide="list"></i> Entradas del Día (Conteo)</h4>
                                 {dailyEntries.length === 0 ? <p className="text-slate-500 text-sm italic">Sin entradas registradas.</p> : (
                                     <div className="space-y-2">
                                         {dailyEntries.map((entry, idx) => (
@@ -191,7 +489,7 @@
                             </div>
 
                             {/* Controles de Justificación (Solo ciertos roles) */}
-                            {(user.role === ROLES.DEVELOPMENT || user.role === ROLES.OBSERVER) && (
+                            {(user.role === ROLES.DEVELOPMENT || user.role === ROLES.OBSERVER || user.role === ROLES.ADMIN) && (
                                 <div className="space-y-4 pt-4 border-t border-slate-700">
                                     <div>
                                         <label className="text-xs font-bold text-yellow-500 uppercase mb-2 block">Agregar Tiempo Muerto (Justificante)</label>
@@ -229,77 +527,50 @@
             const dailyTotal = dailyEntries.reduce((sum, e) => sum + Number(e.qty), 0);
             
             // Lógica de Estado y Colores
-            // Umbral de tiempo: 10 AM del día siguiente
-            const cellDate = new Date(row.isoDate + 'T10:00:00'); // 10 am del dia de la celda
+            const cellDate = new Date(row.isoDate + 'T10:00:00'); 
             const thresholdDate = new Date(cellDate);
-            thresholdDate.setDate(thresholdDate.getDate() + 1); // 10 am del dia siguiente
-            
+            thresholdDate.setDate(thresholdDate.getDate() + 1); 
             const now = new Date();
-            const showStatus = now >= thresholdDate; // Solo mostrar colores definitivos después de las 10am sig.
+            const showStatus = now >= thresholdDate; 
 
-            let statusColor = "bg-slate-800"; // Default (Gris Opaco antes de tiempo)
+            let statusColor = "bg-slate-800"; 
             let textColor = "text-slate-400";
             let borderColor = "border-slate-700";
-            let statusIcon = null;
             let efficiency = 0;
             let efficiencyColor = "text-slate-500";
             let showBlink = false;
 
-            // Capacidad y Eficiencia
             const operatorsCount = (order?.operators?.length || 1);
-            const shiftMinutes = operatorsCount * 12 * 60; // 12 horas por operador
+            const shiftMinutes = operatorsCount * 12 * 60; 
             const justifiedMinutes = (justifications?.downtime || []).reduce((acc, d) => acc + d.minutes, 0);
             const availableMinutes = Math.max(1, shiftMinutes - justifiedMinutes);
             const timePerPiece = Number(order?.timePerPieceMin || 0);
             
-            // Si hay pedido activo en esta fecha
-            const hasOrder = order && order.totalQty > 0 && 
-                             order.startDate <= row.isoDate && 
-                             (!order.finalStatus || order.archivedAt?.seconds * 1000 > new Date(row.isoDate).getTime());
+            const hasOrder = order && order.totalQty > 0 && order.startDate <= row.isoDate && (!order.finalStatus || order.archivedAt?.seconds * 1000 > new Date(row.isoDate).getTime());
 
             if (hasOrder && timePerPiece > 0) {
                 const producedMinutes = dailyTotal * timePerPiece;
                 efficiency = Math.min(100, (producedMinutes / availableMinutes) * 100).toFixed(0);
             }
 
-            // Lógica de Colores "Post-10AM"
             if (showStatus) {
                 if (hasOrder && dailyTotal === 0) {
-                    // Pedido asignado pero 0 producción -> Rojo Parpadeante
-                    // Si tiene explicación, deja de parpadear y se pone rojo fijo o naranja
                     if (justifications?.explanation) {
-                         statusColor = "bg-red-900/40";
-                         borderColor = "border-red-600";
-                         textColor = "text-red-400";
+                         statusColor = "bg-red-900/40"; borderColor = "border-red-600"; textColor = "text-red-400";
                     } else {
-                        statusColor = "bg-red-600 blink-red";
-                        borderColor = "border-red-500";
-                        textColor = "text-white";
-                        showBlink = true;
+                        statusColor = "bg-red-600 blink-red"; borderColor = "border-red-500"; textColor = "text-white"; showBlink = true;
                     }
                 } else if (dailyTotal > 0) {
                     if (efficiency < 75) {
-                        statusColor = "bg-orange-900/40";
-                        borderColor = "border-orange-500";
-                        textColor = "text-orange-400";
-                        efficiencyColor = "text-orange-500";
+                        statusColor = "bg-orange-900/40"; borderColor = "border-orange-500"; textColor = "text-orange-400"; efficiencyColor = "text-orange-500";
                     } else {
-                        statusColor = "bg-green-900/40";
-                        borderColor = "border-green-500";
-                        textColor = "text-green-400";
-                        efficiencyColor = "text-green-500";
+                        statusColor = "bg-green-900/40"; borderColor = "border-green-500"; textColor = "text-green-400"; efficiencyColor = "text-green-500";
                     }
                 } else if (!hasOrder) {
-                    // Sin pedido -> Gris
                     statusColor = "bg-slate-800";
                 }
             } else {
-                // Antes de las 10 AM (Tiempo real)
-                if (dailyTotal > 0) {
-                     statusColor = "bg-blue-900/20"; // Indicador sutil de que lleva algo
-                     textColor = "text-blue-300";
-                     efficiencyColor = "text-blue-400";
-                }
+                if (dailyTotal > 0) { statusColor = "bg-blue-900/20"; textColor = "text-blue-300"; efficiencyColor = "text-blue-400"; }
             }
 
             if (isHiddenDay) return <div className="min-w-[80px] h-[120px] bg-slate-900/50 border-r border-slate-800 flex items-center justify-center opacity-30"><i data-lucide="slash" className="w-6 h-6 text-slate-600"></i></div>;
@@ -307,27 +578,15 @@
             return (
                 <div onClick={() => onCellClick(machineId, row, dailyEntries, { efficiency, dailyTotal, efficiencyColor }, justifications)} 
                      className={`min-w-[80px] h-[120px] border-r border-b ${borderColor} ${statusColor} relative flex flex-col cursor-pointer transition-colors hover:bg-white/5 group`}>
-                    
-                    {/* Barra Superior de Estado */}
                     <div className={`h-1.5 w-full ${hasOrder ? (showStatus && dailyTotal === 0 && !justifications?.explanation ? 'bg-red-500' : (efficiency >= 75 ? 'bg-green-500' : (efficiency > 0 ? 'bg-orange-500' : 'bg-slate-600'))) : 'bg-transparent'}`}></div>
-
-                    {/* Contenido Principal */}
                     <div className="flex-1 flex flex-col items-center justify-center relative p-1">
                         {hasOrder && <span className="absolute top-1 text-[8px] font-bold text-slate-500 uppercase tracking-tighter truncate max-w-full px-1">{order.model}</span>}
-                        
-                        {/* Número Gigante Centrado */}
                         <span className={`text-3xl font-black ${textColor} drop-shadow-lg scale-y-110`}>
                             {dailyTotal > 0 ? dailyTotal : (hasOrder && showStatus ? '0' : '-')}
                         </span>
-                        
-                        {/* Indicadores Inferiores (Botones Visuales) */}
                         <div className="flex gap-1 mt-1 opacity-60 group-hover:opacity-100 transition-opacity">
-                            {justifications?.downtime?.length > 0 && (
-                                <div className="w-2 h-2 rounded-full bg-yellow-500" title="Justificante Activo"></div>
-                            )}
-                            {justifications?.explanation && (
-                                <div className="w-2 h-2 rounded-full bg-blue-500" title="Explicación Activa"></div>
-                            )}
+                            {justifications?.downtime?.length > 0 && (<div className="w-2 h-2 rounded-full bg-yellow-500" title="Justificante Activo"></div>)}
+                            {justifications?.explanation && (<div className="w-2 h-2 rounded-full bg-blue-500" title="Explicación Activa"></div>)}
                         </div>
                     </div>
                 </div>
@@ -338,26 +597,27 @@
             const [user, setUser] = useState(null);
             const [ordersData, setOrdersData] = useState({});
             const [justificationsData, setJustificationsData] = useState({});
-            const [visibilityConfig, setVisibilityConfig] = useState({}); // { '2025-W10': [hiddenIds], ... }
+            const [visibilityConfig, setVisibilityConfig] = useState({});
             const [globalSettings, setGlobalSettings] = useState({ hiddenDays: [] });
             const [loading, setLoading] = useState(true);
             
-            // Estado de Navegación
             const todayISO = new Date().toISOString().split('T')[0];
             const startIdx = ALL_ROWS.findIndex(r => r.isoDate === todayISO);
             const safeStartIdx = startIdx !== -1 ? Math.floor(startIdx / 7) : 0;
             const [weekOffset, setWeekOffset] = useState(safeStartIdx);
             
-            // Modales
             const [selectedCell, setSelectedCell] = useState(null);
             const [showOrderManager, setShowOrderManager] = useState(false);
             const [showVisibilityModal, setShowVisibilityModal] = useState(false);
+            const [showArchiveModal, setShowArchiveModal] = useState(false);
+            const [orderToArchive, setOrderToArchive] = useState(null);
+
             const [usersData, setUsersData] = useState(DEFAULT_USERS);
             const [showLogin, setShowLogin] = useState(true);
             const [pinInput, setPinInput] = useState('');
 
-            // Data Fetching
             useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
                 const unsubOrders = onSnapshot(doc(db, 'settings', 'orders'), (s) => s.exists() && setOrdersData(s.data()));
                 const unsubJustif = onSnapshot(collection(db, 'daily_justifications'), (snap) => {
                     const d = {}; snap.forEach(doc => d[doc.id] = doc.data());
@@ -374,11 +634,33 @@
                 return () => { unsubOrders(); unsubJustif(); unsubVis(); };
             }, []);
 
-            // Handlers
             const handleLogin = (e) => {
                 e.preventDefault();
                 if(usersData[pinInput]) { setUser({...usersData[pinInput], id: pinInput}); setShowLogin(false); }
                 else alert('PIN Incorrecto');
+            };
+
+            const handleSaveOrder = async (machineId, orderData) => { await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { ...orderData, lastUpdated: serverTimestamp() } }, { merge: true }); };
+            const handleDeleteOrder = async (machineId) => { await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, parts: [], verifiedCounts: [], lastUpdated: serverTimestamp() } }, { merge: true }); };
+            
+            const handleSaveConteo = async (machineId, conteoData) => {
+                 const currentOrder = ordersData[machineId];
+                 if (!currentOrder) return;
+                 const newCounts = [...(currentOrder.verifiedCounts || []), { ...conteoData, timestamp: new Date().toISOString() }];
+                 await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { verifiedCounts: newCounts } }, { merge: true });
+            };
+
+            const handleRequestArchive = (machineId, order) => {
+                setOrderToArchive({ machineId, order, machineName: MACHINES.find(m=>m.id===machineId).name });
+                setShowArchiveModal(true);
+            };
+
+            const handleConfirmArchive = async () => {
+                if (!orderToArchive) return;
+                const { machineId, order } = orderToArchive;
+                await addDoc(collection(db, 'completed_orders'), { ...order, machineId, archivedAt: serverTimestamp(), archivedBy: user.name, finalStatus: 'COMPLETED' });
+                await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, parts: [], verifiedCounts: [], lastUpdated: serverTimestamp() } }, { merge: true });
+                setShowArchiveModal(false); setOrderToArchive(null);
             };
 
             const handleSaveJustification = async (machineId, dateIso, data) => {
@@ -394,7 +676,6 @@
                 }, { merge: true });
             };
 
-            // Derivados
             const currentWeekRows = useMemo(() => {
                 const s = weekOffset * 7;
                 return ALL_ROWS.slice(s, s + 7);
@@ -403,6 +684,7 @@
             const weekId = currentWeekRows[0]?.weekId;
             const hiddenMachinesForWeek = visibilityConfig[weekId] || [];
             const visibleMachines = MACHINES.filter(m => !hiddenMachinesForWeek.includes(m.id));
+            const canManageOrders = user && (user.canManageOrders || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT);
 
             if (loading) return <div className="h-screen bg-slate-900 flex items-center justify-center text-blue-500"><i data-lucide="loader-2" className="animate-spin w-10 h-10"></i></div>;
 
@@ -419,13 +701,10 @@
 
             return (
                 <div className="h-full flex flex-col bg-slate-900 overflow-hidden">
-                    {/* Header */}
                     <header className="bg-slate-800 border-b border-slate-700 p-2 flex justify-between items-center z-20 shadow-md">
                         <div className="flex items-center gap-4">
                             <div className="bg-blue-600 p-2 rounded-lg"><i data-lucide="layout-grid" className="text-white w-5 h-5"></i></div>
                             <h1 className="font-bold text-white hidden md:block">CONTROL DE EFICIENCIA</h1>
-                            
-                            {/* Navegación Semanal */}
                             <div className="flex items-center gap-1 bg-slate-900 rounded-lg p-1 border border-slate-700 ml-4">
                                 <button onClick={()=>setWeekOffset(w=>Math.max(0,w-1))} className="p-2 hover:bg-slate-700 rounded text-slate-400"><i data-lucide="chevron-left" className="w-5 h-5"></i></button>
                                 <div className="px-4 text-center">
@@ -437,20 +716,19 @@
                         </div>
 
                         <div className="flex items-center gap-3">
-                            <div className="text-right mr-2 hidden sm:block">
-                                <p className="text-sm font-bold text-white">{user.name}</p>
-                                <p className="text-[10px] text-slate-500 uppercase font-bold">{user.area}</p>
-                            </div>
-                            <button onClick={()=>setShowVisibilityModal(true)} className="p-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg" title="Ocultar Máquinas (Semanal)"><i data-lucide="eye-off" className="w-5 h-5"></i></button>
+                            {canManageOrders && (
+                                <button onClick={() => setShowOrderManager(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-lg transition-transform hover:scale-105">
+                                    <i data-lucide="clipboard-list" className="w-4 h-4"></i> PEDIDOS
+                                </button>
+                            )}
+                            <button onClick={()=>setShowVisibilityModal(true)} className="p-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg" title="Ocultar Máquinas"><i data-lucide="eye-off" className="w-5 h-5"></i></button>
                             <button onClick={()=>setUser(null)||setShowLogin(true)} className="p-2 bg-red-900/30 text-red-400 hover:bg-red-900/50 rounded-lg"><i data-lucide="log-out" className="w-5 h-5"></i></button>
                         </div>
                     </header>
 
-                    {/* Main Grid */}
                     <main className="flex-1 overflow-auto custom-scrollbar bg-slate-900 p-2 relative">
                         <div className="inline-block min-w-full bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-2xl">
                             <div className="flex">
-                                {/* Columna Fija de Fechas */}
                                 <div className="sticky left-0 z-30 bg-slate-800 shadow-[2px_0_10px_rgba(0,0,0,0.5)]">
                                     <div className="h-10 bg-slate-900 border-b border-r border-slate-700 flex items-center justify-center text-xs font-bold text-slate-500">FECHA</div>
                                     {currentWeekRows.map(row => (
@@ -461,36 +739,20 @@
                                     ))}
                                 </div>
 
-                                {/* Columnas de Máquinas */}
                                 <div className="flex">
                                     {visibleMachines.map(m => (
-                                        <div key={m.id} className="flex flex-col w-[80px]"> {/* Ancho fijo reducido */}
-                                            {/* Header Máquina */}
+                                        <div key={m.id} className="flex flex-col w-[80px]">
                                             <div className="h-10 bg-slate-900 border-b border-r border-slate-700 flex items-center justify-center px-1 sticky top-0 z-20">
                                                 <span className="text-[10px] font-black text-blue-400 truncate" title={m.name}>{m.name.replace('MAQ ','M-')}</span>
                                             </div>
-                                            
-                                            {/* Celdas */}
                                             {currentWeekRows.map(row => {
                                                 const order = ordersData[m.id];
                                                 const verifiedCounts = order?.verifiedCounts || [];
-                                                // Filtrar conteos para este día
                                                 const dailyEntries = verifiedCounts.filter(vc => vc.date === row.isoDate);
                                                 const justifKey = `${row.isoDate}_${m.id}`;
                                                 const justifs = justificationsData[justifKey];
-
                                                 return (
-                                                    <EfficiencyCell 
-                                                        key={`${m.id}-${row.id}`}
-                                                        machineId={m.id}
-                                                        row={row}
-                                                        order={order}
-                                                        isHidden={false}
-                                                        dailyEntries={dailyEntries}
-                                                        justifications={justifs}
-                                                        globalHiddenDays={globalSettings.hiddenDays}
-                                                        onCellClick={(mid, r, entries, metrics, j) => setSelectedCell({ machine: m, dateRow: r, entries, metrics, justifications: j, order })}
-                                                    />
+                                                    <EfficiencyCell key={`${m.id}-${row.id}`} machineId={m.id} row={row} order={order} isHidden={false} dailyEntries={dailyEntries} justifications={justifs} globalHiddenDays={globalSettings.hiddenDays} onCellClick={(mid, r, entries, metrics, j) => setSelectedCell({ machine: m, dateRow: r, entries, metrics, justifications: j, order })} />
                                                 );
                                             })}
                                         </div>
@@ -500,23 +762,15 @@
                         </div>
                     </main>
                     
-                    {/* Modal Visibilidad Semanal */}
                     {showVisibilityModal && (
                         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 fade-in">
                             <div className="bg-slate-800 p-6 rounded-2xl w-full max-w-2xl border border-slate-700 max-h-[90vh] flex flex-col">
                                 <h3 className="text-xl font-bold text-white mb-4">Visibilidad para Semana {weekId}</h3>
-                                <p className="text-sm text-slate-400 mb-4">Selecciona las máquinas que deseas <b>OCULTAR</b> esta semana. Al cambiar de semana, se restablecerán o usarán su propia configuración.</p>
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 overflow-y-auto flex-1 custom-scrollbar p-2">
                                     {MACHINES.map(m => {
                                         const isHidden = (visibilityConfig[weekId] || []).includes(m.id);
                                         return (
-                                            <button key={m.id} onClick={() => {
-                                                const current = visibilityConfig[weekId] || [];
-                                                const newHidden = isHidden ? current.filter(id => id !== m.id) : [...current, m.id];
-                                                handleSaveVisibility(newHidden);
-                                            }} className={`p-3 rounded border text-sm font-bold transition-all ${isHidden ? 'bg-red-900/30 border-red-500 text-red-400' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>
-                                                {m.name} {isHidden ? '(Oculta)' : ''}
-                                            </button>
+                                            <button key={m.id} onClick={() => { const current = visibilityConfig[weekId] || []; handleSaveVisibility(isHidden ? current.filter(id => id !== m.id) : [...current, m.id]); }} className={`p-3 rounded border text-sm font-bold transition-all ${isHidden ? 'bg-red-900/30 border-red-500 text-red-400' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>{m.name}</button>
                                         )
                                     })}
                                 </div>
@@ -525,16 +779,9 @@
                         </div>
                     )}
 
-                    {/* Modal Detalle Celda */}
-                    {selectedCell && (
-                        <CellDetailModal 
-                            {...selectedCell} 
-                            onClose={() => setSelectedCell(null)} 
-                            onSaveJustification={handleSaveJustification}
-                            user={user}
-                        />
-                    )}
-
+                    {showOrderManager && <OrderManager onClose={()=>setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allRows={ALL_ROWS} user={user} onSaveConteo={handleSaveConteo} onRequestArchive={handleRequestArchive} />}
+                    {showArchiveModal && orderToArchive && <ArchiveModal onClose={() => setShowArchiveModal(false)} onConfirm={handleConfirmArchive} machineName={orderToArchive.machineName} orderModel={orderToArchive.order.model} />}
+                    {selectedCell && <CellDetailModal {...selectedCell} onClose={() => setSelectedCell(null)} onSaveJustification={handleSaveJustification} user={user} />}
                 </div>
             );
         };
