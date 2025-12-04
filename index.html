@@ -6,12 +6,14 @@
     
     <title>MAES26 Control Total</title>
 
-    <link rel="icon" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/main/icon%20maes.svg">
-    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/main/icon%20maes.svg">
+    <!-- CONFIGURACIÓN DE ÍCONO PWA -->
+    <link rel="icon" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg">
+    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0f172a">
     
+    <!-- Manifiesto dinámico -->
     <link rel="manifest" href='data:application/manifest+json,{
         "name": "MAES26 Control",
         "short_name": "MAES26",
@@ -20,7 +22,7 @@
         "background_color": "#0f172a",
         "theme_color": "#0f172a",
         "icons": [{
-            "src": "https://raw.githubusercontent.com/sweaters-liliana/MAES26/main/icon%20maes.svg",
+            "src": "https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg",
             "sizes": "192x192 512x512",
             "type": "image/svg+xml"
         }]
@@ -339,6 +341,97 @@
                             </div>
 
                         </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- COMPONENTE DE INSTALACIÓN GUIADA ---
+        const InstallModal = ({ onClose, deferredPrompt, setViewPreference }) => {
+            const [step, setStep] = useState(0); // 0: Main, 1: Apple, 2: iPad
+
+            const handleAndroid = () => {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    deferredPrompt.userChoice.then(choice => {
+                        if(choice.outcome === 'accepted') onClose();
+                    });
+                } else {
+                    alert('Para instalar en Android: \n1. Toca los tres puntos (Menú) \n2. Selecciona "Instalar aplicación" o "Agregar a pantalla de inicio"');
+                }
+            };
+
+            const handleWindows = () => {
+                alert('Para instalar en Windows (Chrome/Edge): \n1. Busca el icono de instalación (+) en la barra de direcciones \n2. O ve al Menú > Aplicaciones > Instalar este sitio como aplicación');
+            };
+
+            const handleApple = () => setStep(1);
+
+            const handleIphone = () => {
+                alert('Para instalar en iPhone: \n1. Toca el botón Compartir (cuadrado con flecha) \n2. Desliza hacia abajo y toca "Agregar a Inicio"');
+                onClose();
+            };
+
+            const handleIpad = () => setStep(2);
+
+            const selectIpadView = (mode) => {
+                localStorage.setItem('maes26_view_preference', mode);
+                setViewPreference(mode);
+                alert(`Vista ${mode === 'desktop' ? 'Escritorio' : 'Móvil'} seleccionada. \n\nAhora para finalizar: \n1. Toca el botón Compartir \n2. Toca "Agregar a Inicio"`);
+                onClose();
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-sm flex items-center justify-center z-[80] p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-600 p-6 text-center animate-zoom-in relative" onClick={e => e.stopPropagation()}>
+                        <button onClick={onClose} className="absolute top-2 right-2 text-slate-400"><i data-lucide="x" className="w-6 h-6"></i></button>
+                        
+                        <div className="flex justify-center mb-4">
+                            <img src="https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg" className="w-20 h-20 rounded-xl shadow-lg bg-slate-900 p-2" />
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-2">Instalar MAES26</h3>
+                        <p className="text-slate-400 text-sm mb-6">Elige tu dispositivo para obtener la mejor experiencia.</p>
+
+                        {step === 0 && (
+                            <div className="space-y-3">
+                                <button onClick={handleAndroid} className="w-full py-3 bg-green-600 rounded-xl text-white font-bold flex items-center justify-center gap-3 hover:bg-green-500 transition-colors">
+                                    <i data-lucide="smartphone" className="w-5 h-5"></i> Android
+                                </button>
+                                <button onClick={handleApple} className="w-full py-3 bg-white text-black rounded-xl font-bold flex items-center justify-center gap-3 hover:bg-slate-200 transition-colors">
+                                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.21-1.98 1.07-3.11-1.04.05-2.29.69-3.02 1.55-.65.75-1.21 1.95-1.06 3.04 1.15.09 2.3-.64 3.01-1.48z"/></svg>
+                                    Apple (iOS)
+                                </button>
+                                <button onClick={handleWindows} className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold flex items-center justify-center gap-3 hover:bg-blue-500 transition-colors">
+                                    <i data-lucide="monitor" className="w-5 h-5"></i> Windows (PC)
+                                </button>
+                            </div>
+                        )}
+
+                        {step === 1 && (
+                            <div className="space-y-3 animate-zoom-in">
+                                <h4 className="text-white font-bold mb-4">¿Qué dispositivo Apple usas?</h4>
+                                <button onClick={handleIphone} className="w-full py-3 bg-slate-700 rounded-xl text-white font-bold flex items-center justify-center gap-3 hover:bg-slate-600">
+                                    <i data-lucide="smartphone" className="w-5 h-5"></i> iPhone
+                                </button>
+                                <button onClick={handleIpad} className="w-full py-3 bg-slate-700 rounded-xl text-white font-bold flex items-center justify-center gap-3 hover:bg-slate-600">
+                                    <i data-lucide="tablet" className="w-5 h-5"></i> iPad
+                                </button>
+                                <button onClick={() => setStep(0)} className="text-slate-500 text-sm mt-2 hover:text-white">Volver</button>
+                            </div>
+                        )}
+
+                        {step === 2 && (
+                            <div className="space-y-3 animate-zoom-in">
+                                <h4 className="text-white font-bold mb-4">Elige tu vista preferida en iPad</h4>
+                                <button onClick={() => selectIpadView('desktop')} className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold flex items-center justify-center gap-3 hover:bg-blue-500">
+                                    <i data-lucide="monitor" className="w-5 h-5"></i> Vista Escritorio (PC)
+                                </button>
+                                <button onClick={() => selectIpadView('mobile')} className="w-full py-3 bg-slate-700 rounded-xl text-white font-bold flex items-center justify-center gap-3 hover:bg-slate-600">
+                                    <i data-lucide="smartphone" className="w-5 h-5"></i> Vista Móvil (App)
+                                </button>
+                                <button onClick={() => setStep(1)} className="text-slate-500 text-sm mt-2 hover:text-white">Volver</button>
+                            </div>
+                        )}
                     </div>
                 </div>
             );
@@ -943,7 +1036,7 @@
             );
         };
 
-        const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall, users }) => {
+        const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall, users, isInstalled }) => {
             const [pin, setPin] = useState('');
             const handleLogin = (e) => {
                 e.preventDefault();
@@ -952,7 +1045,13 @@
                 else alert('PIN incorrecto');
             };
             return (
-                <div className="flex items-center justify-center h-full bg-slate-900 p-4">
+                <div className="flex items-center justify-center h-full bg-slate-900 p-4 relative">
+                    {!isInstalled && (
+                        <button onClick={onInstall} className="absolute top-6 right-6 flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-full shadow-lg border border-slate-600 hover:bg-slate-700 transition-all animate-bounce">
+                            <img src="https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg" className="w-6 h-6 rounded-full" />
+                            <span className="text-sm font-bold">Instalar App</span>
+                        </button>
+                    )}
                     <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center border border-slate-700 relative">
                         <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg"><i data-lucide="grid" className="w-8 h-8"></i></div>
                         <h2 className="text-2xl font-black text-white mb-2">MAES - TEJIDO</h2>
@@ -1028,10 +1127,30 @@
             // Modal de Estadísticas
             const [showStatsModal, setShowStatsModal] = useState(false);
 
+            // Modal de Instalación
+            const [showInstallModal, setShowInstallModal] = useState(false);
+            const [isInstalled, setIsInstalled] = useState(false);
+            const [viewPreference, setViewPreference] = useState(localStorage.getItem('maes26_view_preference') || null);
+
             const orderManagerRef = React.useRef(); 
 
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
-            useEffect(() => { const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); }; window.addEventListener('beforeinstallprompt', handler); return () => window.removeEventListener('beforeinstallprompt', handler); }, []);
+            
+            useEffect(() => { 
+                const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); }; 
+                window.addEventListener('beforeinstallprompt', handler); 
+                
+                // Check if installed
+                const checkInstalled = () => {
+                    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+                        setIsInstalled(true);
+                    }
+                };
+                checkInstalled();
+                window.addEventListener('appinstalled', () => setIsInstalled(true));
+
+                return () => window.removeEventListener('beforeinstallprompt', handler); 
+            }, []);
             
             useEffect(() => {
                 const unsubAuth = onAuthStateChanged(auth, (u) => {
@@ -1102,7 +1221,6 @@
             const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
             const canEditSlot = (machineId, slotIndex) => { if (!user) return false; if (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) return true; if (user.allowedSlots) return user.allowedSlots.includes(slotIndex); return false; };
 
-            // Cálculos para Totales y Gráficas (Basado en inputs de operadores)
             const dailyTotals = useMemo(() => {
                 return currentWeekRows.map(row => {
                     const rowId = row.id;
@@ -1130,7 +1248,7 @@
                 });
             }, [visibleMachines, currentWeekRows, data]);
 
-            if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={() => deferredPrompt?.prompt()} users={usersData} />;
+            if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={() => setShowInstallModal(true)} users={usersData} isInstalled={isInstalled} />;
             if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900"><i data-lucide="loader-2" className="animate-spin w-12 h-12 text-blue-500"></i></div>;
 
             const MobileView = () => {
@@ -1311,8 +1429,10 @@
                     {canManageUsers && showUserManagementModal && <UserManagementModal onClose={() => setShowUserManagementModal(false)} users={usersData} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />}
                     {showArchiveModal && orderToArchive && <ArchiveModal onClose={() => setShowArchiveModal(false)} onConfirm={handleConfirmArchive} machineName={orderToArchive.machineName} orderModel={orderToArchive.order.model} />}
                     {showStatsModal && <StatsModal onClose={() => setShowStatsModal(false)} dailyTotals={dailyTotals} machineTotals={machineTotals} />}
-                    <div className="block md:hidden h-full"><MobileView /></div>
-                    <div className="hidden md:block h-full"><DesktopView /></div>
+                    {showInstallModal && <InstallModal onClose={() => setShowInstallModal(false)} deferredPrompt={deferredPrompt} setViewPreference={setViewPreference} />}
+                    
+                    <div className={`h-full ${viewPreference === 'desktop' ? 'hidden' : (viewPreference === 'mobile' ? 'block' : 'block md:hidden')}`}><MobileView /></div>
+                    <div className={`h-full ${viewPreference === 'mobile' ? 'hidden' : (viewPreference === 'desktop' ? 'block' : 'hidden md:block')}`}><DesktopView /></div>
                 </div>
             );
         };
