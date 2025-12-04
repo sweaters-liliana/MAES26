@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
-    <title>MAES26 Control + Conteo</title>
+    <title>MAES26 Control Total</title>
 
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -70,7 +70,7 @@
     <script type="text/babel" data-type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp, updateDoc, arrayUnion } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getFirestore, collection, doc, setDoc, addDoc, deleteDoc, onSnapshot, serverTimestamp, updateDoc, query, orderBy, limit, getDocs } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
         const { useState, useEffect, useMemo, useRef } = React;
 
@@ -156,39 +156,17 @@
             return f.month === l.month ? `${f.month} ${f.year}` : `${f.month} - ${l.month} ${l.year}`;
         };
 
-        const calculateConsumptionDetails = (order, producedQty = 0) => {
-            if (!order) return { totalNeeded: 0, consumption: [], totalYarnKilos: 0, producedYarnKilos: 0 };
-            const materials = order.materials || [];
-            const waste = 1 + (Number(order.wastePercentage) / 100);
-            let totalYarnGramsNeeded = 0;
-            if (order.parts && order.parts.length > 0) {
-                order.parts.forEach(part => { totalYarnGramsNeeded += (Number(part.qty) * Number(part.weight)); });
-            } else {
-                totalYarnGramsNeeded = Number(order.totalQty) * Number(order.pieceWeightGrams);
-            }
-            totalYarnGramsNeeded = totalYarnGramsNeeded * waste;
-            const totalYarnKilos = totalYarnGramsNeeded / 1000;
-            const consumption = materials.filter(m => m.name && m.percentage).map(m => {
-                const percent = Number(m.percentage) / 100;
-                return { name: m.name, percentage: m.percentage, kilosNeeded: (totalYarnKilos * percent), kilosConsumed: 0 };
-            });
-            return { totalNeeded: order.totalQty, consumption, totalYarnKilos, producedYarnKilos: 0 };
-        };
-
         const calculateOrderMetrics = (machineId, order, allProductionData, allRows, globalHiddenDays) => {
             const metrics = { 
                 isPlanned: false, finishDate: null, totalNeeded: 0, progress: 0, produced: 0, 
                 dailyCapacity: 0, plannedToDate: 0, deviation: 0, status: 'OK',
-                activePart: null, partsStatus: [], totalYarnConsumed: 0, verifiedCountTotal: 0
+                activePart: null, partsStatus: [], totalYarnConsumedGrams: 0, verifiedCountTotal: 0
             };
             
             if (!order || !order.startDate) return metrics;
             
-            // Sumar conteos verificados (iPad Pre)
             const verifiedCounts = order.verifiedCounts || [];
-            metrics.verifiedCountTotal = verifiedCounts.reduce((acc, curr) => acc + Number(curr.qty || 0), 0);
-
-            const todayISO = new Date().toISOString().split('T')[0];
+            
             const dailyHours = order.operators && Array.isArray(order.operators) ? order.operators.length * 12 : Number(order.dailyHours || 12);
             const dailyMinutesCapacity = dailyHours * 60;
             const disabledDates = order.disabledDates || [];
@@ -207,50 +185,42 @@
             let totalMinutesProduced = 0;
             let totalItemsProduced = 0;
             let totalYarnConsumedGrams = 0;
-            const wasteMult = 1 + (Number(order.wastePercentage || 0) / 100);
+            
             let partsTracker = isComposite ? order.parts.map(p => ({...p, produced: 0})) : [];
 
-            const startIndex = allRows.findIndex(r => r.isoDate === order.startDate);
-            const todayIndex = allRows.findIndex(r => r.isoDate === todayISO);
-
-            if (startIndex !== -1) {
-                for (let i = startIndex; i < allRows.length; i++) {
-                    const row = allRows[i];
-                    const isFuture = i > todayIndex; 
-                    if (isFuture) break;
-                    const machineData = allProductionData[row.id]?.[machineId];
-                    if (machineData && machineData.slots) {
-                        machineData.slots.forEach(slot => {
-                            if (slot.qty && slot.qty > 0) {
-                                const slotModel = (slot.model || '').toUpperCase().trim();
-                                const qty = Number(slot.qty);
-                                if (isComposite) {
-                                    const partIdx = partsTracker.findIndex(p => p.name.toUpperCase() === slotModel);
-                                    if (partIdx !== -1) {
-                                        partsTracker[partIdx].produced += qty;
-                                        totalMinutesProduced += (qty * Number(partsTracker[partIdx].time));
-                                        totalItemsProduced += qty;
-                                        totalYarnConsumedGrams += (qty * Number(partsTracker[partIdx].weight));
-                                    }
-                                } else {
-                                    totalMinutesProduced += (qty * Number(order.timePerPieceMin));
-                                    totalItemsProduced += qty;
-                                    totalYarnConsumedGrams += (qty * Number(order.pieceWeightGrams));
-                                }
-                            }
-                        });
+            verifiedCounts.forEach(vc => {
+                const qty = Number(vc.qty || 0);
+                if (isComposite) {
+                    const partIdx = partsTracker.findIndex(p => p.name.toUpperCase() === (vc.partName || '').toUpperCase());
+                    if (partIdx !== -1) {
+                        partsTracker[partIdx].produced += qty;
+                        totalMinutesProduced += (qty * Number(partsTracker[partIdx].time));
+                        totalItemsProduced += qty; 
+                        totalYarnConsumedGrams += (qty * Number(partsTracker[partIdx].weight));
+                    } else {
+                        totalItemsProduced += qty;
                     }
+                } else {
+                    totalMinutesProduced += (qty * Number(order.timePerPieceMin));
+                    totalItemsProduced += qty;
+                    totalYarnConsumedGrams += (qty * Number(order.pieceWeightGrams));
                 }
-            }
+            });
 
+            const wasteMult = 1 + (Number(order.wastePercentage || 0) / 100);
+            
             metrics.produced = totalItemsProduced; 
             metrics.progress = totalMinutesNeeded > 0 ? Math.min(100, (totalMinutesProduced / totalMinutesNeeded) * 100) : 0;
             metrics.partsStatus = partsTracker;
-            metrics.totalYarnConsumed = (totalYarnConsumedGrams * wasteMult) / 1000;
+            metrics.totalYarnConsumedGrams = totalYarnConsumedGrams * wasteMult; 
 
             if (isComposite) {
                 metrics.activePart = partsTracker.find(p => p.produced < p.qty) || null;
             }
+
+            const todayISO = new Date().toISOString().split('T')[0];
+            const startIndex = allRows.findIndex(r => r.isoDate === order.startDate);
+            const todayIndex = allRows.findIndex(r => r.isoDate === todayISO);
 
             let plannedMinutesToDate = 0;
             if (startIndex !== -1) {
@@ -299,6 +269,15 @@
             return metrics;
         };
 
+        const calculateDetailedConsumption = (order, totalYarnConsumedGrams) => {
+             const materials = order.materials || [];
+             const totalKilos = totalYarnConsumedGrams / 1000;
+             return materials.map(m => {
+                 const pct = Number(m.percentage) / 100;
+                 return { name: m.name, percentage: m.percentage, kilosConsumed: totalKilos * pct };
+             });
+        };
+
         const ProductionSlot = ({ slotData, index, disabled, onUpdate }) => {
             const [localModel, setLocalModel] = useState(slotData?.model || '');
             const [localQty, setLocalQty] = useState('');
@@ -330,70 +309,80 @@
             );
         };
 
-        // --- CONTEO MODAL (IPAD PRE) ---
         const ConteoModal = ({ onClose, machineId, order, onSaveConteo }) => {
-            const [step, setStep] = useState(0); // 0: Date, 1: Operator, 2: Qty
+            const isComposite = order.parts && order.parts.length > 0;
+            const [step, setStep] = useState(isComposite ? 0 : 1); 
+            const [selectedPart, setSelectedPart] = useState(isComposite ? '' : (order.model || 'General'));
             const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
             const [operator, setOperator] = useState('');
             const [qty, setQty] = useState('');
             const qtyInputRef = useRef(null);
-
             const operators = order.operators || ['Andrés', 'Balta'];
 
             const handleNext = () => {
-                if (step === 0 && date) setStep(1);
-                if (step === 1 && operator) {
-                     setStep(2);
-                     // Focus qty next render
+                if (step === 0 && selectedPart) setStep(1);
+                else if (step === 1 && date) setStep(2);
+                else if (step === 2 && operator) {
+                     setStep(3);
                      setTimeout(() => qtyInputRef.current?.focus(), 100);
                 }
             };
 
             const handleSave = () => {
                 if (!qty) return alert('Ingresa cantidad');
-                onSaveConteo(machineId, { date, operator, qty: Number(qty) });
+                onSaveConteo(machineId, { date, operator, qty: Number(qty), partName: isComposite ? selectedPart : null });
                 onClose();
             };
 
             const handleKeyDown = (e) => {
                  if (e.key === 'Enter') {
-                     if (step === 0) handleNext();
-                     if (step === 2) handleSave();
+                     if (step < 3) handleNext();
+                     else handleSave();
                  }
             };
 
             return (
                 <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-[60] p-4 fade-in" onClick={onClose}>
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 bg-blue-900 flex justify-between items-center">
+                        <div className="p-4 bg-purple-900 flex justify-between items-center">
                             <h3 className="text-white font-bold uppercase flex items-center gap-2"><i data-lucide="clipboard-check"></i> Conteo Físico</h3>
                             <button onClick={onClose}><i data-lucide="x" className="text-white w-6 h-6"></i></button>
                         </div>
                         <div className="p-6 text-center">
-                            {step === 0 && (
+                            {step === 0 && isComposite && (
                                 <div className="space-y-4 animate-zoom-in">
-                                    <p className="text-slate-400 uppercase text-xs font-bold">Paso 1/3: Fecha de Producción</p>
-                                    <input type="date" value={date} onChange={e => setDate(e.target.value)} onKeyDown={handleKeyDown} className="w-full bg-slate-900 text-white text-2xl p-4 rounded-xl border border-slate-600 text-center" autoFocus />
-                                    <button onClick={handleNext} className="w-full bg-blue-600 py-3 rounded-xl text-white font-bold text-lg mt-4">Siguiente</button>
-                                </div>
-                            )}
-                            {step === 1 && (
-                                <div className="space-y-4 animate-zoom-in">
-                                    <p className="text-slate-400 uppercase text-xs font-bold">Paso 2/3: Operador</p>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        {operators.map(op => (
-                                            <button key={op} onClick={() => { setOperator(op); setTimeout(()=>handleNext(), 50); }} className={`p-6 rounded-xl border-2 font-bold text-lg transition-all ${operator === op ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}>
-                                                {op}
-                                            </button>
+                                    <p className="text-slate-400 uppercase text-xs font-bold mb-4">Paso 1: ¿Qué pieza estamos contando?</p>
+                                    <div className="grid grid-cols-1 gap-2 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                                        {order.parts.map((p, i) => (
+                                            <button key={i} onClick={() => { setSelectedPart(p.name); setTimeout(()=>handleNext(), 50); }} className="p-4 bg-slate-700 hover:bg-blue-600 rounded-xl text-white font-bold text-lg uppercase border border-slate-600 hover:border-blue-400 transition-all">{p.name}</button>
                                         ))}
                                     </div>
                                 </div>
                             )}
+                            {step === 1 && (
+                                <div className="space-y-4 animate-zoom-in">
+                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">{selectedPart}</div>
+                                    <p className="text-slate-400 uppercase text-xs font-bold">Fecha de Producción</p>
+                                    <input type="date" value={date} onChange={e => setDate(e.target.value)} onKeyDown={handleKeyDown} className="w-full bg-slate-900 text-white text-2xl p-4 rounded-xl border border-slate-600 text-center" autoFocus />
+                                    <button onClick={handleNext} className="w-full bg-blue-600 py-3 rounded-xl text-white font-bold text-lg mt-4">Siguiente</button>
+                                </div>
+                            )}
                             {step === 2 && (
                                 <div className="space-y-4 animate-zoom-in">
-                                    <p className="text-slate-400 uppercase text-xs font-bold">Paso 3/3: Cantidad Final</p>
-                                    <div className="bg-slate-900 p-2 rounded-lg mb-2"><span className="text-xs text-blue-400">{date}</span> <span className="text-xs text-yellow-400 mx-2">|</span> <span className="text-xs text-green-400">{operator}</span></div>
-                                    <input ref={qtyInputRef} type="number" value={qty} onChange={e => setQty(e.target.value)} onKeyDown={handleKeyDown} placeholder="0" className="w-full bg-slate-900 text-white text-4xl p-4 rounded-xl border border-slate-600 text-center font-bold" />
+                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">{selectedPart} <span className="text-slate-500 mx-2">|</span> {date}</div>
+                                    <p className="text-slate-400 uppercase text-xs font-bold">Operador</p>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {operators.map(op => (
+                                            <button key={op} onClick={() => { setOperator(op); setTimeout(()=>handleNext(), 50); }} className={`p-6 rounded-xl border-2 font-bold text-lg transition-all ${operator === op ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}>{op}</button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {step === 3 && (
+                                <div className="space-y-4 animate-zoom-in">
+                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">{selectedPart} <span className="text-slate-500 mx-2">|</span> {operator}</div>
+                                    <p className="text-slate-400 uppercase text-xs font-bold">Cantidad Final (Piezas)</p>
+                                    <input ref={qtyInputRef} type="number" value={qty} onChange={e => setQty(e.target.value)} onKeyDown={handleKeyDown} placeholder="0" className="w-full bg-slate-900 text-white text-5xl p-6 rounded-xl border border-slate-600 text-center font-bold" />
                                     <button onClick={handleSave} className="w-full bg-green-600 py-4 rounded-xl text-white font-bold text-lg mt-4 shadow-lg hover:scale-105 transition-transform">GUARDAR CONTEO</button>
                                 </div>
                             )}
@@ -405,14 +394,9 @@
 
         const ReportModal = ({ onClose, machineId, order, metrics }) => {
             if (!order || !machineId) return null;
-
-            const machine = MACHINES.find(m => m.id === machineId);
+            const machine = MACHINES.find(m => m.id === machineId) || {name: machineId};
             const isComposite = order.parts && order.parts.length > 0;
-            const consumptionData = calculateConsumptionDetails(order, metrics.produced);
-            const consumedKilosReal = isComposite ? metrics.totalYarnConsumed : consumptionData.producedYarnKilos;
-            const totalRequiredKilos = consumptionData.totalYarnKilos;
-
-            // Datos de Conteo Físico
+            const detailedConsumption = calculateDetailedConsumption(order, metrics.totalYarnConsumedGrams);
             const verifiedCounts = order.verifiedCounts || [];
             const hasVerifiedData = verifiedCounts.length > 0;
 
@@ -436,26 +420,28 @@
                         <div className="flex-1 overflow-y-auto p-0 custom-scrollbar report-page">
                             <div className="report-header"><h1>REPORTE - {order.model} {isComposite ? '(COMPUESTO)' : ''}</h1></div>
                             
-                            {/* Sección Conteo Físico (Nuevo) */}
+                            <div className="report-section">
+                                <h2>📋 Datos Generales</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Máquina:</span><span className="report-value">{machine.name}</span></div>
+                                    <div><span className="report-label">Modelo:</span><span className="report-value text-blue-700">{order.model}</span></div>
+                                    <div><span className="report-label">Inicio:</span><span className="report-value">{order.startDate}</span></div>
+                                    {order.finalStatus === 'COMPLETED' && <div><span className="report-label">Estado:</span><span className="report-value text-green-700 font-bold">FINALIZADO</span></div>}
+                                </div>
+                            </div>
+
                             {hasVerifiedData && (
                                 <div className="report-section" style={{borderColor: '#22c55e', backgroundColor: '#f0fdf4'}}>
-                                    <h2 style={{color: '#15803d'}}>✅ Producción Verificada (Post-Tejido)</h2>
+                                    <h2 style={{color: '#15803d'}}>✅ Registro de Conteo (Producción Real)</h2>
                                     <div className="report-data">
                                         <div style={{borderBottom: 'none', padding: '10px 0'}}>
                                             <table className="report-material-table">
-                                                <thead><tr><th>Fecha</th><th>Operador</th><th className="text-right">Cantidad</th></tr></thead>
+                                                <thead><tr><th>Fecha</th><th>Pieza/Parte</th><th>Operador</th><th className="text-right">Cantidad</th></tr></thead>
                                                 <tbody>
                                                     {verifiedCounts.map((vc, idx) => (
-                                                        <tr key={idx}>
-                                                            <td>{vc.date}</td>
-                                                            <td>{vc.operator}</td>
-                                                            <td className="text-right font-bold">{vc.qty}</td>
-                                                        </tr>
+                                                        <tr key={idx}><td>{vc.date}</td><td>{vc.partName || '-'}</td><td>{vc.operator}</td><td className="text-right font-bold">{vc.qty}</td></tr>
                                                     ))}
-                                                    <tr style={{backgroundColor: '#dcfce7', fontWeight: 'bold'}}>
-                                                        <td colSpan="2" className="text-right">TOTAL VERIFICADO:</td>
-                                                        <td className="text-right text-lg">{metrics.verifiedCountTotal}</td>
-                                                    </tr>
+                                                    <tr style={{backgroundColor: '#dcfce7', fontWeight: 'bold'}}><td colSpan="3" className="text-right">TOTAL PRODUCIDO:</td><td className="text-right text-lg">{metrics.produced}</td></tr>
                                                 </tbody>
                                             </table>
                                         </div>
@@ -463,29 +449,14 @@
                                 </div>
                             )}
 
-                            <div className="report-section">
-                                <h2>📋 Datos del Pedido</h2>
-                                <div className="report-data">
-                                    <div><span className="report-label">Máquina:</span><span className="report-value">{machine.name}</span></div>
-                                    <div><span className="report-label">Modelo:</span><span className="report-value text-blue-700">{order.model}</span></div>
-                                    {!isComposite && <div><span className="report-label">Cantidad Meta:</span><span className="report-value">{Number(order.totalQty).toLocaleString()} pzas</span></div>}
-                                    <div><span className="report-label">Inicio:</span><span className="report-value">{order.startDate}</span></div>
-                                </div>
-                            </div>
-
                             {isComposite && (
                                 <div className="report-section">
-                                    <h2>🧩 Desglose de Partes (Estimado Máquina)</h2>
+                                    <h2>🧩 Desglose de Partes</h2>
                                     <table className="report-material-table">
-                                        <thead><tr><th>Parte</th><th>Total Req.</th><th>Producido (Maq)</th><th>Faltante</th></tr></thead>
+                                        <thead><tr><th>Parte</th><th>Total Req.</th><th>Producido (Conteo)</th><th>Faltante</th></tr></thead>
                                         <tbody>
                                             {metrics.partsStatus.map((p, i) => (
-                                                <tr key={i}>
-                                                    <td>{p.name}</td>
-                                                    <td>{p.qty}</td>
-                                                    <td className={p.produced >= p.qty ? 'text-green-600 font-bold' : ''}>{p.produced}</td>
-                                                    <td>{Math.max(0, p.qty - p.produced)}</td>
-                                                </tr>
+                                                <tr key={i}><td>{p.name}</td><td>{p.qty}</td><td className={p.produced >= p.qty ? 'text-green-600 font-bold' : ''}>{p.produced}</td><td>{Math.max(0, p.qty - p.produced)}</td></tr>
                                             ))}
                                         </tbody>
                                     </table>
@@ -493,21 +464,25 @@
                             )}
 
                             <div className="report-section">
-                                <h2>📈 Avance (Estimado vs Meta)</h2>
+                                <h2>📈 Métricas de Avance</h2>
                                 <div className="report-data">
-                                    <div><span className="report-label">Producido (Contadores Máquina):</span><span className="report-value">{metrics.produced} pzas/partes</span></div>
                                     <div><span className="report-label">Progreso Global:</span><span className="report-value text-blue-700">{metrics.progress.toFixed(1)}%</span></div>
-                                    <div><span className="report-label">Desviación (Tiempo):</span><span className={metrics.deviation < 0 ? 'text-red-700' : 'text-green-700'}>{metrics.deviation} {isComposite ? 'Horas aprox' : 'Piezas'}</span></div>
+                                    <div><span className="report-label">Desviación:</span><span className={metrics.deviation < 0 ? 'text-red-700' : 'text-green-700'}>{metrics.deviation} {isComposite ? 'Horas aprox' : 'Piezas'}</span></div>
                                 </div>
                             </div>
 
                             <div className="report-section">
-                                <h2>🧵 Consumo Hilo</h2>
-                                <div className="report-data">
-                                    <div><span className="report-label">Merma:</span><span className="report-value text-red-700">{order.wastePercentage}%</span></div>
-                                    <div><span className="report-label">Total Requerido:</span><span className="report-value text-blue-700 text-lg">{totalRequiredKilos.toFixed(2)} KG</span></div>
-                                    <div><span className="report-label">Consumido (Estimado):</span><span className="report-value text-green-700 text-lg">{consumedKilosReal.toFixed(2)} KG</span></div>
-                                </div>
+                                <h2>🧵 Consumo de Materiales (Desglosado)</h2>
+                                <p style={{fontSize:'11px', color:'#666', marginBottom:'5px'}}>Calculado sobre producción real verificada + {order.wastePercentage}% merma.</p>
+                                <table className="report-material-table">
+                                    <thead><tr><th>Material</th><th>% Mezcla</th><th className="text-right">Total Consumido (KG)</th></tr></thead>
+                                    <tbody>
+                                        {detailedConsumption.map((mat, idx) => (
+                                            <tr key={idx}><td>{mat.name}</td><td>{mat.percentage}%</td><td className="text-right font-bold">{mat.kilosConsumed.toFixed(3)} kg</td></tr>
+                                        ))}
+                                        <tr style={{backgroundColor:'#f1f5f9', fontWeight:'bold'}}><td colSpan="2" className="text-right">TOTAL GENERAL:</td><td className="text-right">{(metrics.totalYarnConsumedGrams / 1000).toFixed(3)} kg</td></tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -515,9 +490,10 @@
             );
         };
 
-        const OrderManager = React.forwardRef(({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays, user, onSaveConteo }, ref) => {
+        const OrderManager = React.forwardRef(({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays, user, onSaveConteo, onArchiveOrder }, ref) => {
             const [step, setStep] = useState(1);
             const [viewMode, setViewMode] = useState('list'); 
+            const [historyOrders, setHistoryOrders] = useState([]);
             const [modelName, setModelName] = useState('');
             const [selectedMachines, setSelectedMachines] = useState([]);
             const [isEditing, setIsEditing] = useState(false);
@@ -536,6 +512,18 @@
             }), []);
 
             const [config, setConfig] = useState(initialConfig);
+
+            // Fetch history only when viewing history
+            useEffect(() => {
+                if (viewMode === 'history') {
+                    const q = query(collection(db, 'completed_orders'), orderBy('archivedAt', 'desc'), limit(50));
+                    getDocs(q).then(snap => {
+                        const h = [];
+                        snap.forEach(d => h.push({id: d.id, ...d.data()}));
+                        setHistoryOrders(h);
+                    });
+                }
+            }, [viewMode]);
 
             const addPart = () => setParts([...parts, { name: '', qty: '', time: '', weight: '' }]);
             const removePart = (idx) => setParts(parts.filter((_, i) => i !== idx));
@@ -625,15 +613,13 @@
             }
 
             const canDoConteo = user.role === ROLES.DEVELOPMENT || user.role === ROLES.PRE_COUNT;
+            const canViewHistory = user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT;
 
-            // Renderizado Configs...
+            // Renderizado
             const renderPartsConfig = () => (
                 <div className="space-y-4 fade-in">
                     <h3 className="text-lg font-bold text-white text-center mb-4">Configuración de Partes</h3>
-                    <div className="bg-blue-900/20 p-3 rounded-lg text-xs text-blue-200 mb-4 border border-blue-800">
-                        <i data-lucide="info" className="inline w-4 h-4 mr-1"></i>
-                        Define cada parte (Ej: Cuerpo, Manga).
-                    </div>
+                    <div className="bg-blue-900/20 p-3 rounded-lg text-xs text-blue-200 mb-4 border border-blue-800"><i data-lucide="info" className="inline w-4 h-4 mr-1"></i>Define cada parte (Ej: Cuerpo, Manga).</div>
                     <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                         {parts.map((p, i) => (
                             <div key={i} className="bg-slate-800 p-3 rounded border border-slate-700 flex flex-col gap-2 relative">
@@ -674,11 +660,31 @@
                 <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
-                            <span className="font-bold text-white uppercase">Gestión de Producción</span>
-                            <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6"></i></button>
+                            <span className="font-bold text-white uppercase">{viewMode === 'history' ? 'Historial Terminados' : 'Gestión de Producción'}</span>
+                            <div className="flex gap-2">
+                                {canViewHistory && viewMode === 'list' && <button onClick={() => setViewMode('history')} className="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300">Ver Historial</button>}
+                                {viewMode === 'history' && <button onClick={() => setViewMode('list')} className="text-xs bg-blue-600 px-2 py-1 rounded text-white">Ver Activos</button>}
+                                <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6"></i></button>
+                            </div>
                         </div>
                         <div className="flex-1 p-6 overflow-hidden">
-                            {viewMode === 'list' ? (
+                            {viewMode === 'history' ? (
+                                <div className="h-full overflow-y-auto custom-scrollbar">
+                                    <div className="space-y-2">
+                                        {historyOrders.map(ho => (
+                                            <div key={ho.id} className="bg-slate-900 p-3 rounded border border-slate-700/50 flex justify-between items-center opacity-70 hover:opacity-100 transition-opacity">
+                                                <div>
+                                                    <h4 className="font-bold text-white">{ho.model}</h4>
+                                                    <p className="text-xs text-slate-500">Terminado: {new Date(ho.archivedAt?.seconds * 1000).toLocaleDateString()}</p>
+                                                </div>
+                                                <button onClick={() => { setActiveOrderForAction({ machineId: ho.machineId, order: ho, metrics: calculateOrderMetrics(ho.machineId, ho, allProductionData, allRows, hiddenDays) }); setShowReportModal(true); }} className="text-blue-400 hover:bg-slate-800 p-2 rounded"><i data-lucide="file-text" className="w-4 h-4"></i></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {historyOrders.length === 0 && <p className="text-center text-slate-500 mt-10">No hay pedidos terminados.</p>}
+                                    {showReportModal && activeOrderForAction && <ReportModal onClose={() => setShowReportModal(false)} machineId={activeOrderForAction.machineId} order={activeOrderForAction.order} metrics={activeOrderForAction.metrics} />}
+                                </div>
+                            ) : viewMode === 'list' ? (
                                 <div className="h-full flex flex-col">
                                     <div className="flex justify-between mb-4"><h2 className="text-xl font-bold">Pedidos Activos</h2><button onClick={handleStartCreate} className="bg-blue-600 px-4 py-2 rounded text-white font-bold">Nuevo</button></div>
                                     <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
@@ -686,8 +692,9 @@
                                             const order = ordersData[m.id];
                                             const metrics = calculateOrderMetrics(m.id, order, allProductionData, allRows, hiddenDays);
                                             const isComp = !!order.parts?.length;
+                                            const isComplete = metrics.progress >= 100;
                                             return (
-                                                <div key={m.id} className="bg-slate-900 p-4 rounded border border-slate-700">
+                                                <div key={m.id} className={`p-4 rounded border transition-all ${isComplete ? 'bg-green-900/20 border-green-500/50' : 'bg-slate-900 border-slate-700'}`}>
                                                     <div className="flex justify-between">
                                                         <div>
                                                             <span className="text-blue-400 font-bold">{m.name}</span>
@@ -695,10 +702,20 @@
                                                         </div>
                                                         <div className="text-right">
                                                             <span className="block text-xs font-bold text-slate-400">Avance</span>
-                                                            <span className="text-lg font-bold text-white">{metrics.progress.toFixed(0)}%</span>
+                                                            <span className={`text-lg font-bold ${isComplete ? 'text-green-400' : 'text-white'}`}>{metrics.progress.toFixed(0)}%</span>
                                                         </div>
                                                     </div>
                                                     {isComp && metrics.activePart && <div className="mt-2 text-xs text-green-400 font-bold">Trabajando: {metrics.activePart.name}</div>}
+                                                    
+                                                    {isComplete && (
+                                                        <div className="mt-2 mb-2 p-2 bg-green-600/20 border border-green-500 rounded text-center">
+                                                            <p className="text-xs text-green-300 font-bold mb-1">¡PEDIDO AL 100%!</p>
+                                                            <button onClick={() => { if(confirm('¿Finalizar y archivar pedido? Desaparecerá de la lista activa.')) onArchiveOrder(m.id, order); }} className="bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2 px-4 rounded w-full flex items-center justify-center gap-2">
+                                                                <i data-lucide="archive" className="w-3 h-3"></i> FINALIZAR Y ARCHIVAR
+                                                            </button>
+                                                        </div>
+                                                    )}
+
                                                     <div className="flex gap-2 mt-3 justify-end">
                                                         {canDoConteo && (
                                                             <button onClick={() => { setActiveOrderForAction({ machineId: m.id, order }); setShowConteoModal(true); }} className="p-2 bg-slate-800 text-purple-400 rounded hover:bg-slate-700 font-bold flex items-center gap-1 border border-purple-500/30">
@@ -974,11 +991,35 @@
             
             // --- NUEVO: GUARDAR CONTEO ---
             const handleSaveConteo = async (machineId, conteoData) => {
-                 // Estructura: array de conteos en el objeto de la orden
                  const currentOrder = ordersData[machineId];
                  if (!currentOrder) return;
                  const newCounts = [...(currentOrder.verifiedCounts || []), { ...conteoData, timestamp: new Date().toISOString() }];
                  await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { verifiedCounts: newCounts } }, { merge: true });
+            };
+
+            // --- NUEVO: ARCHIVAR PEDIDO ---
+            const handleArchiveOrder = async (machineId, order) => {
+                try {
+                    // 1. Guardar en colección de historial
+                    await addDoc(collection(db, 'completed_orders'), {
+                        ...order,
+                        machineId,
+                        archivedAt: serverTimestamp(),
+                        archivedBy: user.name,
+                        finalStatus: 'COMPLETED'
+                    });
+                    
+                    // 2. Limpiar orden activa (Resetear máquina)
+                    // Importante: No borramos los 'slots' de produccion_2026, solo la configuración del pedido activo.
+                    await setDoc(doc(db, 'settings', 'orders'), { 
+                        [machineId]: { totalQty: 0, parts: [], lastUpdated: serverTimestamp() } 
+                    }, { merge: true });
+                    
+                    alert('Pedido finalizado y archivado correctamente.');
+                } catch (e) {
+                    console.error(e);
+                    alert('Error al archivar: ' + e.message);
+                }
             };
 
             const handleSaveVisibility = async (hiddenMachines, hiddenDays) => { await setDoc(doc(db, 'settings', 'visibility'), { machines: hiddenMachines, days: hiddenDays }, { merge: true }); };
@@ -1149,7 +1190,7 @@
 
             return (
                 <div className="h-full relative">
-                    {showOrderManager && <OrderManager ref={orderManagerRef} onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} user={user} onSaveConteo={handleSaveConteo} />}
+                    {showOrderManager && <OrderManager ref={orderManagerRef} onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} user={user} onSaveConteo={handleSaveConteo} onArchiveOrder={handleArchiveOrder} />}
                     {showVisibilityModal && <VisibilityModal onClose={() => setShowVisibilityModal(false)} currentHiddenMachines={visibilityConfig.machines || []} currentHiddenDays={visibilityConfig.days || []} onSaveVisibility={handleSaveVisibility} allRows={ALL_ROWS} />}
                     {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} onSelectDate={handleDateSelect} allRows={ALL_ROWS} />}
                     {canManageUsers && showUserManagementModal && <UserManagementModal onClose={() => setShowUserManagementModal(false)} users={usersData} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />}
