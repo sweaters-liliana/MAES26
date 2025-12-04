@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
-    <title>MAES26 Control + Planeación</title>
+    <title>MAES26 Control + Conteo Real</title>
 
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -43,8 +43,6 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes zoomIn { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         .animate-zoom-in { animation: zoomIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-        .machine-circle { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-        .machine-circle.selected { transform: scale(1.1); box-shadow: 0 0 15px rgba(34, 197, 94, 0.6); }
         .planning-info { color: #facc15; background-color: rgba(120, 53, 15, 0.1); border-radius: 4px; padding: 1px 3px; font-weight: bold; font-size: 8px; }
         
         /* Report Modal Styles */
@@ -72,9 +70,9 @@
     <script type="text/babel" data-type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp, updateDoc, arrayUnion } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
 
         const firebaseConfig = {
             apiKey: "AIzaSyBqHgV4vDat1-VmZfKbiPg7nuiX-ROcexw",
@@ -95,10 +93,10 @@
             COMMENTATOR: 'commentator', 
             OBSERVER: 'observer', 
             DEVELOPMENT: 'development',
-            OPERATOR: 'operator'
+            OPERATOR: 'operator',
+            PRE_COUNT: 'pre_count'
         };
         
-        // La lista de usuarios inicial se ha movido a Firestore
         const DEFAULT_USERS = {
             '1111': { name: 'Marco Espinoza', role: ROLES.ADMIN, area: 'Administración', canManageOrders: true },
             '0000': { name: 'Prisciliano Espinoza', role: ROLES.COMMENTATOR, area: 'Comentarios' },
@@ -106,7 +104,8 @@
             '1352': { name: 'Vallejo', role: ROLES.DEVELOPMENT, area: 'Desarrollo', canManageOrders: true, canViewGraph: true, canManageUsers: true }, 
             '3333': { name: 'Tejido', role: ROLES.OPERATOR, area: 'Operadores Gral' },
             '1392': { name: 'Andrés', role: ROLES.OPERATOR, area: 'Tejido (A)', allowedSlots: [0] },
-            '7914': { name: 'Balta', role: ROLES.OPERATOR, area: 'Tejido (B)', allowedSlots: [1] }
+            '7914': { name: 'Balta', role: ROLES.OPERATOR, area: 'Tejido (B)', allowedSlots: [1] },
+            '5555': { name: 'IPAD PRE', role: ROLES.PRE_COUNT, area: 'Conteo Físico', canCount: true }
         };
 
         const MACHINES = [
@@ -125,7 +124,6 @@
         const generateCalendar = () => {
             const dates = [];
             const months = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-            // Covering a period, e.g., 2025 to 2026 for flexibility
             const start = new Date(2025, 8, 1); 
             const end = new Date(2026, 11, 31);
             let idx = 0;
@@ -148,7 +146,6 @@
         const INITIAL_STATE = (() => {
             const todayISO = new Date().toISOString().split('T')[0];
             const foundIndex = ALL_ROWS.findIndex(r => r.isoDate === todayISO);
-            // Default to start of the calendar if today is not found or index is too small
             const safeIndex = foundIndex !== -1 ? foundIndex : 0;
             return { weekOffset: Math.floor(safeIndex / 7), selectedDayIndex: safeIndex % 7 };
         })();
@@ -159,128 +156,145 @@
             return f.month === l.month ? `${f.month} ${f.year}` : `${f.month} - ${l.month} ${l.year}`;
         };
 
-        const calculateConsumptionDetails = (order, producedQty = 0) => {
-            if (!order || !order.totalQty || !order.pieceWeightGrams) return { totalNeeded: 0, consumption: [], totalYarnKilos: 0, producedYarnKilos: 0 };
-
-            const totalQty = Number(order.totalQty);
-            const pieceWeightGrams = Number(order.pieceWeightGrams);
-            const materials = order.materials || [];
-            const waste = 1 + (Number(order.wastePercentage) / 100);
-
-            // 1. Total Needed (with waste)
-            const totalYarnGramsNeeded = totalQty * pieceWeightGrams * waste;
-            const totalYarnKilos = totalYarnGramsNeeded / 1000;
-
-            // 2. Produced (Consumed) Yarn
-            const producedYarnGrams = producedQty * pieceWeightGrams * waste;
-            const producedYarnKilos = producedYarnGrams / 1000;
-            
-            // 3. Detailed Consumption (with waste)
-            const consumption = materials
-                .filter(m => m.name && m.percentage)
-                .map(m => {
-                    const percent = Number(m.percentage) / 100;
-                    const kilosNeeded = (totalYarnKilos * percent);
-                    const kilosConsumed = (producedYarnKilos * percent);
-                    return { 
-                        name: m.name, 
-                        percentage: m.percentage, 
-                        kilosNeeded: kilosNeeded,
-                        kilosConsumed: kilosConsumed
-                    };
-                });
-            
-            return { totalNeeded: totalQty, consumption, totalYarnKilos, producedYarnKilos };
-        };
-
-
-        // --- CÁLCULO PROYECCIÓN Y DESVIACIÓN ---
+        // --- CÁLCULO DE MÉTRICAS (BASADO SOLO EN CONTEO VERIFICADO) ---
         const calculateOrderMetrics = (machineId, order, allProductionData, allRows, globalHiddenDays) => {
             const metrics = { 
                 isPlanned: false, finishDate: null, totalNeeded: 0, progress: 0, produced: 0, 
-                dailyCapacity: 0, plannedToDate: 0, deviation: 0, status: 'OK'
+                dailyCapacity: 0, plannedToDate: 0, deviation: 0, status: 'OK',
+                activePart: null, partsStatus: [], totalYarnConsumedGrams: 0, verifiedCountTotal: 0
             };
             
-            if (!order || !order.totalQty || !order.timePerPieceMin || !order.startDate) return metrics;
+            if (!order || !order.startDate) return metrics;
             
-            const totalQty = Number(order.totalQty);
-            let dailyHours = order.operators && Array.isArray(order.operators) ? order.operators.length * 12 : Number(order.dailyHours || 12);
-            const timePerPieceMin = Number(order.timePerPieceMin);
-            const disabledDates = order.disabledDates || []; 
+            const verifiedCounts = order.verifiedCounts || [];
             
-            metrics.dailyCapacity = Math.floor((dailyHours * 60) / timePerPieceMin);
+            // 1. Capacidad Planeada
+            const dailyHours = order.operators && Array.isArray(order.operators) ? order.operators.length * 12 : Number(order.dailyHours || 12);
+            const dailyMinutesCapacity = dailyHours * 60;
+            const disabledDates = order.disabledDates || [];
+            metrics.dailyCapacity = dailyMinutesCapacity; 
+            metrics.isPlanned = true;
+
+            const isComposite = order.parts && order.parts.length > 0;
+            let totalMinutesNeeded = 0;
             
-            // 1. Producción Real y Progreso
-            let produced = 0;
-            let plannedToDate = 0;
+            // 2. Definir Metas
+            if (isComposite) {
+                order.parts.forEach(p => { totalMinutesNeeded += Number(p.qty) * Number(p.time); });
+            } else {
+                totalMinutesNeeded = Number(order.totalQty) * Number(order.timePerPieceMin);
+            }
+
+            // 3. Calcular Producción Real (SOLO DESDE VERIFIED COUNTS)
+            let totalMinutesProduced = 0;
+            let totalItemsProduced = 0;
+            let totalYarnConsumedGrams = 0;
+            
+            // Inicializar status de partes
+            let partsTracker = isComposite ? order.parts.map(p => ({...p, produced: 0})) : [];
+
+            verifiedCounts.forEach(vc => {
+                const qty = Number(vc.qty || 0);
+                if (isComposite) {
+                    // Buscar la parte en el tracker
+                    const partIdx = partsTracker.findIndex(p => p.name.toUpperCase() === (vc.partName || '').toUpperCase());
+                    if (partIdx !== -1) {
+                        partsTracker[partIdx].produced += qty;
+                        totalMinutesProduced += (qty * Number(partsTracker[partIdx].time));
+                        totalItemsProduced += qty; // Suma de partes mixtas
+                        totalYarnConsumedGrams += (qty * Number(partsTracker[partIdx].weight));
+                    } else {
+                        // Fallback si la parte no se encuentra (no debería pasar si se selecciona bien)
+                        // Asumimos promedio o ignoramos para tiempo, pero sumamos a items
+                        totalItemsProduced += qty;
+                    }
+                } else {
+                    // Pedido Simple
+                    totalMinutesProduced += (qty * Number(order.timePerPieceMin));
+                    totalItemsProduced += qty;
+                    totalYarnConsumedGrams += (qty * Number(order.pieceWeightGrams));
+                }
+            });
+
+            // Aplicar Merma al consumo real calculado
+            const wasteMult = 1 + (Number(order.wastePercentage || 0) / 100);
+            
+            metrics.produced = totalItemsProduced; 
+            metrics.progress = totalMinutesNeeded > 0 ? Math.min(100, (totalMinutesProduced / totalMinutesNeeded) * 100) : 0;
+            metrics.partsStatus = partsTracker;
+            metrics.totalYarnConsumedGrams = totalYarnConsumedGrams * wasteMult; // Gramos con merma
+
+            if (isComposite) {
+                metrics.activePart = partsTracker.find(p => p.produced < p.qty) || null;
+            }
+
+            // 4. Calcular Planeado vs Real (Deviation)
             const todayISO = new Date().toISOString().split('T')[0];
             const startIndex = allRows.findIndex(r => r.isoDate === order.startDate);
             const todayIndex = allRows.findIndex(r => r.isoDate === todayISO);
-            
-            if (startIndex !== -1) {
-                // Production: Sum all 'actual' quantities from start date up to now
-                for (let i = startIndex; i < allRows.length; i++) {
-                    const row = allRows[i];
-                    produced += Number(allProductionData[row.id]?.[machineId]?.actual || 0);
 
-                    // Calculate planned production up to *Yesterday*
-                    if (i < todayIndex) {
-                        if (!globalHiddenDays.includes(row.id) && !disabledDates.includes(row.isoDate)) {
-                            plannedToDate += metrics.dailyCapacity;
-                        }
-                    }
-                    
-                    // Stop production sum after today, but allow past days to be included
-                    if (new Date(row.isoDate) >= new Date(todayISO) && new Date(row.isoDate).getDate() === new Date(todayISO).getDate()) break; 
+            let plannedMinutesToDate = 0;
+            if (startIndex !== -1) {
+                for (let i = startIndex; i < todayIndex; i++) { 
+                     const row = allRows[i];
+                     if (!globalHiddenDays.includes(row.id) && !disabledDates.includes(row.isoDate)) {
+                         plannedMinutesToDate += dailyMinutesCapacity;
+                     }
                 }
             }
             
-            metrics.produced = produced;
-            metrics.plannedToDate = plannedToDate;
-            metrics.deviation = produced - plannedToDate; // Negative means behind schedule
-            metrics.progress = totalQty > 0 ? Math.min(100, (produced / totalQty) * 100) : 0;
-            metrics.isPlanned = true;
+            const minutesDeviation = totalMinutesProduced - plannedMinutesToDate;
+            metrics.deviation = isComposite ? Math.round(minutesDeviation / 60) : (totalItemsProduced - (plannedMinutesToDate / Number(order.timePerPieceMin))); 
+            metrics.plannedToDate = isComposite ? Math.round(plannedMinutesToDate / 60) + ' hrs' : Math.floor(plannedMinutesToDate / Number(order.timePerPieceMin));
 
-            // Set deviation status
-            if (metrics.deviation < -metrics.dailyCapacity * 1.5) { // Behind by more than 1.5 days
-                metrics.status = 'ATRASO CRÍTICO';
-            } else if (metrics.deviation < 0) { // Behind by some quantity
-                metrics.status = 'ATRASO LEVE';
-            }
-
-            const remainingQty = Math.max(0, totalQty - produced);
+            const criticalDelayMinutes = dailyMinutesCapacity * 1.5; 
+            if (minutesDeviation < -criticalDelayMinutes) metrics.status = 'ATRASO CRÍTICO';
+            else if (minutesDeviation < 0) metrics.status = 'ATRASO LEVE';
             
-            if (remainingQty <= 0) {
-                metrics.finishDate = todayISO; // Usamos la fecha de hoy o la última fecha de producción
-                metrics.progress = 100;
+            // 5. Proyección Fecha Fin (Basado en ritmo ideal restante)
+            const remainingMinutes = Math.max(0, totalMinutesNeeded - totalMinutesProduced);
+            if (remainingMinutes <= 0) {
+                metrics.finishDate = todayISO;
                 metrics.status = 'COMPLETADO';
+                metrics.progress = 100;
+                metrics.totalNeeded = 0;
                 return metrics;
             }
             
-            metrics.totalNeeded = remainingQty;
-            
-            // 2. Proyección Futura (starts from today or startDate if in future)
-            let projRemaining = remainingQty;
-            let currentIdx = startIndex !== -1 ? startIndex : 0;
-            
-            // If the start date is in the past, start the projection from today
-            if (todayIndex > currentIdx) currentIdx = todayIndex;
+            metrics.totalNeeded = isComposite ? 0 : (Number(order.totalQty) - totalItemsProduced);
 
-            if (currentIdx === -1) { metrics.finishDate = todayISO; return metrics; } // Fallback
+            let projMinutes = remainingMinutes;
+            let currentIdx = startIndex !== -1 ? startIndex : 0;
+            if (todayIndex > currentIdx) currentIdx = todayIndex;
 
             for (let i = currentIdx; i < allRows.length; i++) {
                 const row = allRows[i];
                 if (globalHiddenDays.includes(row.id) || disabledDates.includes(row.isoDate)) continue;
-                
-                projRemaining -= metrics.dailyCapacity; 
-                if (projRemaining <= 0) {
-                    metrics.finishDate = row.isoDate; 
+                projMinutes -= dailyMinutesCapacity;
+                if (projMinutes <= 0) {
+                    metrics.finishDate = row.isoDate;
                     return metrics;
                 }
             }
 
-            metrics.finishDate = null; // Indica que se necesita más de 60 días
+            metrics.finishDate = null; 
             return metrics;
+        };
+
+        // --- CÁLCULO DE CONSUMOS DESGLOSADO ---
+        const calculateDetailedConsumption = (order, totalYarnConsumedGrams) => {
+             const materials = order.materials || [];
+             // El totalYarnConsumedGrams ya incluye la merma desde la función de métricas
+             const totalKilos = totalYarnConsumedGrams / 1000;
+
+             return materials.map(m => {
+                 const pct = Number(m.percentage) / 100;
+                 return {
+                     name: m.name,
+                     percentage: m.percentage,
+                     kilosConsumed: totalKilos * pct
+                 };
+             });
         };
 
         const ProductionSlot = ({ slotData, index, disabled, onUpdate }) => {
@@ -314,9 +328,513 @@
             );
         };
 
-        // --- GESTIÓN DE USUARIOS MODAL ---
+        // --- CONTEO MODAL (IPAD PRE) ---
+        const ConteoModal = ({ onClose, machineId, order, onSaveConteo }) => {
+            const isComposite = order.parts && order.parts.length > 0;
+            
+            // Step 0: Select Part (if composite), Step 1: Date, Step 2: Operator, Step 3: Qty
+            const [step, setStep] = useState(isComposite ? 0 : 1); 
+            const [selectedPart, setSelectedPart] = useState(isComposite ? '' : (order.model || 'General'));
+            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+            const [operator, setOperator] = useState('');
+            const [qty, setQty] = useState('');
+            const qtyInputRef = useRef(null);
+
+            const operators = order.operators || ['Andrés', 'Balta'];
+
+            const handleNext = () => {
+                if (step === 0 && selectedPart) setStep(1);
+                else if (step === 1 && date) setStep(2);
+                else if (step === 2 && operator) {
+                     setStep(3);
+                     setTimeout(() => qtyInputRef.current?.focus(), 100);
+                }
+            };
+
+            const handleSave = () => {
+                if (!qty) return alert('Ingresa cantidad');
+                onSaveConteo(machineId, { 
+                    date, 
+                    operator, 
+                    qty: Number(qty),
+                    partName: isComposite ? selectedPart : null 
+                });
+                onClose();
+            };
+
+            const handleKeyDown = (e) => {
+                 if (e.key === 'Enter') {
+                     if (step < 3) handleNext();
+                     else handleSave();
+                 }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-[60] p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 bg-purple-900 flex justify-between items-center">
+                            <h3 className="text-white font-bold uppercase flex items-center gap-2"><i data-lucide="clipboard-check"></i> Conteo Físico</h3>
+                            <button onClick={onClose}><i data-lucide="x" className="text-white w-6 h-6"></i></button>
+                        </div>
+                        <div className="p-6 text-center">
+                            
+                            {/* PASO 0: SELECCIONAR PARTE (SOLO COMPUESTOS) */}
+                            {step === 0 && isComposite && (
+                                <div className="space-y-4 animate-zoom-in">
+                                    <p className="text-slate-400 uppercase text-xs font-bold mb-4">Paso 1: ¿Qué pieza estamos contando?</p>
+                                    <div className="grid grid-cols-1 gap-2 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                                        {order.parts.map((p, i) => (
+                                            <button key={i} onClick={() => { setSelectedPart(p.name); setTimeout(()=>handleNext(), 50); }} className="p-4 bg-slate-700 hover:bg-blue-600 rounded-xl text-white font-bold text-lg uppercase border border-slate-600 hover:border-blue-400 transition-all">
+                                                {p.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Si no es compuesto, el paso 0 se salta automaticamente y selectedPart es el modelo */}
+
+                            {step === 1 && (
+                                <div className="space-y-4 animate-zoom-in">
+                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">
+                                        {selectedPart}
+                                    </div>
+                                    <p className="text-slate-400 uppercase text-xs font-bold">Fecha de Producción</p>
+                                    <input type="date" value={date} onChange={e => setDate(e.target.value)} onKeyDown={handleKeyDown} className="w-full bg-slate-900 text-white text-2xl p-4 rounded-xl border border-slate-600 text-center" autoFocus />
+                                    <button onClick={handleNext} className="w-full bg-blue-600 py-3 rounded-xl text-white font-bold text-lg mt-4">Siguiente</button>
+                                </div>
+                            )}
+                            {step === 2 && (
+                                <div className="space-y-4 animate-zoom-in">
+                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">
+                                        {selectedPart} <span className="text-slate-500 mx-2">|</span> {date}
+                                    </div>
+                                    <p className="text-slate-400 uppercase text-xs font-bold">Operador</p>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {operators.map(op => (
+                                            <button key={op} onClick={() => { setOperator(op); setTimeout(()=>handleNext(), 50); }} className={`p-6 rounded-xl border-2 font-bold text-lg transition-all ${operator === op ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}>
+                                                {op}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {step === 3 && (
+                                <div className="space-y-4 animate-zoom-in">
+                                    <div className="bg-purple-900/30 text-purple-200 p-2 rounded mb-4 font-bold uppercase text-sm border border-purple-500/30">
+                                        {selectedPart} <span className="text-slate-500 mx-2">|</span> {operator}
+                                    </div>
+                                    <p className="text-slate-400 uppercase text-xs font-bold">Cantidad Final (Piezas)</p>
+                                    <input ref={qtyInputRef} type="number" value={qty} onChange={e => setQty(e.target.value)} onKeyDown={handleKeyDown} placeholder="0" className="w-full bg-slate-900 text-white text-5xl p-6 rounded-xl border border-slate-600 text-center font-bold" />
+                                    <button onClick={handleSave} className="w-full bg-green-600 py-4 rounded-xl text-white font-bold text-lg mt-4 shadow-lg hover:scale-105 transition-transform">GUARDAR CONTEO</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ReportModal = ({ onClose, machineId, order, metrics }) => {
+            if (!order || !machineId) return null;
+
+            const machine = MACHINES.find(m => m.id === machineId);
+            const isComposite = order.parts && order.parts.length > 0;
+            
+            // Consumo Detallado
+            const detailedConsumption = calculateDetailedConsumption(order, metrics.totalYarnConsumedGrams);
+
+            // Datos de Conteo Físico
+            const verifiedCounts = order.verifiedCounts || [];
+            const hasVerifiedData = verifiedCounts.length > 0;
+
+            const handleDownloadWord = () => {
+                const reportContent = document.querySelector('.report-page').outerHTML;
+                const htmlContent = `<html><head><meta charset="UTF-8"></head><body>${reportContent}</body></html>`;
+                const blob = new Blob([htmlContent], { type: 'application/msword;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `Reporte_${machine.name}_${order.model}.doc`;
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in no-print" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[95vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
+                            <h3 className="font-bold text-white uppercase tracking-wider text-sm">Reporte: {machine.name} - {order.model}</h3>
+                            <div className="flex gap-2"><button onClick={() => window.print()} className="px-3 bg-red-600 rounded text-white font-bold">PDF</button><button onClick={handleDownloadWord} className="px-3 bg-blue-600 rounded text-white font-bold">DOC</button><button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button></div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-0 custom-scrollbar report-page">
+                            <div className="report-header"><h1>REPORTE - {order.model} {isComposite ? '(COMPUESTO)' : ''}</h1></div>
+                            
+                            <div className="report-section">
+                                <h2>📋 Datos Generales</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Máquina:</span><span className="report-value">{machine.name}</span></div>
+                                    <div><span className="report-label">Modelo:</span><span className="report-value text-blue-700">{order.model}</span></div>
+                                    <div><span className="report-label">Inicio:</span><span className="report-value">{order.startDate}</span></div>
+                                </div>
+                            </div>
+
+                            {/* Sección Conteo Físico (Nuevo) */}
+                            {hasVerifiedData && (
+                                <div className="report-section" style={{borderColor: '#22c55e', backgroundColor: '#f0fdf4'}}>
+                                    <h2 style={{color: '#15803d'}}>✅ Registro de Conteo (Producción Real)</h2>
+                                    <div className="report-data">
+                                        <div style={{borderBottom: 'none', padding: '10px 0'}}>
+                                            <table className="report-material-table">
+                                                <thead><tr><th>Fecha</th><th>Pieza/Parte</th><th>Operador</th><th className="text-right">Cantidad</th></tr></thead>
+                                                <tbody>
+                                                    {verifiedCounts.map((vc, idx) => (
+                                                        <tr key={idx}>
+                                                            <td>{vc.date}</td>
+                                                            <td>{vc.partName || '-'}</td>
+                                                            <td>{vc.operator}</td>
+                                                            <td className="text-right font-bold">{vc.qty}</td>
+                                                        </tr>
+                                                    ))}
+                                                    <tr style={{backgroundColor: '#dcfce7', fontWeight: 'bold'}}>
+                                                        <td colSpan="3" className="text-right">TOTAL PRODUCIDO:</td>
+                                                        <td className="text-right text-lg">{metrics.produced}</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {isComposite && (
+                                <div className="report-section">
+                                    <h2>🧩 Desglose de Partes (Estado Actual)</h2>
+                                    <table className="report-material-table">
+                                        <thead><tr><th>Parte</th><th>Total Req.</th><th>Producido (Conteo)</th><th>Faltante</th></tr></thead>
+                                        <tbody>
+                                            {metrics.partsStatus.map((p, i) => (
+                                                <tr key={i}>
+                                                    <td>{p.name}</td>
+                                                    <td>{p.qty}</td>
+                                                    <td className={p.produced >= p.qty ? 'text-green-600 font-bold' : ''}>{p.produced}</td>
+                                                    <td>{Math.max(0, p.qty - p.produced)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+
+                            <div className="report-section">
+                                <h2>📈 Métricas de Avance</h2>
+                                <div className="report-data">
+                                    <div><span className="report-label">Progreso Global:</span><span className="report-value text-blue-700">{metrics.progress.toFixed(1)}%</span></div>
+                                    <div><span className="report-label">Desviación (Tiempo):</span><span className={metrics.deviation < 0 ? 'text-red-700' : 'text-green-700'}>{metrics.deviation} {isComposite ? 'Horas aprox' : 'Piezas'}</span></div>
+                                </div>
+                            </div>
+
+                            <div className="report-section">
+                                <h2>🧵 Consumo de Materiales (Desglosado)</h2>
+                                <p style={{fontSize:'11px', color:'#666', marginBottom:'5px'}}>Calculado sobre producción real verificada + {order.wastePercentage}% merma.</p>
+                                <table className="report-material-table">
+                                    <thead><tr><th>Material</th><th>% Mezcla</th><th className="text-right">Total Consumido (KG)</th></tr></thead>
+                                    <tbody>
+                                        {detailedConsumption.map((mat, idx) => (
+                                            <tr key={idx}>
+                                                <td>{mat.name}</td>
+                                                <td>{mat.percentage}%</td>
+                                                <td className="text-right font-bold">{mat.kilosConsumed.toFixed(3)} kg</td>
+                                            </tr>
+                                        ))}
+                                        <tr style={{backgroundColor:'#f1f5f9', fontWeight:'bold'}}>
+                                            <td colSpan="2" className="text-right">TOTAL GENERAL:</td>
+                                            <td className="text-right">{(metrics.totalYarnConsumedGrams / 1000).toFixed(3)} kg</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const OrderManager = React.forwardRef(({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays, user, onSaveConteo }, ref) => {
+            const [step, setStep] = useState(1);
+            const [viewMode, setViewMode] = useState('list'); 
+            const [modelName, setModelName] = useState('');
+            const [selectedMachines, setSelectedMachines] = useState([]);
+            const [isEditing, setIsEditing] = useState(false);
+            const [showReportModal, setShowReportModal] = useState(false);
+            const [showConteoModal, setShowConteoModal] = useState(false);
+            const [activeOrderForAction, setActiveOrderForAction] = useState(null);
+            
+            const [isComposite, setIsComposite] = useState(false);
+            const [parts, setParts] = useState([]); 
+
+            const initialConfig = useMemo(() => ({
+                totalQty: '', timePerPiece: '', startDate: new Date().toISOString().split('T')[0],
+                operators: ['Andrés', 'Balta'], disabledDates: [], pieceWeightGrams: '',
+                materials: [{name: 'LYCRA', percentage: ''}, {name: 'NYLON', percentage: ''}],
+                wastePercentage: 0
+            }), []);
+
+            const [config, setConfig] = useState(initialConfig);
+
+            const addPart = () => setParts([...parts, { name: '', qty: '', time: '', weight: '' }]);
+            const removePart = (idx) => setParts(parts.filter((_, i) => i !== idx));
+            const updatePart = (idx, field, val) => {
+                const newParts = [...parts];
+                newParts[idx][field] = val;
+                setParts(newParts);
+            };
+
+            const toggleMachine = (id) => { setSelectedMachines(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]); };
+            const toggleOperator = (op) => {
+                setConfig(prev => {
+                    const current = prev.operators;
+                    if (current.includes(op)) { if (current.length === 1) return prev; return { ...prev, operators: current.filter(o => o !== op) }; }
+                    return { ...prev, operators: [...current, op] };
+                });
+            };
+            
+            const handleStartCreate = () => {
+                setIsEditing(false); setModelName(''); setSelectedMachines([]); setConfig(initialConfig);
+                setStep(1); setViewMode('create'); setIsComposite(false); setParts([]);
+            };
+
+            const handleStartEdit = (machineId, orderData) => {
+                setIsEditing(true);
+                setModelName(orderData.model);
+                setSelectedMachines([machineId]); 
+                const isComp = !!(orderData.parts && orderData.parts.length > 0);
+                setIsComposite(isComp);
+                setParts(orderData.parts || []);
+
+                setConfig({
+                    totalQty: orderData.totalQty,
+                    timePerPiece: orderData.timePerPieceMin,
+                    startDate: orderData.startDate,
+                    operators: orderData.operators || ['Andrés'],
+                    disabledDates: orderData.disabledDates || [],
+                    pieceWeightGrams: orderData.pieceWeightGrams || '',
+                    materials: orderData.materials || [],
+                    wastePercentage: orderData.wastePercentage || 0,
+                });
+                setStep(1); setViewMode('create');
+            };
+
+            const handleFinalSave = () => {
+                if (selectedMachines.length === 0) return;
+                selectedMachines.forEach(mid => {
+                    let finalTotalYarnKilos = 0;
+                    const waste = 1 + (config.wastePercentage / 100);
+                    if (isComposite) {
+                        let totalMass = 0;
+                        parts.forEach(p => totalMass += (Number(p.qty) * Number(p.weight)));
+                        finalTotalYarnKilos = (totalMass * waste) / 1000;
+                    } else {
+                         finalTotalYarnKilos = (Number(config.totalQty) * Number(config.pieceWeightGrams) * waste) / 1000;
+                    }
+
+                    const orderPayload = {
+                        model: modelName,
+                        startDate: config.startDate,
+                        operators: config.operators, 
+                        dailyHours: config.operators.length * 12, 
+                        disabledDates: config.disabledDates,
+                        materials: config.materials,
+                        wastePercentage: config.wastePercentage,
+                        totalYarnKilos: finalTotalYarnKilos,
+                        parts: isComposite ? parts : [],
+                        totalQty: isComposite ? parts.reduce((a,b)=>a+Number(b.qty),0) : Number(config.totalQty),
+                        timePerPieceMin: isComposite ? 0 : Number(config.timePerPiece),
+                        pieceWeightGrams: isComposite ? 0 : Number(config.pieceWeightGrams),
+                    };
+                    onSaveOrders(mid, orderPayload);
+                });
+                setViewMode('list');
+            };
+            
+            const validateStep = (s) => {
+                if (s === 1 && !modelName) return false;
+                if (s === 2 && selectedMachines.length === 0) return false;
+                if (s === 3) {
+                    if (isComposite) {
+                        return parts.length > 0 && parts.every(p => p.name && p.qty && p.time && p.weight);
+                    }
+                    return config.totalQty && config.timePerPiece && config.pieceWeightGrams;
+                }
+                return true;
+            }
+
+            const canDoConteo = user.role === ROLES.DEVELOPMENT || user.role === ROLES.PRE_COUNT;
+
+            // Renderizado Configs...
+            const renderPartsConfig = () => (
+                <div className="space-y-4 fade-in">
+                    <h3 className="text-lg font-bold text-white text-center mb-4">Configuración de Partes</h3>
+                    <div className="bg-blue-900/20 p-3 rounded-lg text-xs text-blue-200 mb-4 border border-blue-800">
+                        <i data-lucide="info" className="inline w-4 h-4 mr-1"></i>
+                        Define cada parte (Ej: Cuerpo, Manga).
+                    </div>
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        {parts.map((p, i) => (
+                            <div key={i} className="bg-slate-800 p-3 rounded border border-slate-700 flex flex-col gap-2 relative">
+                                <button onClick={() => removePart(i)} className="absolute top-2 right-2 text-red-400"><i data-lucide="x" className="w-4 h-4"></i></button>
+                                <div><label className="text-[10px] text-slate-400">Nombre Parte</label><input type="text" value={p.name} onChange={e => updatePart(i, 'name', e.target.value.toUpperCase())} placeholder="EJ: CUERPO" className="w-full bg-slate-900 border border-slate-600 rounded p-1 text-white uppercase text-sm"/></div>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div><label className="text-[10px] text-slate-400">Cant.</label><input type="number" value={p.qty} onChange={e => updatePart(i, 'qty', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-1 text-white text-sm"/></div>
+                                    <div><label className="text-[10px] text-slate-400">Min/Pza</label><input type="number" value={p.time} onChange={e => updatePart(i, 'time', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-1 text-white text-sm"/></div>
+                                    <div><label className="text-[10px] text-slate-400">Gr/Pza</label><input type="number" value={p.weight} onChange={e => updatePart(i, 'weight', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-1 text-white text-sm"/></div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={addPart} className="w-full py-2 bg-slate-700 rounded text-sm font-bold text-white hover:bg-slate-600">+ Agregar Parte</button>
+                    <div><label className="text-xs text-slate-400 uppercase">Fecha Inicio</label><input type="date" value={config.startDate} onChange={e => setConfig({...config, startDate: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
+                </div>
+            );
+
+            const renderSimpleConfig = () => (
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="col-span-2">
+                        <label className="text-xs text-slate-400 uppercase mb-2 block">Operadores</label>
+                        <div className="flex gap-2">
+                            {['Andrés', 'Balta'].map(op => {
+                                const active = config.operators.includes(op);
+                                return <button key={op} onClick={() => toggleOperator(op)} className={`flex-1 py-3 rounded-lg border font-bold text-sm ${active ? 'bg-blue-600 border-blue-400' : 'bg-slate-800'}`}>{op}</button>
+                            })}
+                        </div>
+                    </div>
+                    <div><label className="text-xs text-slate-400 uppercase">Cantidad Total</label><input type="number" value={config.totalQty} onChange={e => setConfig({...config, totalQty: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
+                    <div><label className="text-xs text-slate-400 uppercase">Minutos/Pieza</label><input type="number" value={config.timePerPiece} onChange={e => setConfig({...config, timePerPiece: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
+                    <div><label className="text-xs text-slate-400 uppercase">Peso/Pieza (g)</label><input type="number" value={config.pieceWeightGrams} onChange={e => setConfig({...config, pieceWeightGrams: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
+                    <div><label className="text-xs text-slate-400 uppercase">Fecha Inicio</label><input type="date" value={config.startDate} onChange={e => setConfig({...config, startDate: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
+                </div>
+            );
+
+            return (
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
+                            <span className="font-bold text-white uppercase">Gestión de Producción</span>
+                            <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6"></i></button>
+                        </div>
+                        <div className="flex-1 p-6 overflow-hidden">
+                            {viewMode === 'list' ? (
+                                <div className="h-full flex flex-col">
+                                    <div className="flex justify-between mb-4"><h2 className="text-xl font-bold">Pedidos Activos</h2><button onClick={handleStartCreate} className="bg-blue-600 px-4 py-2 rounded text-white font-bold">Nuevo</button></div>
+                                    <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
+                                        {MACHINES.filter(m => ordersData[m.id]?.totalQty > 0 || (ordersData[m.id]?.parts?.length > 0)).map(m => {
+                                            const order = ordersData[m.id];
+                                            const metrics = calculateOrderMetrics(m.id, order, allProductionData, allRows, hiddenDays);
+                                            const isComp = !!order.parts?.length;
+                                            return (
+                                                <div key={m.id} className="bg-slate-900 p-4 rounded border border-slate-700">
+                                                    <div className="flex justify-between">
+                                                        <div>
+                                                            <span className="text-blue-400 font-bold">{m.name}</span>
+                                                            <h4 className="text-lg font-black text-yellow-400">{order.model} {isComp && <span className="text-[10px] bg-slate-700 text-white px-1 rounded ml-2">MULTIEX</span>}</h4>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="block text-xs font-bold text-slate-400">Avance</span>
+                                                            <span className="text-lg font-bold text-white">{metrics.progress.toFixed(0)}%</span>
+                                                        </div>
+                                                    </div>
+                                                    {isComp && metrics.activePart && <div className="mt-2 text-xs text-green-400 font-bold">Trabajando: {metrics.activePart.name}</div>}
+                                                    <div className="flex gap-2 mt-3 justify-end">
+                                                        {canDoConteo && (
+                                                            <button onClick={() => { setActiveOrderForAction({ machineId: m.id, order }); setShowConteoModal(true); }} className="p-2 bg-slate-800 text-purple-400 rounded hover:bg-slate-700 font-bold flex items-center gap-1 border border-purple-500/30">
+                                                                <i data-lucide="clipboard-check" className="w-4 h-4"></i> <span className="text-[10px]">CONTEO</span>
+                                                            </button>
+                                                        )}
+                                                        <button onClick={() => { setActiveOrderForAction({ machineId: m.id, order, metrics }); setShowReportModal(true); }} className="p-2 bg-slate-800 text-green-400 rounded hover:bg-slate-700"><i data-lucide="file-text" className="w-4 h-4"></i></button>
+                                                        <button onClick={() => handleStartEdit(m.id, order)} className="p-2 bg-slate-800 text-blue-400 rounded hover:bg-slate-700"><i data-lucide="pencil" className="w-4 h-4"></i></button>
+                                                        <button onClick={() => handleDeleteOrder(m.id)} className="p-2 bg-slate-800 text-red-400 rounded hover:bg-slate-700"><i data-lucide="trash-2" className="w-4 h-4"></i></button>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                    {showReportModal && activeOrderForAction && <ReportModal onClose={() => setShowReportModal(false)} machineId={activeOrderForAction.machineId} order={activeOrderForAction.order} metrics={activeOrderForAction.metrics} />}
+                                    {showConteoModal && activeOrderForAction && <ConteoModal onClose={() => setShowConteoModal(false)} machineId={activeOrderForAction.machineId} order={activeOrderForAction.order} onSaveConteo={onSaveConteo} />}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col h-full">
+                                    <div className="flex justify-between mb-6 px-2">
+                                        {[1,2,3,4,5,6].map(s => <div key={s} className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= s ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-500'}`}>{s}</div>)}
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto custom-scrollbar px-2">
+                                        {step === 1 && (
+                                            <div className="space-y-4">
+                                                <h3 className="text-xl font-bold text-white text-center mb-6">Modelo</h3>
+                                                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                                                    <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Nombre del Modelo</label>
+                                                    <input type="text" value={modelName} onChange={e => setModelName(e.target.value.toUpperCase())} className="w-full bg-slate-900 text-2xl font-black text-white p-4 rounded-lg outline-none text-center uppercase" autoFocus />
+                                                </div>
+                                            </div>
+                                        )}
+                                        {step === 2 && (
+                                            <div className="grid grid-cols-4 gap-4">
+                                                {MACHINES.map(m => (
+                                                    <button key={m.id} onClick={() => toggleMachine(m.id)} className={`w-14 h-14 rounded-full flex flex-col items-center justify-center border-2 ${selectedMachines.includes(m.id) ? 'bg-green-600 border-green-400' : 'bg-slate-800 border-slate-600'}`}>
+                                                        <span className="text-[10px] font-black text-white">{m.name.replace('MAQ ','')}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {step === 3 && (
+                                            <div>
+                                                <div className="flex justify-center mb-6">
+                                                    <div className="bg-slate-700 p-1 rounded-lg flex">
+                                                        <button onClick={() => setIsComposite(false)} className={`px-4 py-2 rounded-md text-xs font-bold ${!isComposite ? 'bg-blue-600 text-white shadow' : 'text-slate-300'}`}>Simple</button>
+                                                        <button onClick={() => setIsComposite(true)} className={`px-4 py-2 rounded-md text-xs font-bold ${isComposite ? 'bg-blue-600 text-white shadow' : 'text-slate-300'}`}>Compuesto</button>
+                                                    </div>
+                                                </div>
+                                                {isComposite ? renderPartsConfig() : renderSimpleConfig()}
+                                            </div>
+                                        )}
+                                        {step === 4 && <div className="text-center text-slate-400 mt-10">Planeación Automática (Vista previa no disponible en edición rápida)</div>}
+                                        {step === 5 && (
+                                            <div className="space-y-4">
+                                                 <h3 className="text-xl font-bold text-white text-center">Materiales (Englobado)</h3>
+                                                 {config.materials.map((m, i) => (
+                                                     <div key={i} className="flex gap-2">
+                                                         <input value={m.name} onChange={e => {const n=[...config.materials]; n[i].name=e.target.value.toUpperCase(); setConfig({...config, materials:n})}} className="bg-slate-900 text-white p-2 rounded flex-1 uppercase" placeholder="Material" />
+                                                         <input type="number" value={m.percentage} onChange={e => {const n=[...config.materials]; n[i].percentage=e.target.value; setConfig({...config, materials:n})}} className="bg-slate-900 text-white p-2 rounded w-20 text-center" placeholder="%" />
+                                                     </div>
+                                                 ))}
+                                                 <div className="flex justify-center gap-2 mt-4">
+                                                     {[0,5,10].map(w => <button key={w} onClick={() => setConfig({...config, wastePercentage: w})} className={`px-4 py-2 border rounded ${config.wastePercentage===w ? 'bg-green-600 text-white' : 'text-slate-400'}`}>{w}% Merma</button>)}
+                                                 </div>
+                                            </div>
+                                        )}
+                                        {step === 6 && (
+                                            <div className="text-center">
+                                                <h3 className="text-xl font-bold text-white">Confirmar</h3>
+                                                <div className="mt-4 p-4 bg-slate-900 rounded border border-slate-700">
+                                                    <p className="text-yellow-400 text-lg font-bold">{modelName}</p>
+                                                    {isComposite ? <p className="text-sm text-slate-400">{parts.length} Partes definidas</p> : <p className="text-sm text-slate-400">{config.totalQty} piezas</p>}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="mt-4 pt-4 border-t border-slate-700 flex justify-between">
+                                        <button onClick={() => step > 1 ? setStep(s => s - 1) : setViewMode('list')} className="px-4 py-2 bg-slate-700 text-white rounded">Atrás</button>
+                                        <button onClick={() => step < 6 ? (validateStep(step) && setStep(s => s + 1)) : handleFinalSave()} className="px-6 py-2 bg-green-600 text-white font-bold rounded">
+                                            {step === 6 ? 'Guardar' : 'Siguiente'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        });
+
         const UserManagementModal = ({ onClose, users, onSaveUser, onDeleteUser }) => {
-            const [editingUser, setEditingUser] = useState(null); // { id: pin, name: '', role: '', area: '', ... }
+            const [editingUser, setEditingUser] = useState(null);
             const [pin, setPin] = useState('');
             const [name, setName] = useState('');
             const [role, setRole] = useState(ROLES.OPERATOR);
@@ -334,800 +852,56 @@
             };
 
             const handleSave = () => {
-                if (!pin || !name || !role) {
-                    alert('Todos los campos son obligatorios (PIN, Nombre, Rol)');
-                    return;
-                }
-                if (pin.length !== 4 || isNaN(Number(pin))) {
-                    alert('El PIN debe ser un número de 4 dígitos.');
-                    return;
-                }
-                if (!editingUser && users[pin]) {
-                    alert('El PIN ya existe. Usa un PIN diferente o edita el usuario existente.');
-                    return;
-                }
-
+                if (!pin || !name || !role) { alert('Todos los campos son obligatorios'); return; }
+                if (pin.length !== 4 || isNaN(Number(pin))) { alert('PIN debe ser 4 dígitos'); return; }
+                
                 const payload = { 
-                    name, 
-                    role, 
-                    area,
-                    // Mantener permisos existentes si se edita, o usar valores por defecto
+                    name, role, area,
                     canManageOrders: editingUser ? editingUser.canManageOrders : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
                     canViewGraph: editingUser ? editingUser.canViewGraph : role === ROLES.ADMIN || role === ROLES.OBSERVER || role === ROLES.DEVELOPMENT,
                     canManageUsers: editingUser ? editingUser.canManageUsers : role === ROLES.DEVELOPMENT,
                 };
-                
-                // CORRECCIÓN: Evitar enviar 'undefined' a Firestore.
-                if (role === ROLES.OPERATOR) {
-                    // Si es operador, el campo allowedSlots debe existir como array (vacío o con datos)
-                    payload.allowedSlots = editingUser?.allowedSlots || [];
-                } 
-                // Si el rol NO es OPERATOR, el campo allowedSlots simplemente no se incluye en el payload (no se usa 'undefined').
+                if (role === ROLES.OPERATOR) payload.allowedSlots = editingUser?.allowedSlots || [];
 
                 onSaveUser(pin, payload);
-                setEditingUser(null);
-                setPin('');
-                setName('');
-                setRole(ROLES.OPERATOR);
-                setArea('');
+                setEditingUser(null); setPin(''); setName(''); setRole(ROLES.OPERATOR); setArea('');
             };
 
             return (
                 <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
-                            <h3 className="font-bold text-white uppercase tracking-wider text-sm flex items-center gap-2">
-                                <i data-lucide="users" className="w-5 h-5 text-yellow-400"></i>
-                                Gestión de Usuarios
-                            </h3>
-                            <button onClick={onClose} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded"><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button>
+                            <h3 className="font-bold text-white uppercase tracking-wider text-sm flex items-center gap-2"><i data-lucide="users" className="w-5 h-5 text-yellow-400"></i> Gestión de Usuarios</h3>
+                            <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button>
                         </div>
-
                         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar flex gap-6">
-                            
-                            {/* Formulario de Creación/Edición */}
                             <div className="w-1/3 shrink-0 bg-slate-900 p-4 rounded-xl border border-slate-700 h-fit sticky top-0">
-                                <h4 className="text-lg font-bold text-white mb-4 border-b border-slate-700 pb-2">{editingUser ? `Editar: ${editingUser.name}` : 'Crear Nuevo Usuario'}</h4>
+                                <h4 className="text-lg font-bold text-white mb-4">{editingUser ? 'Editar' : 'Crear'}</h4>
                                 <div className="space-y-3">
-                                    <div>
-                                        <label className="block text-xs font-bold text-blue-400 mb-1">PIN (4 Dígitos)</label>
-                                        <input type="number" value={pin} onChange={e => setPin(e.target.value.slice(0, 4))} disabled={!!editingUser} placeholder="Ej: 1352" className="w-full bg-slate-700 text-white p-2 rounded text-lg font-bold outline-none disabled:bg-slate-700/50 disabled:text-slate-400" />
-                                        {!!editingUser && <p className="text-[10px] text-red-400 mt-1">El PIN no se puede cambiar.</p>}
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-blue-400 mb-1">Nombre</label>
-                                        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Vallejo" className="w-full bg-slate-700 text-white p-2 rounded outline-none" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-blue-400 mb-1">Área (Opcional)</label>
-                                        <input type="text" value={area} onChange={e => setArea(e.target.value)} placeholder="Ej: Desarrollo" className="w-full bg-slate-700 text-white p-2 rounded outline-none" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-blue-400 mb-1">Rol</label>
-                                        <select value={role} onChange={e => setRole(e.target.value)} className="w-full bg-slate-700 text-white p-2 rounded outline-none">
-                                            {availableRoles.map(r => (<option key={r} value={r} className="uppercase">{r}</option>))}
-                                        </select>
-                                    </div>
+                                    <input type="number" value={pin} onChange={e => setPin(e.target.value.slice(0, 4))} disabled={!!editingUser} placeholder="PIN" className="w-full bg-slate-700 text-white p-2 rounded" />
+                                    <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" className="w-full bg-slate-700 text-white p-2 rounded" />
+                                    <input type="text" value={area} onChange={e => setArea(e.target.value)} placeholder="Área" className="w-full bg-slate-700 text-white p-2 rounded" />
+                                    <select value={role} onChange={e => setRole(e.target.value)} className="w-full bg-slate-700 text-white p-2 rounded">
+                                        <option value={ROLES.OPERATOR}>Operador</option>
+                                        <option value={ROLES.ADMIN}>Admin</option>
+                                        <option value={ROLES.PRE_COUNT}>iPad Pre (Conteo)</option>
+                                    </select>
                                 </div>
-                                <div className="mt-6 flex flex-col gap-2">
-                                    <button onClick={handleSave} className={`w-full py-2 rounded-lg font-bold text-sm ${editingUser ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white`}>
-                                        {editingUser ? 'Guardar Cambios' : 'Crear Usuario'}
-                                    </button>
-                                    {editingUser && (
-                                        <button onClick={() => { setEditingUser(null); setPin(''); setName(''); setRole(ROLES.OPERATOR); setArea(''); }} className="w-full py-2 rounded-lg font-bold text-sm bg-slate-700 text-slate-300 hover:bg-slate-600">
-                                            Cancelar Edición
-                                        </button>
-                                    )}
-                                </div>
+                                <button onClick={handleSave} className="mt-4 w-full bg-green-600 text-white py-2 rounded font-bold">Guardar</button>
                             </div>
-
-                            {/* Lista de Usuarios */}
-                            <div className="flex-1">
-                                <h4 className="text-lg font-bold text-white mb-4">Lista Actual ({allUsersArray.length})</h4>
-                                <div className="space-y-3">
-                                    {allUsersArray.sort((a,b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name)).map(u => (
-                                        <div key={u.pin} className={`bg-slate-900 p-4 rounded-xl border ${editingUser?.pin === u.pin ? 'border-yellow-500' : 'border-slate-700'} flex justify-between items-center transition-all`}>
-                                            <div className="flex-1">
-                                                <p className="text-lg font-bold text-white">{u.name}</p>
-                                                <div className="flex items-center gap-2 text-sm">
-                                                    <span className="text-blue-400 font-bold uppercase">{u.role}</span>
-                                                    <span className="text-slate-500">|</span>
-                                                    <span className="text-slate-500">{u.area || 'Sin Área'}</span>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-4 shrink-0">
-                                                <span className="text-3xl font-black text-yellow-500/80 tracking-widest">{u.pin}</span>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => startEdit(u)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded text-blue-400"><i data-lucide="pencil" className="w-4 h-4"></i></button>
-                                                    <button onClick={() => onDeleteUser(u.pin)} className="p-2 bg-red-900/50 hover:bg-red-700/50 rounded text-red-400"><i data-lucide="trash-2" className="w-4 h-4"></i></button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
+                            <div className="flex-1 space-y-3">
+                                {allUsersArray.map(u => (
+                                    <div key={u.pin} className="bg-slate-900 p-4 rounded border border-slate-700 flex justify-between items-center">
+                                        <div><p className="font-bold text-white">{u.name}</p><p className="text-sm text-blue-400">{u.role}</p></div>
+                                        <div className="flex gap-2"><button onClick={() => startEdit(u)} className="p-2 bg-slate-700 rounded"><i data-lucide="pencil" className="w-4 h-4 text-blue-400"></i></button><button onClick={() => onDeleteUser(u.pin)} className="p-2 bg-red-900/50 rounded"><i data-lucide="trash-2" className="w-4 h-4 text-red-400"></i></button></div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </div>
                 </div>
             );
         };
-        
-        // --- REPORTE MODAL ---
-        const ReportModal = ({ onClose, machineId, order, metrics, orderManagerRef }) => {
-            if (!order || !machineId) return null;
-
-            const machine = MACHINES.find(m => m.id === machineId);
-            const consumptionData = calculateConsumptionDetails(order, metrics.produced);
-            const consumptionBase = calculateConsumptionDetails({...order, wastePercentage: 0}, metrics.produced);
-            const isCompleted = metrics.finishDate && metrics.status === 'COMPLETADO';
-            
-            // Función para generar y descargar el archivo Word/DOC (usando HTML/MIME type)
-            const handleDownloadWord = () => {
-                const reportContent = document.querySelector('.report-page').outerHTML;
-                const htmlContent = `
-                    <html>
-                        <head>
-                            <meta charset="UTF-8">
-                            <style>
-                                body { font-family: sans-serif; padding: 20px; color: #1e293b; }
-                                h1 { font-size: 24px; font-weight: bold; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 15px; color: #1e40af; }
-                                h2 { font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #1e40af; }
-                                .report-section { margin-bottom: 20px; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; }
-                                .report-data div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #cbd5e1; font-size: 14px; }
-                                .report-label { font-weight: 500; color: #475569; }
-                                .report-value { font-weight: 700; }
-                                .report-material-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                                .report-material-table th, .report-material-table td { border: 1px solid #e2e8f0; padding: 8px; text-align: left; font-size: 13px; }
-                                .report-material-table th { background-color: #f1f5f9; color: #1e293b; }
-                            </style>
-                        </head>
-                        <body>
-                            ${reportContent}
-                        </body>
-                    </html>
-                `;
-
-                const blob = new Blob([htmlContent], { type: 'application/msword;charset=utf-8' });
-                const fileName = `Reporte_${machine.name}_${order.model}_${new Date().toISOString().split('T')[0]}.doc`;
-
-                // Usamos una simulación de descarga (compatible con navegadores)
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = fileName;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-            };
-
-            // Función para generar y descargar el archivo PDF (usando el diálogo de impresión y forzando PDF)
-            const handleDownloadPDF = () => {
-                alert("Se abrirá el diálogo de impresión. Por favor, selecciona 'Guardar como PDF' en las opciones de destino.");
-                window.print();
-            };
-
-            const handleNewOrder = () => {
-                onClose();
-                // Llama a la función en OrderManager para iniciar la creación del siguiente pedido
-                orderManagerRef.current.startNewOrderChain(machineId);
-            };
-
-            return (
-                <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in no-print" onClick={onClose}>
-                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl h-[95vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
-                            <h3 className="font-bold text-white uppercase tracking-wider text-sm">Reporte de Producción: {machine.name} - {order.model}</h3>
-                            <div className="flex gap-2">
-                                <button onClick={handleDownloadPDF} className="px-3 py-1 rounded bg-red-600 text-white font-bold flex items-center gap-1 hover:bg-red-500"><i data-lucide="file-text" className="w-4 h-4"></i> Descargar PDF</button>
-                                <button onClick={handleDownloadWord} className="px-3 py-1 rounded bg-blue-600 text-white font-bold flex items-center gap-1 hover:bg-blue-500"><i data-lucide="file-text" className="w-4 h-4"></i> Descargar DOC</button>
-                                <button onClick={onClose} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded"><i data-lucide="x" className="text-slate-400 w-5 h-5"></i></button>
-                            </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-0 custom-scrollbar report-page">
-                            {/* ... Contenido del Reporte ... */}
-                            <div className="report-header">
-                                <h1>REPORTE DE PRODUCCIÓN - {order.model}</h1>
-                                <p className="text-xs text-gray-500">Generado el: {new Date().toLocaleDateString('es-MX', {day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'})} por Sistema MAES</p>
-                            </div>
-
-                            <div className="report-section">
-                                <h2>📋 Datos del Pedido</h2>
-                                <div className="report-data">
-                                    <div><span className="report-label">Máquina:</span><span className="report-value">{machine.name} ({machine.type})</span></div>
-                                    <div><span className="report-label">Modelo:</span><span className="report-value text-blue-700">{order.model}</span></div>
-                                    <div><span className="report-label">Cantidad Total:</span><span className="report-value">{Number(order.totalQty).toLocaleString()} piezas</span></div>
-                                    <div><span className="report-label">Inicio Planeado:</span><span className="report-value">{new Date(order.startDate).toLocaleDateString('es-MX')}</span></div>
-                                    <div><span className="report-label">Fin Estimado:</span><span className={`report-value ${isCompleted ? 'text-green-600' : (metrics.finishDate ? 'text-red-600' : 'text-orange-600')}`}>{isCompleted ? 'COMPLETADO' : (metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX') : 'PENDIENTE (+60 días)')}</span></div>
-                                </div>
-                            </div>
-
-                            <div className="report-section">
-                                <h2>📈 Avance y Desempeño</h2>
-                                <div className="report-data">
-                                    <div><span className="report-label">Piezas Producidas (Real):</span><span className="report-value text-green-700">{metrics.produced.toLocaleString()} piezas</span></div>
-                                    <div><span className="report-label">Piezas Faltantes:</span><span className="report-value">{metrics.totalNeeded.toLocaleString()} piezas</span></div>
-                                    <div><span className="report-label">Progreso (%):</span><span className="report-value text-blue-700">{metrics.progress.toFixed(1)}%</span></div>
-                                    <div><span className="report-label">Producción Planeada (hasta hoy):</span><span className="report-value">{metrics.plannedToDate.toLocaleString()} piezas</span></div>
-                                    <div><span className="report-label">Desviación (vs Plan):</span><span className={`report-value ${metrics.deviation < 0 ? 'text-red-700' : 'text-green-700'}`}>{metrics.deviation.toLocaleString()} piezas</span></div>
-                                </div>
-                            </div>
-
-                            <div className="report-section">
-                                <h2>🧵 Consumo de Materia Prima (KG)</h2>
-                                <div className="report-data">
-                                    <div><span className="report-label">Peso por Pieza:</span><span className="report-value">{order.pieceWeightGrams} gramos</span></div>
-                                    <div><span className="report-label">Merma Aplicada:</span><span className="report-value text-red-700">{order.wastePercentage}%</span></div>
-                                    <div><span className="report-label">**Total Hilo Requerido (con Merma):**</span><span className="report-value text-blue-700 text-lg">{consumptionData.totalYarnKilos.toFixed(2)} KG</span></div>
-                                    <div><span className="report-label">**Total Hilo Consumido (hasta hoy):**</span><span className="report-value text-green-700 text-lg">{consumptionData.producedYarnKilos.toFixed(2)} KG</span></div>
-                                    {order.wastePercentage > 0 && <div><span className="report-label text-red-500">Consumo Base (Sin Merma):</span><span className="report-value text-red-500">{consumptionBase.totalYarnKilos.toFixed(2)} KG</span></div>}
-                                </div>
-                                <h3 className="font-bold text-sm mt-4">Desglose por Hilatura (Kg):</h3>
-                                <table className="report-material-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Hilatura (%)</th>
-                                            <th>Total Requerido</th>
-                                            <th>Consumido (Hoy)</th>
-                                            <th>Faltante</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {consumptionData.consumption.map((m, i) => (
-                                            <tr key={i}>
-                                                <td>{m.name} ({m.percentage}%)</td>
-                                                <td>{m.kilosNeeded.toFixed(2)} KG</td>
-                                                <td className="font-bold text-green-700">{m.kilosConsumed.toFixed(2)} KG</td>
-                                                <td>{(m.kilosNeeded - m.kilosConsumed).toFixed(2)} KG</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        
-                        {/* Botón para iniciar el siguiente pedido, solo si está completo */}
-                        {isCompleted && (
-                             <div className="p-4 border-t border-slate-700 flex justify-center bg-slate-900 no-print">
-                                <button onClick={handleNewOrder} className="px-6 py-2 rounded bg-yellow-600 text-white font-bold flex items-center gap-2 hover:bg-yellow-500 transition-transform hover:scale-105">
-                                    <i data-lucide="chevrons-right" className="w-5 h-5"></i> Programar Siguiente Pedido
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            );
-        };
-
-
-        // --- GESTOR DE PEDIDOS ---
-        const OrderManager = React.forwardRef(({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays }, ref) => {
-            const [step, setStep] = useState(1);
-            const [viewMode, setViewMode] = useState('list'); 
-            const [modelName, setModelName] = useState('');
-            const [selectedMachines, setSelectedMachines] = useState([]);
-            const [isEditing, setIsEditing] = useState(false);
-            const [editMachineId, setEditMachineId] = useState(null); 
-            const [showReportModal, setShowReportModal] = useState(false);
-            const [reportConfig, setReportConfig] = useState(null);
-
-            const initialConfig = useMemo(() => ({
-                totalQty: '', timePerPiece: '', startDate: new Date().toISOString().split('T')[0],
-                operators: ['Andrés', 'Balta'], disabledDates: [], pieceWeightGrams: '',
-                materials: [{name: 'LYCRA', percentage: ''}, {name: 'NYLON', percentage: ''}],
-                wastePercentage: 0
-            }), []);
-
-            const [config, setConfig] = useState(initialConfig);
-
-            // Funciones pasadas al ReportModal para encadenar pedidos
-            const startNewOrderChain = (machineId) => {
-                const order = ordersData[machineId];
-                if (!order) return;
-                const metrics = calculateOrderMetrics(machineId, order, allProductionData, allRows, hiddenDays);
-                
-                // Si la fecha de finalización es válida (COMPLETADO o proyectada), úsala como inicio
-                const nextStartDate = metrics.finishDate && metrics.status === 'COMPLETADO' 
-                    ? new Date(new Date(metrics.finishDate).setDate(new Date(metrics.finishDate).getDate() + 1)).toISOString().split('T')[0] // Día siguiente al completado
-                    : (metrics.finishDate ? metrics.finishDate : new Date().toISOString().split('T')[0]); // Fecha proyectada o hoy
-
-                setIsEditing(false);
-                setEditMachineId(null);
-                setModelName('');
-                setSelectedMachines([machineId]);
-                setConfig({
-                    ...initialConfig,
-                    startDate: nextStartDate,
-                    // Reutilizar materiales del pedido anterior
-                    materials: order.materials || initialConfig.materials,
-                    wastePercentage: order.wastePercentage || 0,
-                });
-                setStep(1);
-                setViewMode('create');
-                alert(`Programando nuevo pedido en ${MACHINES.find(m => m.id === machineId).name}. Fecha de inicio fijada en ${new Date(nextStartDate).toLocaleDateString('es-MX')}.`);
-            };
-
-            // Exponer la función al padre a través de `useImperativeHandle`
-            React.useImperativeHandle(ref, () => ({
-                startNewOrderChain,
-            }));
-
-            const toggleMachine = (id) => { setSelectedMachines(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]); };
-            const toggleOperator = (op) => {
-                setConfig(prev => {
-                    const current = prev.operators;
-                    if (current.includes(op)) { if (current.length === 1) return prev; return { ...prev, operators: current.filter(o => o !== op) }; }
-                    return { ...prev, operators: [...current, op] };
-                });
-            };
-            const toggleDateDisabled = (isoDate) => {
-                setConfig(prev => {
-                    const current = prev.disabledDates;
-                    if (current.includes(isoDate)) return { ...prev, disabledDates: current.filter(d => d !== isoDate) };
-                    return { ...prev, disabledDates: [...current, isoDate] };
-                });
-            };
-            const handleMaterialChange = (index, field, value) => {
-                setConfig(prev => {
-                    const newMaterials = [...prev.materials];
-                    newMaterials[index] = {...newMaterials[index], [field]: value};
-                    return {...prev, materials: newMaterials};
-                });
-            };
-            const addMaterial = () => { setConfig(prev => ({ ...prev, materials: [...prev.materials, { name: '', percentage: '' }] })); };
-            const removeMaterial = (index) => { setConfig(prev => ({ ...prev, materials: prev.materials.filter((_, i) => i !== index) })); };
-            const applyWaste = (percent) => { setConfig(prev => ({...prev, wastePercentage: percent})); };
-
-
-            const calculatePreview = () => {
-                if (!config.totalQty || !config.timePerPiece) return null;
-                const dummyOrder = { 
-                    totalQty: config.totalQty, timePerPieceMin: config.timePerPiece, 
-                    startDate: config.startDate, operators: config.operators,
-                    disabledDates: config.disabledDates
-                };
-                const calc = calculateOrderMetrics('dummy', dummyOrder, {}, allRows, hiddenDays); 
-                return calc.finishDate;
-            };
-
-            const calculateConsumption = (appliedWaste = false) => {
-                const totalQty = Number(config.totalQty);
-                const pieceWeightGrams = Number(config.pieceWeightGrams);
-                const waste = appliedWaste ? (1 + (config.wastePercentage / 100)) : 1;
-                
-                const totalYarnGrams = totalQty * pieceWeightGrams * waste;
-                const totalYarnKilos = totalYarnGrams / 1000;
-                
-                const consumption = config.materials
-                    .filter(m => m.name && m.percentage)
-                    .map(m => {
-                        const percent = Number(m.percentage) / 100;
-                        const kilos = (totalYarnKilos * percent);
-                        return { name: m.name, kilos: kilos, percentage: m.percentage };
-                    });
-
-                return { totalYarnKilos, consumption };
-            };
-
-            const handleStartCreate = () => {
-                setIsEditing(false);
-                setEditMachineId(null);
-                setModelName('');
-                setSelectedMachines([]);
-                setConfig(initialConfig);
-                setStep(1);
-                setViewMode('create');
-            };
-
-            const handleStartEdit = (machineId, orderData) => {
-                setIsEditing(true);
-                setEditMachineId(machineId);
-                setModelName(orderData.model);
-                setSelectedMachines([machineId]); 
-                setConfig({
-                    totalQty: orderData.totalQty,
-                    timePerPiece: orderData.timePerPieceMin,
-                    startDate: orderData.startDate,
-                    operators: orderData.operators || (orderData.dailyHours == 24 ? ['Andrés', 'Balta'] : ['Andrés']),
-                    disabledDates: orderData.disabledDates || [],
-                    pieceWeightGrams: orderData.pieceWeightGrams || '',
-                    materials: orderData.materials || [{name: 'LYCRA', percentage: ''}, {name: 'NYLON', percentage: ''}],
-                    wastePercentage: orderData.wastePercentage || 0,
-                });
-                setStep(1);
-                setViewMode('create');
-            };
-
-            const handleDelete = (machineId) => {
-                if(confirm('¿Seguro que quieres eliminar este pedido? Se perderá el seguimiento.')) {
-                    onDeleteOrder(machineId);
-                }
-            };
-
-            const handleFinalSave = () => {
-                if (selectedMachines.length === 0) {
-                     alert('Debes seleccionar al menos una máquina.');
-                     return;
-                }
-                
-                selectedMachines.forEach(mid => {
-                    const consumptionData = calculateConsumption();
-                    
-                    const orderPayload = {
-                        model: modelName,
-                        totalQty: Number(config.totalQty),
-                        timePerPieceMin: Number(config.timePerPiece),
-                        startDate: config.startDate,
-                        operators: config.operators, 
-                        dailyHours: config.operators.length * 12, 
-                        disabledDates: config.disabledDates,
-                        // New fields
-                        pieceWeightGrams: Number(config.pieceWeightGrams),
-                        materials: config.materials.filter(m => m.name && m.percentage),
-                        wastePercentage: config.wastePercentage,
-                        totalYarnKilos: consumptionData.totalYarnKilos,
-                        consumptionDetails: consumptionData.consumption,
-                    };
-                    onSaveOrders(mid, orderPayload);
-                });
-                setViewMode('list');
-            };
-            
-            // Step validation
-            const validateStep = (s) => {
-                if (s === 1 && !modelName) return false;
-                if (s === 2 && selectedMachines.length === 0) return false;
-                if (s === 3 && (!config.totalQty || !config.timePerPiece || !config.pieceWeightGrams)) return false;
-                if (s === 5) {
-                    const totalPercentage = config.materials.reduce((sum, m) => sum + Number(m.percentage || 0), 0);
-                    return totalPercentage === 100;
-                }
-                return true;
-            }
-
-            const handleOpenReport = (machineId, order, metrics) => {
-                setReportConfig({ machineId, order, metrics });
-                setShowReportModal(true);
-            };
-
-
-            // Renderers
-            const renderCalendarPicker = () => {
-                const finishDate = calculatePreview();
-                if (!finishDate) return <div className="text-center text-red-400">Datos insuficientes para calcular</div>;
-                
-                const startIdx = allRows.findIndex(r => r.isoDate === config.startDate);
-                if (startIdx === -1) return null;
-
-                let endIdx = allRows.findIndex(r => r.isoDate === finishDate);
-                if (!finishDate) endIdx = startIdx + 60; // Mostrar 60 días si no hay fecha de fin
-                if (endIdx === -1) endIdx = startIdx + 60; 
-
-                // Start view 7 days before the actual start date to give context
-                const viewStartIdx = Math.max(0, startIdx - 7);
-                const viewEndIdx = Math.min(allRows.length, endIdx + 15);
-
-                const daysToShow = allRows.slice(viewStartIdx, viewEndIdx);
-                const startDay = daysToShow[0];
-                const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(startDay?.shortDay) || 0;
-                const blanks = Array(startDayOffset).fill(null);
-
-                return (
-                    <div className="grid grid-cols-7 gap-1">
-                        {['D','L','M','M','J','V','S'].map(d => <div key={d} className="text-center text-[10px] text-slate-500 font-bold">{d}</div>)}
-                        {blanks.map((_, i) => <div key={`b-${i}`}></div>)}
-                        {daysToShow.map(row => {
-                            const isDisabled = config.disabledDates.includes(row.isoDate);
-                            const isGlobalHidden = hiddenDays.includes(row.id);
-                            const isStartDay = row.isoDate === config.startDate;
-                            const isFinishDay = row.isoDate === finishDate;
-                            const isWithinRange = !isDisabled && !isGlobalHidden && (row.isoDate >= config.startDate && row.isoDate <= finishDate);
-                            const isPast = new Date(row.isoDate) < new Date(config.startDate);
-
-                            let bgClass = 'bg-slate-800 text-slate-500'; 
-                            if (isGlobalHidden) bgClass = 'bg-slate-900 opacity-30 cursor-not-allowed';
-                            else if (isStartDay) bgClass = 'bg-blue-600 border border-blue-400 text-white';
-                            else if (isFinishDay) bgClass = 'bg-red-600 border border-red-400 text-white shadow shadow-red-900'; 
-                            else if (isDisabled) bgClass = 'bg-red-900/40 text-red-500 border border-red-900'; 
-                            else if (isWithinRange) bgClass = 'bg-green-600 text-white shadow shadow-green-900';
-                            else if (isPast) bgClass = 'bg-slate-900/50 text-slate-600 cursor-not-allowed';
-
-                            return (
-                                <button key={row.id} 
-                                    onClick={() => !isGlobalHidden && !isPast && !isStartDay && toggleDateDisabled(row.isoDate)}
-                                    className={`p-1 rounded text-[10px] font-bold h-10 flex flex-col items-center justify-center transition-all ${bgClass}`}>
-                                    <span>{row.dateNum}</span>
-                                    <span className="text-[6px] uppercase">{row.month}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                );
-            };
-
-            const renderMaterialConfig = () => {
-                const totalPercentage = config.materials.reduce((sum, m) => sum + Number(m.percentage || 0), 0);
-
-                return (
-                    <div className="space-y-4 fade-in">
-                        <h3 className="text-xl font-bold text-white text-center mb-6">Materia Prima y Merma</h3>
-
-                        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                            <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Hilaturas ({totalPercentage}%)</label>
-                            <div className="space-y-3">
-                                {config.materials.map((m, index) => (
-                                    <div key={index} className="flex gap-2 items-center">
-                                        <input type="text" value={m.name} onChange={e => handleMaterialChange(index, 'name', e.target.value.toUpperCase())} placeholder="NOMBRE (EJ: NYLON)" className="flex-1 bg-slate-900 text-sm text-white p-2 rounded border border-slate-600 outline-none uppercase" />
-                                        <input type="number" value={m.percentage} onChange={e => handleMaterialChange(index, 'percentage', Math.min(100, Math.max(0, e.target.value)))} placeholder="%" className="w-16 bg-slate-900 text-sm text-white p-2 rounded border border-slate-600 outline-none text-center" />
-                                        <button onClick={() => removeMaterial(index)} className="p-2 bg-red-900/50 rounded text-red-400"><i data-lucide="x" className="w-4 h-4"></i></button>
-                                    </div>
-                                ))}
-                            </div>
-                            <button onClick={addMaterial} className="mt-3 w-full bg-slate-700 text-white py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2"><i data-lucide="plus-circle" className="w-4 h-4"></i> Añadir Hilatura</button>
-
-                            {totalPercentage !== 100 && totalPercentage > 0 && (
-                                <div className="mt-4 p-3 bg-red-900/30 text-red-300 rounded-lg text-xs font-bold text-center">
-                                    ¡Atención! La suma de porcentajes debe ser 100%. (Actual: {totalPercentage}%)
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                            <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Merma</label>
-                            <div className="flex gap-4 justify-center">
-                                {[0, 5, 10].map(p => (
-                                    <button key={p} onClick={() => applyWaste(p)} className={`flex-1 py-2 rounded-lg border font-bold text-sm ${config.wastePercentage === p ? 'bg-green-600 border-green-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>
-                                        {p}% Merma
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                );
-            };
-
-            const renderConfirmation = () => {
-                const { totalYarnKilos, consumption } = calculateConsumption(true);
-                const consumptionBase = calculateConsumption(false); 
-                
-                return (
-                    <div className="space-y-6 fade-in text-center">
-                        <h3 className="text-xl font-bold text-white">Confirmación y Consumo</h3>
-                        <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 inline-block text-left w-full">
-                            <div className="flex justify-between border-b border-slate-700 pb-2 mb-2">
-                                <span className="text-slate-400">Modelo:</span>
-                                <span className="font-bold text-yellow-400 text-lg">{modelName}</span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 text-sm mb-4">
-                                <div className="flex justify-between"><span className="text-slate-400">Total Piezas:</span><span className="text-white">{Number(config.totalQty).toLocaleString()}</span></div>
-                                <div className="flex justify-between"><span className="text-slate-400">Peso/Pza:</span><span className="text-white">{config.pieceWeightGrams} g</span></div>
-                                <div className="flex justify-between"><span className="text-slate-400">Merma Aplicada:</span><span className={`font-bold ${config.wastePercentage > 0 ? 'text-red-400' : 'text-green-400'}`}>{config.wastePercentage}%</span></div>
-                            </div>
-                            
-                            <h4 className="text-xs font-bold text-blue-400 uppercase mt-4 mb-2 border-t border-slate-700 pt-2">Consumo Total de Hilatura</h4>
-                            <div className="text-3xl font-black text-center text-green-400 mb-4">{totalYarnKilos.toFixed(2)} KG</div>
-
-                            <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Desglose por Hilatura:</h4>
-                            <div className="space-y-1">
-                                {consumption.map((m, i) => (
-                                    <div key={i} className="flex justify-between text-sm">
-                                        <span className="text-white font-bold">{m.name} ({m.percentage}%)</span>
-                                        <span className="text-slate-300">{m.kilos.toFixed(2)} KG</span>
-                                    </div>
-                                ))}
-                            </div>
-
-                            {config.wastePercentage > 0 && (
-                                <div className="text-[10px] text-red-400 mt-4 border-t border-red-900/50 pt-2">
-                                    Consumo base sin merma: {consumptionBase.totalYarnKilos.toFixed(2)} KG.
-                                </div>
-                            )}
-
-                        </div>
-                        <p className="text-sm text-slate-400">¿Deseas guardar esta planeación?</p>
-                    </div>
-                );
-            };
-
-            const renderCreateFlow = () => (
-                <div className="flex flex-col h-full">
-                    <div className="flex justify-between mb-6 px-2 no-print">
-                        {[1,2,3,4,5,6].map(s => (
-                            <div key={s} className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= s ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-500'}`}>{s}</div>
-                        ))}
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto custom-scrollbar px-2">
-                        {step === 1 && (
-                            <div className="space-y-4 fade-in">
-                                <h3 className="text-xl font-bold text-white text-center mb-6">{isEditing ? 'Editar Pedido' : 'Nuevo Pedido'}</h3>
-                                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-                                    <label className="block text-blue-400 font-bold uppercase text-xs mb-2">Ingresa el Modelo</label>
-                                    <input type="text" value={modelName} onChange={e => setModelName(e.target.value.toUpperCase())} placeholder="EJ: B001-EG" className="w-full bg-slate-900 text-2xl font-black text-white p-4 rounded-lg border border-slate-600 focus:border-blue-500 outline-none text-center uppercase" autoFocus />
-                                </div>
-                            </div>
-                        )}
-
-                        {step === 2 && (
-                            <div className="fade-in">
-                                <h3 className="text-lg font-bold text-white text-center mb-4">Selecciona Máquinas</h3>
-                                <div className="grid grid-cols-4 gap-4 justify-items-center">
-                                    {MACHINES.map(m => {
-                                        const isSelected = selectedMachines.includes(m.id);
-                                        const hasActiveOrder = ordersData[m.id] && ordersData[m.id].totalQty > 0;
-                                        
-                                        // CORRECCIÓN: Se permite seleccionar siempre. El botón ya no está deshabilitado.
-                                        return (
-                                            <button key={m.id} onClick={() => {
-                                                toggleMachine(m.id);
-                                                // Si se selecciona una máquina con pedido activo, se sugiere usar la fecha de finalización como inicio
-                                                if (!isSelected && hasActiveOrder && selectedMachines.length === 0) {
-                                                    const order = ordersData[m.id];
-                                                    const metrics = calculateOrderMetrics(m.id, order, allProductionData, allRows, hiddenDays);
-                                                    
-                                                    let nextStartDate = new Date().toISOString().split('T')[0];
-                                                    if (metrics.finishDate) {
-                                                         // Sumar un día a la fecha de finalización
-                                                        const finishDateObj = new Date(metrics.finishDate);
-                                                        finishDateObj.setDate(finishDateObj.getDate() + 1);
-                                                        nextStartDate = finishDateObj.toISOString().split('T')[0];
-                                                    }
-                                                    
-                                                    setConfig(prev => ({...prev, startDate: nextStartDate}));
-                                                    alert(`Fecha de inicio sugerida: ${new Date(nextStartDate).toLocaleDateString('es-MX')} (Día siguiente a la finalización estimada de ${order.model})`);
-                                                }
-                                            }} 
-                                            className={`machine-circle w-14 h-14 rounded-full flex flex-col items-center justify-center border-2 shadow-lg relative ${isSelected ? 'bg-green-600 border-green-400 selected' : hasActiveOrder ? 'bg-red-600 border-red-400' : 'bg-slate-800 border-slate-600'}`}>
-                                                <span className="text-[10px] font-black text-white">{m.name.replace('MAQ ','')}</span>
-                                                {hasActiveOrder && <span className="text-[8px] text-yellow-300 font-bold absolute -bottom-1 bg-slate-900/80 px-1 rounded-full">{ordersData[m.id].model}</span>}
-                                                {isSelected && <div className="absolute -top-1 -right-1 bg-white text-green-600 rounded-full p-0.5"><i data-lucide="check" className="w-3 h-3"></i></div>}
-                                            </button>
-                                        )
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {step === 3 && (
-                            <div className="space-y-4 fade-in">
-                                <h3 className="text-lg font-bold text-white text-center mb-4">Configuración Producción</h3>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="col-span-2">
-                                        <label className="text-xs text-slate-400 uppercase mb-2 block">Operadores (Turno)</label>
-                                        <div className="flex gap-2">
-                                            {['Andrés', 'Balta'].map(op => {
-                                                const active = config.operators.includes(op);
-                                                return (
-                                                    <button key={op} onClick={() => toggleOperator(op)} className={`flex-1 py-3 rounded-lg border font-bold text-sm flex items-center justify-center gap-2 ${active ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-800 border-slate-600 text-slate-500'}`}>
-                                                        {active ? <i data-lucide="check-circle" className="w-4 h-4"/> : <i data-lucide="circle" className="w-4 h-4"/>}
-                                                        {op}
-                                                    </button>
-                                                )
-                                            })}
-                                        </div>
-                                    </div>
-                                    <div><label className="text-xs text-slate-400 uppercase">Cantidad Total</label><input type="number" value={config.totalQty} onChange={e => setConfig({...config, totalQty: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="1000" /></div>
-                                    <div><label className="text-xs text-slate-400 uppercase">Minutos/Pieza</label><input type="number" value={config.timePerPiece} onChange={e => setConfig({...config, timePerPiece: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="1.5" /></div>
-                                    <div><label className="text-xs text-slate-400 uppercase">Peso/Pieza (Gramos)</label><input type="number" value={config.pieceWeightGrams} onChange={e => setConfig({...config, pieceWeightGrams: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" placeholder="350 g" /></div>
-                                    <div><label className="text-xs text-slate-400 uppercase">Fecha Inicio</label><input type="date" value={config.startDate} onChange={e => setConfig({...config, startDate: e.target.value})} className="w-full bg-slate-900 border border-slate-600 p-3 rounded text-white" /></div>
-                                </div>
-                            </div>
-                        )}
-
-                        {step === 4 && (
-                            <div className="space-y-4 fade-in">
-                                <h3 className="text-lg font-bold text-white text-center mb-1">Planeación Automática</h3>
-                                <p className="text-xs text-slate-400 text-center mb-4">Toca un día verde para desactivarlo (descanso/paro)</p>
-                                
-                                <div className="bg-slate-900 p-2 rounded-lg border border-slate-700 mb-4">
-                                    <div className="flex justify-between items-center text-sm">
-                                        <span className="text-slate-400">Fin Estimado:</span>
-                                        <span className="font-bold text-green-400 text-lg">{calculatePreview() ? new Date(calculatePreview()).toLocaleDateString() : '...'}</span>
-                                    </div>
-                                </div>
-                                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50 max-h-[300px] overflow-y-auto custom-scrollbar">
-                                    {renderCalendarPicker()}
-                                </div>
-                            </div>
-                        )}
-
-                        {step === 5 && renderMaterialConfig()}
-
-                        {step === 6 && renderConfirmation()}
-                    </div>
-
-                    <div className="mt-4 pt-4 border-t border-slate-700 flex justify-between no-print">
-                        {step > 1 ? <button onClick={() => setStep(s => s - 1)} className="px-4 py-2 rounded bg-slate-700 text-white">Atrás</button> : <button onClick={() => setViewMode('list')} className="px-4 py-2 rounded bg-slate-800 text-slate-400">Cancelar</button>}
-                        {step < 6 ? (
-                            <button onClick={() => {
-                                if (validateStep(step)) { setStep(s => s + 1); }
-                                else { alert(step === 5 ? '¡Error! La suma de porcentajes de hilaturas debe ser 100.' : 'Faltan datos obligatorios para continuar.'); }
-                            }} className="px-6 py-2 rounded bg-blue-600 text-white font-bold hover:bg-blue-500" disabled={!validateStep(step)}>Siguiente</button>
-                        ) : (
-                            <button onClick={handleFinalSave} className="px-6 py-2 rounded bg-green-600 text-white font-bold shadow-lg hover:bg-green-500 animate-pulse">CONFIRMAR</button>
-                        )}
-                    </div>
-                </div>
-            );
-
-            const renderListView = () => {
-                const activeMachines = MACHINES.filter(m => ordersData[m.id] && ordersData[m.id].totalQty > 0);
-                return (
-                    <div className="flex flex-col h-full">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-black text-white flex items-center gap-2"><i data-lucide="clipboard-list" className="text-yellow-400"></i> Pedidos Activos</h2>
-                            <div className="flex gap-3">
-                                <button onClick={handleStartCreate} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg transition-transform hover:scale-105"><i data-lucide="plus-circle" className="w-5 h-5"></i> Nuevo</button>
-                            </div>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
-                            {activeMachines.length === 0 && <div className="text-center text-slate-500 py-10">No hay pedidos activos.</div>}
-                            {activeMachines.map(m => {
-                                const order = ordersData[m.id];
-                                const metrics = calculateOrderMetrics(m.id, order, allProductionData, ALL_ROWS, hiddenDays);
-                                
-                                return (
-                                    <div key={m.id} className="bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-md relative overflow-hidden group">
-                                        <div className="flex justify-between items-start mb-2 relative z-10">
-                                            <div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-bold text-blue-400 text-sm">{m.name}</span>
-                                                    <span className="text-[10px] bg-slate-800 px-2 rounded text-slate-400">{m.type.split(' ')[0]}</span>
-                                                </div>
-                                                <h4 className="text-xl font-black text-yellow-400 uppercase mt-1">{order.model}</h4>
-                                            </div>
-                                            <div className="flex flex-col items-end gap-2">
-                                                <div className="flex gap-1">
-                                                     <button onClick={() => handleOpenReport(m.id, order, metrics)} className="p-1.5 bg-green-700/50 hover:bg-green-700 rounded text-green-400" title="Generar Reporte"><i data-lucide="file-text" className="w-4 h-4"></i></button>
-                                                     <button onClick={() => handleStartEdit(m.id, order)} className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-blue-400"><i data-lucide="pencil" className="w-4 h-4"></i></button>
-                                                     <button onClick={() => handleDelete(m.id)} className="p-1.5 bg-slate-800 hover:bg-red-900/50 rounded text-red-400"><i data-lucide="trash-2" className="w-4 h-4"></i></button>
-                                                </div>
-                                                <div className="text-right">
-                                                    <span className={`block text-xs font-bold ${metrics.status === 'COMPLETADO' ? 'text-green-500' : 'text-slate-400'}`}>{metrics.status === 'COMPLETADO' ? '¡LISTO!' : 'Fin Estimado'}</span>
-                                                    <span className="text-lg font-bold text-white">{metrics.status === 'COMPLETADO' ? <i data-lucide="check-circle" className="w-5 h-5 inline"/> : (metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}) : '-')}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {metrics.status !== 'OK' && metrics.status !== 'COMPLETADO' && (
-                                            <div className="flex items-center gap-2 p-2 mt-2 bg-red-900/30 border border-red-900 rounded-lg text-xs font-bold text-red-300 relative z-10">
-                                                <i data-lucide="alert-triangle" className="w-4 h-4 shrink-0"></i>
-                                                <span>{metrics.status}: Detrás por {Math.abs(metrics.deviation).toLocaleString()} pzas (Plneado: {metrics.plannedToDate.toLocaleString()}).</span>
-                                            </div>
-                                        )}
-
-                                        <div className="relative z-10 mt-3">
-                                            <div className="flex justify-between text-xs text-slate-400 mb-1">
-                                                <span>Progreso: {metrics.progress.toFixed(1)}%</span>
-                                                <span>{metrics.produced.toLocaleString()} / {Number(order.totalQty).toLocaleString()}</span>
-                                            </div>
-                                            <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden border border-slate-700">
-                                                <div className="h-full bg-gradient-to-r from-blue-600 to-cyan-400 transition-all duration-1000" style={{ width: `${metrics.progress}%` }}></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                        {showReportModal && reportConfig && <ReportModal onClose={() => setShowReportModal(false)} {...reportConfig} orderManagerRef={ref} />}
-                    </div>
-                );
-            };
-
-            return (
-                <div className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
-                    <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900 no-print">
-                            <span className="font-bold text-white uppercase tracking-wider text-sm">Gestión de Producción</span>
-                            <button onClick={onClose}><i data-lucide="x" className="text-slate-400 w-6 h-6 hover:text-white"></i></button>
-                        </div>
-                        <div className="flex-1 p-6 overflow-hidden">
-                            {viewMode === 'list' ? renderListView() : renderCreateFlow()}
-                        </div>
-                    </div>
-                </div>
-            );
-        });
-
 
         const LoginScreen = ({ setAuthenticatedUser, installPrompt, onInstall, users }) => {
             const [pin, setPin] = useState('');
@@ -1142,12 +916,10 @@
                     <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center border border-slate-700 relative">
                         <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg"><i data-lucide="grid" className="w-8 h-8"></i></div>
                         <h2 className="text-2xl font-black text-white mb-2">MAES - TEJIDO</h2>
-                        <p className="text-slate-400 mb-8">Control & Planeación</p>
                         <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
                             <input type="tel" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="• • • •" className="w-full text-center text-4xl p-4 bg-slate-900 border-2 border-slate-700 rounded-xl tracking-[0.2em] focus:border-blue-500 outline-none font-bold text-white password-mask" autoFocus />
                             <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-blue-500 shadow-lg">INGRESAR</button>
                         </form>
-                        {installPrompt && (<div className="mt-8 pt-6 border-t border-slate-700"><button onClick={onInstall} className="flex items-center justify-center gap-2 w-full bg-slate-700 text-slate-200 py-3 rounded-lg font-bold text-sm border border-slate-600"><i data-lucide="download" className="w-4 h-4"></i>Instalar App</button></div>)}
                     </div>
                 </div>
             );
@@ -1181,14 +953,13 @@
             const handleMonthChange = (delta) => { const d = new Date(viewDate); d.setMonth(d.getMonth() + delta); setViewDate(d); };
             const monthRows = allRows.filter(r => r.monthIndex === viewDate.getMonth() && r.year === viewDate.getFullYear());
             const startDayOffset = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'].indexOf(monthRows[0]?.shortDay) || 0;
-            const blanks = Array(startDayOffset).fill(null);
 
             return (
                 <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in" onClick={onClose}>
                     <div className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-700 p-4" onClick={e => e.stopPropagation()}>
                         <div className="flex justify-between items-center mb-4"><button onClick={() => handleMonthChange(-1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-left" className="text-white w-5 h-5"></i></button><span className="font-bold text-white uppercase">{viewDate.toLocaleString('es-MX', { month: 'long', year: 'numeric' })}</span><button onClick={() => handleMonthChange(1)} className="p-2 hover:bg-slate-700 rounded"><i data-lucide="chevron-right" className="text-white w-5 h-5"></i></button></div>
                         <div className="grid grid-cols-7 gap-1 text-center mb-2">{['D','L','M','M','J','V','S'].map((d,i) => <div key={i} className="text-xs text-slate-500 font-bold">{d}</div>)}</div>
-                        <div className="grid grid-cols-7 gap-1">{blanks.map((_, i) => <div key={`b-${i}`}></div>)}{monthRows.map(row => (<button key={row.id} onClick={() => onSelectDate(row)} className="aspect-square flex items-center justify-center rounded-lg hover:bg-blue-600 bg-slate-900 text-slate-200 text-sm font-bold border border-slate-700">{row.dateNum}</button>))}</div>
+                        <div className="grid grid-cols-7 gap-1">{Array(startDayOffset).fill(null).map((_, i) => <div key={`b-${i}`}></div>)}{monthRows.map(row => (<button key={row.id} onClick={() => onSelectDate(row)} className="aspect-square flex items-center justify-center rounded-lg hover:bg-blue-600 bg-slate-900 text-slate-200 text-sm font-bold border border-slate-700">{row.dateNum}</button>))}</div>
                         <button onClick={onClose} className="w-full mt-4 bg-slate-700 py-2 rounded-lg text-white font-bold text-sm">Cerrar</button>
                     </div>
                 </div>
@@ -1197,22 +968,18 @@
 
         const App = () => {
             const [user, setUser] = useState(null);
-            const [usersData, setUsersData] = useState(DEFAULT_USERS); // Dynamic users data
+            const [usersData, setUsersData] = useState(DEFAULT_USERS); 
             const [data, setData] = useState({});
             const [ordersData, setOrdersData] = useState({});
             const [visibilityConfig, setVisibilityConfig] = useState({ machines: [], days: [] });
             const [loading, setLoading] = useState(true);
             const [weekOffset, setWeekOffset] = useState(INITIAL_STATE.weekOffset);
             const [selectedDayIndex, setSelectedDayIndex] = useState(INITIAL_STATE.selectedDayIndex); 
-            
-            // Modales
             const [showOrderManager, setShowOrderManager] = useState(false);
             const [showVisibilityModal, setShowVisibilityModal] = useState(false);
             const [showCalendar, setShowCalendar] = useState(false);
             const [showUserManagementModal, setShowUserManagementModal] = useState(false);
             const [deferredPrompt, setDeferredPrompt] = useState(null);
-
-            // Ref para el OrderManager para acceder a sus funciones internas (ej: encadenar pedidos)
             const orderManagerRef = React.useRef(); 
 
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
@@ -1224,23 +991,14 @@
                         const unsubDb = onSnapshot(collection(db, 'produccion_2026'), (snap) => { const d = {}; snap.forEach(doc => d[doc.id] = doc.data()); setData(d); setLoading(false); });
                         const unsubSettings = onSnapshot(doc(db, 'settings', 'visibility'), (docSnap) => { if (docSnap.exists()) setVisibilityConfig(docSnap.data()); });
                         const unsubOrders = onSnapshot(doc(db, 'settings', 'orders'), (docSnap) => { if (docSnap.exists()) setOrdersData(docSnap.data()); });
-                        // New: Listen for dynamic users data
                         const unsubUsers = onSnapshot(doc(db, 'settings', 'users'), (docSnap) => { 
-                            if (docSnap.exists()) {
-                                const fetchedUsers = docSnap.data();
-                                setUsersData(fetchedUsers); 
-                                // Si el usuario actual no tiene rol, se desloguea (seguridad)
-                                if (user && !fetchedUsers[user.id]) setUser(null); 
-                            } else {
-                                // Initialize users if not found (First run)
-                                setDoc(doc(db, 'settings', 'users'), DEFAULT_USERS);
-                            }
+                            if (docSnap.exists()) { const fetchedUsers = docSnap.data(); setUsersData(fetchedUsers); if (user && !fetchedUsers[user.id]) setUser(null); } else { setDoc(doc(db, 'settings', 'users'), DEFAULT_USERS); }
                         });
                         return () => { unsubDb(); unsubSettings(); unsubOrders(); unsubUsers(); };
                     } else signInAnonymously(auth);
                 });
                 return () => unsubAuth();
-            }, [user]); // Dependencia 'user' para re-evaluar si se necesita desloguear
+            }, [user]);
 
             const handleUpdateSlot = async (rowId, machineId, slotIndex, field, value) => {
                 const currentMachineData = data[rowId]?.[machineId] || {};
@@ -1254,77 +1012,31 @@
                 await setDoc(doc(db, 'produccion_2026', rowId), { [machineId]: updatedMachine }, { merge: true });
             };
 
-            const handleSaveOrder = async (machineId, orderData) => {
-                await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { ...orderData, lastUpdated: serverTimestamp(), updatedBy: user.name } }, { merge: true });
-            };
-
-            const handleDeleteOrder = async (machineId) => {
-                // Para "eliminar" un pedido sin borrar el historial, simplemente se establece la cantidad a 0.
-                // Esto mantiene la máquina visible en el OrderManager, pero sin afectar la planeación.
-                // Si quieres que el pedido desaparezca de la lista de activos, podrías borrar el campo completo:
-                // await updateDoc(doc(db, 'settings', 'orders'), { [machineId]: deleteField() });
-                // Pero, por ahora, usamos la lógica de setDoc para mantener la estructura y solo poner totalQty a 0
-                await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, lastUpdated: serverTimestamp() } }, { merge: true });
+            const handleSaveOrder = async (machineId, orderData) => { await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { ...orderData, lastUpdated: serverTimestamp(), updatedBy: user.name } }, { merge: true }); };
+            const handleDeleteOrder = async (machineId) => { await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, parts: [], lastUpdated: serverTimestamp() } }, { merge: true }); };
+            
+            // --- NUEVO: GUARDAR CONTEO ---
+            const handleSaveConteo = async (machineId, conteoData) => {
+                 // Estructura: array de conteos en el objeto de la orden
+                 const currentOrder = ordersData[machineId];
+                 if (!currentOrder) return;
+                 const newCounts = [...(currentOrder.verifiedCounts || []), { ...conteoData, timestamp: new Date().toISOString() }];
+                 await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { verifiedCounts: newCounts } }, { merge: true });
             };
 
             const handleSaveVisibility = async (hiddenMachines, hiddenDays) => { await setDoc(doc(db, 'settings', 'visibility'), { machines: hiddenMachines, days: hiddenDays }, { merge: true }); };
-
-            const handleSaveUser = async (pin, userData) => {
-                try {
-                    // Crea el nuevo objeto de usuarios
-                    const newUsers = { ...usersData, [pin]: userData };
-                    // Sobrescribe el documento 'users' con la lista completa de usuarios
-                    await setDoc(doc(db, 'settings', 'users'), newUsers);
-                    
-                    // Si el usuario actual fue editado, refresca sus permisos
-                    if (user.id === pin) setUser({...userData, id: pin});
-                    
-                    console.log(`✅ Usuario ${pin} - ${userData.name} guardado/actualizado con éxito.`);
-                    alert(`Usuario ${userData.name} guardado con éxito!`);
-                } catch (error) {
-                    console.error("Error al guardar usuario:", error);
-                    alert(`Error al guardar usuario: ${error.message}`);
-                }
-            };
-
-            const handleDeleteUser = async (pinToDelete) => {
-                if (pinToDelete === user.id) {
-                    alert('No puedes eliminar tu propio usuario mientras estás logueado.');
-                    return;
-                }
-                if (confirm(`¿Estás seguro de que deseas eliminar al usuario con PIN: ${pinToDelete}?`)) {
-                    try {
-                        // Crea el nuevo objeto sin el PIN a eliminar
-                        const { [pinToDelete]: _, ...newUsers } = usersData;
-                        // Sobrescribe la lista completa de usuarios en Firestore
-                        await setDoc(doc(db, 'settings', 'users'), newUsers);
-
-                        console.log(`✅ Usuario con PIN ${pinToDelete} eliminado con éxito.`);
-                        alert(`Usuario con PIN ${pinToDelete} eliminado con éxito.`);
-                    } catch (error) {
-                        console.error("Error al eliminar usuario:", error);
-                        alert(`Error al eliminar usuario: ${error.message}`);
-                    }
-                }
-            };
-
+            const handleSaveUser = async (pin, userData) => { try { await setDoc(doc(db, 'settings', 'users'), { ...usersData, [pin]: userData }); if (user.id === pin) setUser({...userData, id: pin}); alert('Usuario guardado'); } catch (error) { alert('Error: ' + error.message); } };
+            const handleDeleteUser = async (pinToDelete) => { if (pinToDelete === user.id) return; if (confirm(`¿Eliminar ${pinToDelete}?`)) { const { [pinToDelete]: _, ...newUsers } = usersData; await setDoc(doc(db, 'settings', 'users'), newUsers); } };
             const handleDateSelect = (row) => { setWeekOffset(Math.floor(row.index / 7)); setShowCalendar(false); };
 
-            const canViewGraph = user && (user.canViewGraph || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT || user.role === ROLES.OBSERVER);
-            const canManageUsers = user && user.role === ROLES.DEVELOPMENT; // Explicitly for developer
-            
+            const canViewGraph = user && (user.canViewGraph || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT || user.role === ROLES.OBSERVER || user.role === ROLES.PRE_COUNT);
+            const canManageUsers = user && user.role === ROLES.DEVELOPMENT; 
             const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
             const currentWeekRows = useMemo(() => { const start = weekOffset * 7; return ALL_ROWS.slice(start, start + 7); }, [weekOffset]);
             const weekLabel = useMemo(() => getWeekLabel(currentWeekRows), [currentWeekRows]);
-            
-            const canManageOrders = user && (user.canManageOrders || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT); 
+            const canManageOrders = user && (user.canManageOrders || user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT || user.role === ROLES.PRE_COUNT); 
             const canConfig = user && (user.role === ROLES.DEVELOPMENT); 
-            const canEditSlot = (machineId, slotIndex) => {
-                if (!user) return false;
-                if (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) return true;
-                if (user.allowedSlots) return user.allowedSlots.includes(slotIndex);
-                return false; 
-            };
+            const canEditSlot = (machineId, slotIndex) => { if (!user) return false; if (user.role === ROLES.ADMIN || user.role === ROLES.DEVELOPMENT) return true; if (user.allowedSlots) return user.allowedSlots.includes(slotIndex); return false; };
 
             if (!user) return <LoginScreen setAuthenticatedUser={setUser} installPrompt={deferredPrompt} onInstall={() => deferredPrompt?.prompt()} users={usersData} />;
             if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900"><i data-lucide="loader-2" className="animate-spin w-12 h-12 text-blue-500"></i></div>;
@@ -1343,8 +1055,8 @@
                              <div className="p-3 flex justify-between items-center bg-slate-900/50"> 
                                 <div className="flex items-center gap-2"><i data-lucide="user-check" className="w-5 h-5 text-blue-400"></i><div><p className="text-sm font-bold text-slate-100">{user.name.split(' ')[0]}</p><p className="text-[10px] text-slate-500 uppercase font-medium">{user.area}</p></div></div>
                                 <div className="flex gap-2">
-                                    {canManageUsers && <button onClick={() => setShowUserManagementModal(true)} className="w-8 h-8 bg-yellow-600 rounded-lg flex items-center justify-center text-white shadow-lg"><i data-lucide="users" className="w-4 h-4"></i></button>}
-                                    {canManageOrders && <button onClick={() => setShowOrderManager(true)} className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg animate-pulse"><i data-lucide="clipboard-list" className="w-4 h-4"></i></button>}
+                                    {canManageUsers && <button onClick={() => setShowUserManagementModal(true)} className="w-8 h-8 bg-yellow-600 rounded-lg flex items-center justify-center text-white"><i data-lucide="users" className="w-4 h-4"></i></button>}
+                                    {canManageOrders && <button onClick={() => setShowOrderManager(true)} className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><i data-lucide="clipboard-list" className="w-4 h-4"></i></button>}
                                     {canConfig && <button onClick={() => setShowVisibilityModal(true)} className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-slate-300"><i data-lucide="settings" className="w-4 h-4"></i></button>}
                                 </div>
                             </div>
@@ -1358,6 +1070,7 @@
                                 const order = ordersData[m.id];
                                 const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days || []);
                                 const isPlannedDay = metrics.isPlanned && new Date(order.startDate).toISOString().split('T')[0] <= selectedDay.isoDate && (metrics.finishDate === null || metrics.finishDate >= selectedDay.isoDate);
+                                const isComposite = order?.parts?.length > 0;
                                 
                                 return (
                                     <div key={m.id} className="bg-slate-800 rounded-xl p-3 shadow-sm border border-slate-700 relative overflow-hidden mb-3">
@@ -1365,9 +1078,10 @@
                                             <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center"><i data-lucide="cpu" className="w-5 h-5 opacity-50"></i></div><div><h3 className="font-black text-slate-200 text-sm">{m.name.replace('MAQ ','M-')}</h3><p className="text-[10px] text-slate-500 font-medium">{m.type}</p></div></div>
                                             {(metrics.progress > 0 || isPlannedDay) && <div className="text-[10px] font-bold text-blue-400 bg-blue-900/30 px-2 py-0.5 rounded">{metrics.progress.toFixed(0)}%</div>}
                                         </div>
-                                        {order && order.totalQty > 0 && canViewGraph && (
+                                        {order && (order.totalQty > 0 || isComposite) && canViewGraph && (
                                             <div className="mb-3">
-                                                <div className="text-[10px] text-yellow-500 font-bold uppercase flex justify-between border-b border-slate-700 pb-1"><span>{order.model}</span><span>{Number(order.totalQty).toLocaleString()} pzas</span></div>
+                                                <div className="text-[10px] text-yellow-500 font-bold uppercase flex justify-between border-b border-slate-700 pb-1"><span>{order.model}</span><span>{isComposite ? 'MULTI' : order.totalQty}</span></div>
+                                                {isComposite && metrics.activePart && <div className="text-[9px] text-green-400 mt-1">Prod: {metrics.activePart.name}</div>}
                                                 <div className="h-1 w-full bg-slate-700 mt-1 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
                                             </div>
                                         )}
@@ -1421,17 +1135,16 @@
                                             {visibleMachines.map(m => {
                                                 const order = ordersData[m.id];
                                                 const metrics = calculateOrderMetrics(m.id, order, data, ALL_ROWS, visibilityConfig.days || []);
+                                                const isComp = order?.parts?.length > 0;
                                                 return (
                                                     <th key={m.id} className={`min-w-[160px] p-2 border-r border-slate-700 ${metrics.isPlanned ? 'bg-yellow-900/10' : ''}`}>
                                                         <div className="flex flex-col items-center">
                                                             <span className="text-xs font-bold text-blue-400">{m.name.replace('MAQ ','')}</span>
-                                                            {order && order.totalQty > 0 ? (
+                                                            {order && (order.totalQty > 0 || isComp) ? (
                                                                 <div className="mt-1 w-full px-2">
                                                                     <div className="flex justify-between items-center text-[9px] font-black text-yellow-400 uppercase leading-none mb-1"><span>{order.model}</span><span>{metrics.progress.toFixed(0)}%</span></div>
-                                                                    {canViewGraph && (
-                                                                        <div className="h-1 bg-slate-700 rounded-full overflow-hidden w-full"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>
-                                                                    )}
-                                                                    <span className="block text-[8px] text-slate-500 mt-1 font-bold">Fin: <span className={metrics.status === 'COMPLETADO' ? 'text-green-400' : 'text-red-400'}>{metrics.status === 'COMPLETADO' ? 'OK' : (metrics.finishDate ? new Date(metrics.finishDate).toLocaleDateString('es-MX',{day:'2-digit',month:'short'}) : '-')}</span></span>
+                                                                    {canViewGraph && <div className="h-1 bg-slate-700 rounded-full overflow-hidden w-full"><div className="h-full bg-blue-500" style={{width: `${metrics.progress}%`}}></div></div>}
+                                                                    <span className="block text-[8px] text-slate-500 mt-1 font-bold">Fin: <span className={metrics.status === 'COMPLETADO' ? 'text-green-400' : 'text-red-400'}>{metrics.status === 'COMPLETADO' ? 'OK' : (metrics.finishDate || '-')}</span></span>
                                                                 </div>
                                                             ) : <span className="text-[9px] text-slate-600">Sin Orden</span>}
                                                         </div>
@@ -1445,7 +1158,6 @@
                                             const rowId = row.id; 
                                             const rowData = data[rowId] || {};
                                             const isHiddenDay = visibilityConfig.days?.includes(rowId);
-                                            
                                             return (
                                                 <tr key={rowId} className={`border-b border-slate-700 hover:bg-slate-700/50 transition-colors ${isHiddenDay ? 'opacity-30' : ''}`}>
                                                     <td className="sticky left-0 bg-slate-800 p-2 border-r border-slate-700 text-xs font-bold text-slate-400 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">{row.shortDay} <br/> <span className="text-lg text-slate-200">{row.dateNum}</span></td>
@@ -1480,8 +1192,7 @@
 
             return (
                 <div className="h-full relative">
-                    {/* Se pasa la referencia al OrderManager */}
-                    {showOrderManager && <OrderManager ref={orderManagerRef} onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} />}
+                    {showOrderManager && <OrderManager ref={orderManagerRef} onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} user={user} onSaveConteo={handleSaveConteo} />}
                     {showVisibilityModal && <VisibilityModal onClose={() => setShowVisibilityModal(false)} currentHiddenMachines={visibilityConfig.machines || []} currentHiddenDays={visibilityConfig.days || []} onSaveVisibility={handleSaveVisibility} allRows={ALL_ROWS} />}
                     {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} onSelectDate={handleDateSelect} allRows={ALL_ROWS} />}
                     {canManageUsers && showUserManagementModal && <UserManagementModal onClose={() => setShowUserManagementModal(false)} users={usersData} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />}
