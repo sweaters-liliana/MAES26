@@ -278,6 +278,31 @@
              });
         };
 
+        // --- COMPONENTE DE CONFIRMACIÓN DE ARCHIVADO ---
+        const ArchiveModal = ({ onClose, onConfirm, machineName, orderModel }) => {
+            return (
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-sm flex items-center justify-center z-[70] p-4 fade-in" onClick={onClose}>
+                    <div className="bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm border border-slate-600 p-6 text-center animate-zoom-in" onClick={e => e.stopPropagation()}>
+                        <div className="bg-green-600/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500">
+                            <i data-lucide="archive" className="w-8 h-8 text-green-400"></i>
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-2">¿Confirmar Archivado?</h3>
+                        <p className="text-slate-400 text-sm mb-6">
+                            Estás a punto de finalizar el pedido <b>{orderModel}</b> en la <b>{machineName}</b>.
+                            <br/><br/>
+                            <span className="text-yellow-400 font-bold block bg-yellow-900/20 p-2 rounded border border-yellow-600/30">
+                                ⚠️ Los datos se moverán al historial y la máquina quedará libre para un nuevo pedido.
+                            </span>
+                        </p>
+                        <div className="flex gap-3">
+                            <button onClick={onClose} className="flex-1 py-3 bg-slate-700 rounded-lg text-white font-bold hover:bg-slate-600">Cancelar</button>
+                            <button onClick={onConfirm} className="flex-1 py-3 bg-green-600 rounded-lg text-white font-bold hover:bg-green-500 shadow-lg shadow-green-900/50">CONFIRMAR</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         const ProductionSlot = ({ slotData, index, disabled, onUpdate }) => {
             const [localModel, setLocalModel] = useState(slotData?.model || '');
             const [localQty, setLocalQty] = useState('');
@@ -490,7 +515,7 @@
             );
         };
 
-        const OrderManager = React.forwardRef(({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays, user, onSaveConteo, onArchiveOrder }, ref) => {
+        const OrderManager = React.forwardRef(({ onClose, onSaveOrders, onDeleteOrder, ordersData, allProductionData, allRows, hiddenDays, user, onSaveConteo, onRequestArchive }, ref) => {
             const [step, setStep] = useState(1);
             const [viewMode, setViewMode] = useState('list'); 
             const [historyOrders, setHistoryOrders] = useState([]);
@@ -686,7 +711,7 @@
                                 </div>
                             ) : viewMode === 'list' ? (
                                 <div className="h-full flex flex-col">
-                                    <div className="flex justify-between mb-4"><h2 className="text-xl font-bold">Pedidos Activos</h2><button onClick={handleStartCreate} className="bg-blue-600 px-4 py-2 rounded text-white font-bold">Nuevo</button></div>
+                                    <div className="flex justify-between mb-4"><h2>Pedidos Activos</h2><button onClick={handleStartCreate} className="bg-blue-600 px-4 py-2 rounded text-white font-bold">Nuevo</button></div>
                                     <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
                                         {MACHINES.filter(m => ordersData[m.id]?.totalQty > 0 || (ordersData[m.id]?.parts?.length > 0)).map(m => {
                                             const order = ordersData[m.id];
@@ -710,7 +735,7 @@
                                                     {isComplete && (
                                                         <div className="mt-2 mb-2 p-2 bg-green-600/20 border border-green-500 rounded text-center">
                                                             <p className="text-xs text-green-300 font-bold mb-1">¡PEDIDO AL 100%!</p>
-                                                            <button onClick={() => { if(confirm('¿Finalizar y archivar pedido? Desaparecerá de la lista activa.')) onArchiveOrder(m.id, order); }} className="bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2 px-4 rounded w-full flex items-center justify-center gap-2">
+                                                            <button onClick={() => onRequestArchive(m.id, order)} className="bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2 px-4 rounded w-full flex items-center justify-center gap-2">
                                                                 <i data-lucide="archive" className="w-3 h-3"></i> FINALIZAR Y ARCHIVAR
                                                             </button>
                                                         </div>
@@ -954,6 +979,11 @@
             const [showCalendar, setShowCalendar] = useState(false);
             const [showUserManagementModal, setShowUserManagementModal] = useState(false);
             const [deferredPrompt, setDeferredPrompt] = useState(null);
+            
+            // --- NUEVO: Estado para el modal de archivar ---
+            const [showArchiveModal, setShowArchiveModal] = useState(false);
+            const [orderToArchive, setOrderToArchive] = useState(null);
+
             const orderManagerRef = React.useRef(); 
 
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
@@ -987,9 +1017,11 @@
             };
 
             const handleSaveOrder = async (machineId, orderData) => { await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { ...orderData, lastUpdated: serverTimestamp(), updatedBy: user.name } }, { merge: true }); };
-            const handleDeleteOrder = async (machineId) => { await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, parts: [], lastUpdated: serverTimestamp() } }, { merge: true }); };
+            const handleDeleteOrder = async (machineId) => { 
+                // Al borrar pedido también limpiamos conteos
+                await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { totalQty: 0, parts: [], verifiedCounts: [], lastUpdated: serverTimestamp() } }, { merge: true }); 
+            };
             
-            // --- NUEVO: GUARDAR CONTEO ---
             const handleSaveConteo = async (machineId, conteoData) => {
                  const currentOrder = ordersData[machineId];
                  if (!currentOrder) return;
@@ -997,10 +1029,20 @@
                  await setDoc(doc(db, 'settings', 'orders'), { [machineId]: { verifiedCounts: newCounts } }, { merge: true });
             };
 
-            // --- NUEVO: ARCHIVAR PEDIDO ---
-            const handleArchiveOrder = async (machineId, order) => {
+            // --- NUEVO: PREPARAR ARCHIVADO (SOLO ABRE MODAL) ---
+            const handleRequestArchive = (machineId, order) => {
+                const machineName = MACHINES.find(m => m.id === machineId)?.name || machineId;
+                setOrderToArchive({ machineId, order, machineName });
+                setShowArchiveModal(true);
+            };
+
+            // --- NUEVO: CONFIRMAR ARCHIVADO (LÓGICA REAL) ---
+            const handleConfirmArchive = async () => {
+                if (!orderToArchive) return;
+                const { machineId, order } = orderToArchive;
+
                 try {
-                    // 1. Guardar en colección de historial
+                    // 1. Guardar en historial
                     await addDoc(collection(db, 'completed_orders'), {
                         ...order,
                         machineId,
@@ -1009,13 +1051,23 @@
                         finalStatus: 'COMPLETED'
                     });
                     
-                    // 2. Limpiar orden activa (Resetear máquina)
-                    // Importante: No borramos los 'slots' de produccion_2026, solo la configuración del pedido activo.
+                    // 2. LIMPIEZA PROFUNDA: Borrar TODO rastro del pedido en la configuración activa.
+                    // CRUCIAL: 'verifiedCounts': [] es lo que soluciona el bug.
                     await setDoc(doc(db, 'settings', 'orders'), { 
-                        [machineId]: { totalQty: 0, parts: [], lastUpdated: serverTimestamp() } 
+                        [machineId]: { 
+                            totalQty: 0, 
+                            parts: [], 
+                            model: '', 
+                            startDate: '', 
+                            verifiedCounts: [], // <-- ESTO EVITA QUE EL NUEVO PEDIDO HEREDE CONTEOS
+                            materials: [],
+                            operators: [],
+                            lastUpdated: serverTimestamp() 
+                        } 
                     }, { merge: true });
                     
-                    alert('Pedido finalizado y archivado correctamente.');
+                    setShowArchiveModal(false);
+                    setOrderToArchive(null);
                 } catch (e) {
                     console.error(e);
                     alert('Error al archivar: ' + e.message);
@@ -1190,10 +1242,11 @@
 
             return (
                 <div className="h-full relative">
-                    {showOrderManager && <OrderManager ref={orderManagerRef} onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} user={user} onSaveConteo={handleSaveConteo} onArchiveOrder={handleArchiveOrder} />}
+                    {showOrderManager && <OrderManager ref={orderManagerRef} onClose={() => setShowOrderManager(false)} onSaveOrders={handleSaveOrder} onDeleteOrder={handleDeleteOrder} ordersData={ordersData} allProductionData={data} allRows={ALL_ROWS} hiddenDays={visibilityConfig.days} user={user} onSaveConteo={handleSaveConteo} onRequestArchive={handleRequestArchive} />}
                     {showVisibilityModal && <VisibilityModal onClose={() => setShowVisibilityModal(false)} currentHiddenMachines={visibilityConfig.machines || []} currentHiddenDays={visibilityConfig.days || []} onSaveVisibility={handleSaveVisibility} allRows={ALL_ROWS} />}
                     {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} onSelectDate={handleDateSelect} allRows={ALL_ROWS} />}
                     {canManageUsers && showUserManagementModal && <UserManagementModal onClose={() => setShowUserManagementModal(false)} users={usersData} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />}
+                    {showArchiveModal && orderToArchive && <ArchiveModal onClose={() => setShowArchiveModal(false)} onConfirm={handleConfirmArchive} machineName={orderToArchive.machineName} orderModel={orderToArchive.order.model} />}
                     <div className="block md:hidden h-full"><MobileView /></div>
                     <div className="hidden md:block h-full"><DesktopView /></div>
                 </div>
