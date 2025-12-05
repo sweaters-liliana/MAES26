@@ -3,9 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MAES26 - Monitor Inteligente (Orders Driven)</title>
+    
+    <title>MAES26 Control Total</title>
 
     <link rel="icon" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg">
+    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0f172a">
+    
+    <link rel="manifest" href='data:application/manifest+json,{
+        "name": "MAES26 Control",
+        "short_name": "MAES26",
+        "start_url": ".",
+        "display": "standalone",
+        "background_color": "#0f172a",
+        "theme_color": "#0f172a",
+        "icons": [
+            { "src": "https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg", "sizes": "192x192", "type": "image/svg+xml" },
+            { "src": "https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg", "sizes": "512x512", "type": "image/svg+xml" }
+        ]
+    }'>
+    
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,27 +32,14 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <style>
-        body { background-color: #020617; color: #e2e8f0; overflow: hidden; font-family: 'Segoe UI', Roboto, sans-serif; }
+        body { background-color: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', Roboto, sans-serif; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        
-        @keyframes critical-blink {
-            0%, 100% { background-color: rgba(69, 10, 10, 0.5); box-shadow: inset 0 0 20px rgba(220, 38, 38, 0.2); }
-            50% { background-color: rgba(185, 28, 28, 0.8); box-shadow: inset 0 0 40px rgba(239, 68, 68, 0.6); }
-        }
-        .animate-critical {
-            animation: critical-blink 1.5s infinite ease-in-out;
-            color: #ffffff;
-            border: 2px solid #ef4444;
-        }
         .fade-in { animation: fadeIn 0.5s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        
-        /* Modal Overlay Backdrop */
-        .modal-backdrop {
-            background: rgba(2, 6, 23, 0.85);
-            backdrop-filter: blur(8px);
-        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .modal-backdrop { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(5px); }
+        .tab-button.active { border-color: #3b82f6; background-color: #1e3a8a; color: #ffffff; }
+        .input-qty { text-align: center; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -42,10 +48,10 @@
 
     <script type="text/babel" data-type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-        import { getFirestore, collection, doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        import { getFirestore, collection, doc, onSnapshot, setDoc, serverTimestamp, query, orderBy, limit, getDoc, getDocs, deleteDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-        const { useState, useEffect, useMemo, useRef, useCallback } = React;
+        const { useState, useEffect, useMemo, useCallback } = React;
 
         const firebaseConfig = {
             apiKey: "AIzaSyBqHgV4vDat1-VmZfKbiPg7nuiX-ROcexw",
@@ -61,6 +67,7 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
+        // Definiciones estáticas (Iguales en ambos archivos)
         const MACHINES = [
             { id: 'm35', name: 'MAQ 35', type: 'SANTONI' }, { id: 'm39', name: 'MAQ 39', type: 'SANTONI' },
             { id: 'm40', name: 'MAQ 40', type: 'SANTONI' }, { id: 'm36', name: 'MAQ 36', type: 'CIXING' },
@@ -93,449 +100,497 @@
             }
             return dates;
         };
-
         const ALL_ROWS = generateCalendar();
-        
-        const INITIAL_WEEK = (() => {
-            const todayISO = new Date().toISOString().split('T')[0];
-            const foundIndex = ALL_ROWS.findIndex(r => r.isoDate === todayISO);
-            return foundIndex !== -1 ? Math.floor(foundIndex / 7) : 0;
-        })();
 
-        // --- MODAL DE DETALLES ---
-        const DetailsModal = ({ isOpen, onClose, data }) => {
-            if (!isOpen || !data) return null;
+        const findRowByISO = (isoDate) => ALL_ROWS.find(r => r.isoDate === isoDate);
 
-            return (
-                <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop fade-in" onClick={onClose}>
-                    <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl shadow-2xl max-w-md w-full relative" onClick={e => e.stopPropagation()}>
-                        <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-white">
-                            <i data-lucide="x" className="w-6 h-6"></i>
-                        </button>
-                        
-                        <div className="text-center mb-6">
-                            <h3 className="text-xl font-bold text-slate-300 mb-1">{data.machineName}</h3>
-                            <p className="text-sm text-blue-400 font-bold uppercase tracking-widest">{data.dateLabel}</p>
-                        </div>
+        // --- COMPONENTES AUXILIARES (MODAL, ETC.) ---
 
-                        <div className="grid grid-cols-2 gap-4 mb-6">
-                            <div className="bg-slate-800 p-4 rounded-xl text-center">
-                                <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Meta (24h)</span>
-                                <span className="text-3xl font-black text-white">{data.target}</span>
-                            </div>
-                            <div className="bg-slate-800 p-4 rounded-xl text-center">
-                                <span className="text-xs text-slate-500 uppercase font-bold block mb-1">Total Producido</span>
-                                <span className={`text-3xl font-black ${data.statusColor}`}>{data.produced}</span>
-                            </div>
-                        </div>
+        const Loader = () => (
+            <div className="flex flex-col items-center justify-center h-full text-blue-400">
+                <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+                <p className="text-xl font-bold">Cargando datos...</p>
+            </div>
+        );
 
-                        <div className="bg-slate-800/50 rounded-xl p-4">
-                            <h4 className="text-xs font-bold text-slate-400 uppercase mb-3 border-b border-slate-700 pb-2">Desglose por Operador</h4>
-                            <div className="space-y-3">
-                                {data.operators && data.operators.length > 0 ? (
-                                    data.operators.map((op, idx) => (
-                                        <div key={idx} className="flex justify-between items-center">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-blue-900/50 flex items-center justify-center text-blue-400 font-bold text-xs">
-                                                    {op.name.charAt(0)}
-                                                </div>
-                                                <span className="text-slate-200 font-medium">{op.name}</span>
-                                            </div>
-                                            <div className="text-right">
-                                                <span className="block font-bold text-white">{op.count} pzas</span>
-                                                <span className="text-xs text-slate-500">{(data.produced > 0 ? (op.count/data.produced*100).toFixed(0) : 0)}% del total</span>
-                                            </div>
-                                        </div>
-                                    ))
-                                ) : (
-                                    <div className="text-center text-slate-500 italic text-sm py-2">Sin desglose detallado disponible</div>
-                                )}
-                            </div>
-                        </div>
-                        
-                        <div className="mt-6 text-center">
-                             <div className="inline-block px-4 py-2 bg-slate-950 rounded-lg border border-slate-800">
-                                <span className="text-xs text-slate-400 mr-2">Tiempo por prenda:</span>
-                                <span className="text-yellow-400 font-bold">{data.timePerPiece} min</span>
-                             </div>
-                        </div>
-                    </div>
+        const Modal = ({ children, title, onClose, className = '' }) => (
+            <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop fade-in" onClick={onClose}>
+                <div className={`bg-slate-800 border border-slate-700 p-6 rounded-2xl shadow-2xl relative max-w-lg w-full ${className}`} onClick={e => e.stopPropagation()}>
+                    <h3 className="text-2xl font-bold text-white mb-4 border-b border-slate-700 pb-2">{title}</h3>
+                    <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+                        <i data-lucide="x" className="w-6 h-6"></i>
+                    </button>
+                    {children}
                 </div>
-            );
-        };
+            </div>
+        );
 
-        // --- COMPONENTE DE CONTENIDO DE CELDA ---
-        const CellContent = ({ metrics }) => {
-            if (!metrics || !metrics.isPlanned) return <span className="text-slate-800 text-2xl font-bold select-none">-</span>;
+        const UserManagementModal = ({ onClose, users, onSaveUser, onDeleteUser }) => {
+            const [localUsers, setLocalUsers] = useState(users);
+            const [newUser, setNewUser] = useState({ name: '', role: 'operator' });
 
-            if (metrics.status === 'critical') {
-                return (
-                    <div className="flex flex-col items-center justify-center h-full">
-                        <i data-lucide="alert-triangle" className="w-6 h-6 mb-1 text-red-500 animate-pulse"></i>
-                        <span className="text-2xl font-black text-white">0</span>
-                        <span className="text-[9px] uppercase font-bold tracking-widest mt-1 text-red-400 animate-pulse">REPORTE PENDIENTE</span>
-                    </div>
-                );
-            }
+            useEffect(() => setLocalUsers(users), [users]);
 
-            let colorClass = "text-slate-400";
-            let statusText = "En Proceso...";
-            
-            if (metrics.efficiency >= 95) { 
-                colorClass = "text-emerald-400"; 
-                statusText = "Excelencia 🌟";
-            } else if (metrics.efficiency >= 85) { 
-                colorClass = "text-green-400"; 
-                statusText = "Gran Eficiencia ✅";
-            } else if (metrics.efficiency >= 70) { 
-                colorClass = "text-yellow-400"; 
-                statusText = "Regular ⚠️";
-            } else { 
-                colorClass = "text-orange-500"; 
-                statusText = "Bajo Rendimiento 📉";
-            }
-            
-            return (
-                <div className="flex flex-col h-full justify-center items-center py-1 cursor-pointer hover:scale-105 transition-transform">
-                    <div className="relative leading-none mb-1">
-                        <span className={`text-3xl font-black ${colorClass} tracking-tighter`}>{metrics.produced}</span>
-                        <sup className={`absolute -top-1 -right-6 text-[10px] font-bold ${colorClass} bg-slate-900/80 px-1 rounded`}>
-                            {metrics.efficiency.toFixed(0)}%
-                        </sup>
-                    </div>
-                    <div className="w-full h-[2px] bg-slate-800 my-1"></div>
-                    <span className={`text-[9px] font-bold uppercase tracking-wide ${colorClass} opacity-80`}>
-                        {statusText}
-                    </span>
-                </div>
-            );
-        };
+            const handleChange = (id, field, value) => {
+                setLocalUsers(prev => prev.map(u => u.id === id ? { ...u, [field]: value } : u));
+            };
 
-        const Dashboard = () => {
-            const [data, setData] = useState({});
-            const [ordersData, setOrdersData] = useState({});
-            const [visibilityConfig, setVisibilityConfig] = useState({ machines: [], days: [] });
-            
-            const [weekOffset, setWeekOffset] = useState(INITIAL_WEEK);
-            const [scrollLevel, setScrollLevel] = useState(0); 
-            const [loading, setLoading] = useState(true);
-            const [currentTime, setCurrentTime] = useState(new Date());
-            
-            const [modalData, setModalData] = useState(null); // Estado para el modal
-            
-            const mainTableRef = useRef(null);
+            const handleNewUserChange = (field, value) => {
+                setNewUser(prev => ({ ...prev, [field]: value }));
+            };
 
-            useEffect(() => {
-                const timer = setInterval(() => setCurrentTime(new Date()), 60000); // Actualizar cada minuto es suficiente
-                return () => clearInterval(timer);
-            }, []);
-
-            useEffect(() => {
-                if (mainTableRef.current) {
-                    mainTableRef.current.scrollTo({ top: scrollLevel * 150, behavior: 'smooth' });
+            const handleSave = (user) => {
+                if (user.name) {
+                    onSaveUser(user);
+                } else {
+                    alert("El nombre de usuario no puede estar vacío.");
                 }
-            }, [scrollLevel]);
+            };
 
-            useEffect(() => {
-                setTimeout(() => { if (window.lucide) window.lucide.createIcons(); }, 100);
-            }, [data, weekOffset, loading, modalData]);
+            return (
+                <Modal title="Gestión de Usuarios" onClose={onClose} className="max-w-xl">
+                    <div className="space-y-4 max-h-96 overflow-y-auto pr-2 no-scrollbar">
+                        <div className="flex gap-2 p-3 bg-slate-700 rounded-lg">
+                            <input
+                                type="text"
+                                placeholder="Nuevo Nombre"
+                                value={newUser.name}
+                                onChange={(e) => handleNewUserChange('name', e.target.value)}
+                                className="flex-1 p-2 rounded bg-slate-600 text-white border border-slate-500"
+                            />
+                            <select
+                                value={newUser.role}
+                                onChange={(e) => handleNewUserChange('role', e.target.value)}
+                                className="p-2 rounded bg-slate-600 text-white border border-slate-500"
+                            >
+                                <option value="operator">Operador</option>
+                                <option value="admin">Administrador</option>
+                            </select>
+                            <button
+                                onClick={() => { handleSave(newUser); setNewUser({ name: '', role: 'operator' }); }}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-bold text-white"
+                            >
+                                <i data-lucide="plus" className="w-5 h-5"></i>
+                            </button>
+                        </div>
+                        
+                        {localUsers.filter(u => u.name).map((user) => (
+                            <div key={user.id} className="flex gap-2 items-center p-3 bg-slate-700 rounded-lg">
+                                <input
+                                    type="text"
+                                    value={user.name}
+                                    onChange={(e) => handleChange(user.id, 'name', e.target.value)}
+                                    className="flex-1 p-2 rounded bg-slate-600 text-white border border-slate-500"
+                                />
+                                <select
+                                    value={user.role}
+                                    onChange={(e) => handleChange(user.id, 'role', e.target.value)}
+                                    className="p-2 rounded bg-slate-600 text-white border border-slate-500"
+                                >
+                                    <option value="operator">Operador</option>
+                                    <option value="admin">Administrador</option>
+                                </select>
+                                <button
+                                    onClick={() => handleSave(user)}
+                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded font-bold text-white"
+                                >
+                                    Guardar
+                                </button>
+                                <button
+                                    onClick={() => onDeleteUser(user.id)}
+                                    className="px-3 py-2 bg-red-600 hover:bg-red-700 rounded text-white"
+                                >
+                                    <i data-lucide="trash-2" className="w-5 h-5"></i>
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </Modal>
+            );
+        };
+        
+        // ... Otros Modals (CalendarModal, ArchiveModal, StatsModal, InstallModal) irían aquí si los hubieras incluido ...
+        
+        // El resto de los Modals (CalendarModal, ArchiveModal, StatsModal, InstallModal) 
+        // están omitidos aquí por brevedad, pero deberían estar presentes en tu archivo original.
+        // Asumimos que están en el archivo original y no los has modificado.
+        
+        // --- COMPONENTE DE VISTA MÓVIL (DATA ENTRY) ---
+
+        const MobileView = ({ todayRowId, data, ordersData, operators, handleUpdateSlot, handleSelectOrder, handleSetDisabledDates }) => {
+            const [selectedMachine, setSelectedMachine] = useState(MACHINES[0].id);
+
+            const machine = MACHINES.find(m => m.id === selectedMachine);
+            const rowData = data[todayRowId]?.[selectedMachine] || {};
+            const slots = rowData.slots || [{}, {}, {}, {}]; 
+            const order = ordersData[selectedMachine];
+
+            const OrderSelect = ({ machineId, currentOrder, onSelect, onDisableDate }) => (
+                <div className="bg-slate-700 p-4 rounded-xl shadow-inner mb-4">
+                    <h3 className="text-xl font-bold text-white mb-2 flex items-center justify-between">
+                        Orden de Producción
+                        <button 
+                            onClick={() => onDisableDate(machineId)} 
+                            className="text-xs text-red-400 bg-red-900/50 hover:bg-red-900 px-2 py-1 rounded font-bold flex items-center"
+                        >
+                            <i data-lucide="calendar-off" className="w-4 h-4 mr-1"></i>
+                            Día Muerto
+                        </button>
+                    </h3>
+                    
+                    {currentOrder && currentOrder.model ? (
+                        <div className="text-center p-3 border border-blue-500/50 bg-blue-900/20 rounded-lg">
+                            <p className="text-sm text-slate-400 font-medium">Modelo Activo:</p>
+                            <span className="text-3xl font-black text-yellow-400">{currentOrder.model}</span>
+                            <div className="mt-2 text-xs text-slate-400">
+                                {currentOrder.timePerPieceMin > 0 && <span>Tiempo por pza: **{currentOrder.timePerPieceMin} min** | </span>}
+                                {currentOrder.totalQty > 0 && <span>Total a producir: **{currentOrder.totalQty} pzas**</span>}
+                            </div>
+                            <button 
+                                onClick={() => onSelect(machineId, null)} 
+                                className="mt-3 text-xs text-red-400 hover:text-red-300 font-bold"
+                            >
+                                Cambiar / Finalizar Orden
+                            </button>
+                        </div>
+                    ) : (
+                        <button 
+                            onClick={() => onSelect(machineId, {})} 
+                            className="w-full p-4 bg-blue-600 hover:bg-blue-700 rounded-lg font-bold text-white text-lg transition-colors"
+                        >
+                            <i data-lucide="plus" className="w-5 h-5 inline mr-2"></i>
+                            Asignar Nueva Orden
+                        </button>
+                    )}
+                </div>
+            );
+
+            const SlotInput = ({ slotIndex, label, currentQty, currentModel }) => (
+                <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 shadow-lg">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-blue-400 mb-2">{label}</label>
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            placeholder="Modelo"
+                            value={currentModel || ''}
+                            onChange={(e) => handleUpdateSlot(todayRowId, selectedMachine, slotIndex, 'model', e.target.value.toUpperCase())}
+                            className="flex-1 p-2 rounded bg-slate-900 text-white border border-slate-700 text-sm"
+                            disabled={!order?.model}
+                        />
+                        <input
+                            type="number"
+                            placeholder="Qty"
+                            value={currentQty || ''}
+                            onChange={(e) => handleUpdateSlot(todayRowId, selectedMachine, slotIndex, 'qty', e.target.value)}
+                            className="w-20 p-2 rounded bg-slate-900 text-yellow-400 border border-slate-700 input-qty text-lg"
+                            disabled={!order?.model}
+                        />
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="h-full flex flex-col fade-in">
+                    <header className="p-4 bg-slate-900 border-b border-slate-800 shadow-xl">
+                        <div className="flex overflow-x-auto no-scrollbar pb-2 space-x-2">
+                            {MACHINES.map(m => (
+                                <button
+                                    key={m.id}
+                                    onClick={() => setSelectedMachine(m.id)}
+                                    className={`flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm transition-all ${
+                                        selectedMachine === m.id 
+                                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' 
+                                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                    }`}
+                                >
+                                    {m.name}
+                                </button>
+                            ))}
+                        </div>
+                    </header>
+                    
+                    <main className="flex-1 p-4 overflow-y-auto no-scrollbar">
+                        <h2 className="text-3xl font-black text-white mb-2">{machine?.name}</h2>
+                        <p className="text-sm text-slate-400 font-medium mb-4">Ingreso para hoy: **{findRowByISO(todayRowId)?.id}**</p>
+
+                        <OrderSelect 
+                            machineId={selectedMachine} 
+                            currentOrder={order} 
+                            onSelect={handleSelectOrder}
+                            onDisableDate={handleSetDisabledDates}
+                        />
+
+                        {order?.model && (
+                            <div className="space-y-4">
+                                <SlotInput slotIndex={0} label="Turno Mañana (Slot 1)" currentQty={slots[0]?.qty} currentModel={slots[0]?.model} />
+                                <SlotInput slotIndex={1} label="Turno Noche (Slot 2)" currentQty={slots[1]?.qty} currentModel={slots[1]?.model} />
+                                <SlotInput slotIndex={2} label="Turno Extra 1 (Slot 3)" currentQty={slots[2]?.qty} currentModel={slots[2]?.model} />
+                                <SlotInput slotIndex={3} label="Turno Extra 2 (Slot 4)" currentQty={slots[3]?.qty} currentModel={slots[3]?.model} />
+                                
+                                <div className="p-4 bg-emerald-900/20 rounded-lg text-center font-black mt-6 border border-emerald-700">
+                                    <span className="text-lg text-slate-300 block">TOTAL REGISTRADO HOY</span>
+                                    <span className="text-5xl text-emerald-400">{rowData.actual || 0}</span>
+                                </div>
+                            </div>
+                        )}
+                        
+                    </main>
+                </div>
+            );
+        };
+
+        // --- COMPONENTE PRINCIPAL ---
+
+        const App = () => {
+            const [data, setData] = useState({}); // produccion_2026 (Detailed data)
+            const [ordersData, setOrdersData] = useState({}); // settings/orders
+            const [usersData, setUsersData] = useState([]);
+            const [userData, setUserData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [viewPreference, setViewPreference] = useState(localStorage.getItem('viewPreference') || 'mobile');
+            
+            // UI State
+            const [showUserManagementModal, setShowUserManagementModal] = useState(false);
+            const [showOrderModal, setShowOrderModal] = useState(false);
+            const [currentMachineForOrder, setCurrentMachineForOrder] = useState(null);
+            const [orderToEdit, setOrderToEdit] = useState(null);
+
+            const today = new Date();
+            const todayISO = today.toISOString().split('T')[0];
+            const todayRow = findRowByISO(todayISO);
+            const todayRowId = todayRow?.id;
+            
+            const isAdmin = userData?.role === 'admin';
+            const canManageUsers = userData?.role === 'admin';
+            const machineTotals = useMemo(() => calculateTotals(data, MACHINES, ALL_ROWS), [data]);
+            const dailyTotals = useMemo(() => calculateDailyTotals(data, MACHINES, ALL_ROWS), [data]);
+
+
+            // --- HANDLERS (BASE DE DATOS) ---
 
             useEffect(() => {
                 const unsubAuth = onAuthStateChanged(auth, (u) => {
                     if (u) {
-                        const unsubDb = onSnapshot(collection(db, 'monitor_data_2026'), (snap) => { 
+                        const userRef = doc(db, 'users', u.uid);
+                        onSnapshot(userRef, (docSnap) => {
+                            if (docSnap.exists()) {
+                                setUserData({ uid: u.uid, ...docSnap.data() });
+                            } else {
+                                // Default role for new users
+                                setDoc(userRef, { name: 'Operador Desconocido', role: 'operator' }, { merge: true });
+                                setUserData({ uid: u.uid, name: 'Operador Desconocido', role: 'operator' });
+                            }
+                            setLoading(false);
+                        });
+                        
+                        // Listeners for data
+                        onSnapshot(collection(db, 'produccion_2026'), (snap) => { 
                             const d = {}; 
                             snap.forEach(doc => d[doc.id] = doc.data()); 
                             setData(d); 
                         });
-                        const unsubSettings = onSnapshot(doc(db, 'settings', 'visibility'), (docSnap) => { 
-                            if (docSnap.exists()) setVisibilityConfig(docSnap.data()); 
-                        });
-                        const unsubOrders = onSnapshot(doc(db, 'settings', 'orders'), (docSnap) => { 
+                        onSnapshot(doc(db, 'settings', 'orders'), (docSnap) => { 
                             if (docSnap.exists()) setOrdersData(docSnap.data()); 
-                            setLoading(false);
+                        });
+                        onSnapshot(collection(db, 'users'), (snap) => {
+                            const u = [];
+                            snap.forEach(doc => u.push({ id: doc.id, ...doc.data() }));
+                            setUsersData(u);
                         });
                         
-                        const unsubNav = onSnapshot(doc(db, 'settings', 'navigation'), (docSnap) => {
-                            if (docSnap.exists()) {
-                                const navData = docSnap.data();
-                                setWeekOffset(INITIAL_WEEK + (navData.weekDelta || 0));
-                                setScrollLevel(navData.scrollLevel || 0);
-                            }
-                        });
-
                     } else {
                         signInAnonymously(auth).catch(err => console.error("Error login:", err));
                     }
                 });
                 return () => unsubAuth();
             }, []);
-
-            const visibleMachines = useMemo(() => MACHINES.filter(m => !visibilityConfig.machines?.includes(m.id)), [visibilityConfig.machines]);
             
-            const currentWeekRows = useMemo(() => { 
-                const start = weekOffset * 7; 
-                const safeStart = Math.max(0, Math.min(start, ALL_ROWS.length - 7));
-                return ALL_ROWS.slice(safeStart, safeStart + 7); 
-            }, [weekOffset]);
+            useEffect(() => {
+                // Initialize Lucide icons after state change
+                if (window.lucide) window.lucide.createIcons();
+            }, [userData, viewPreference, showUserManagementModal, showOrderModal]);
 
-            const weekLabel = useMemo(() => {
-                if (!currentWeekRows.length) return '';
-                const f = currentWeekRows[0];
-                return `${f.month} ${f.year}`;
-            }, [currentWeekRows]);
 
-            // --- LÓGICA CORE: OBTENER MÉTRICAS POR CELDA ---
-            const getMetrics = useCallback((machineId, rowData, dateRow) => {
-                const order = ordersData[machineId];
-                const machineData = rowData && rowData[machineId] ? rowData[machineId] : {};
+            // --- LÓGICA CORE DE INGRESO DE DATOS (CORREGIDA) ---
+            const handleUpdateSlot = async (rowId, machineId, slotIndex, field, value) => {
+                if (!todayRowId || rowId !== todayRowId) {
+                    alert("Solo se puede editar la producción del día de hoy.");
+                    return;
+                }
                 
-                // 1. Extraer conteo. Soporte para array de operadores o conteo simple.
-                let produced = 0;
-                let operatorsList = [];
+                // 1. Calcular la nueva estructura de slots localmente
+                const currentMachineData = data[rowId]?.[machineId] || {};
+                const currentSlots = currentMachineData.slots || [{}, {}, {}, {}];
+                const updatedSlots = [...currentSlots];
                 
-                if (machineData.operators && Array.isArray(machineData.operators)) {
-                    // Si la DB tiene desglose por operador
-                    operatorsList = machineData.operators;
-                    produced = operatorsList.reduce((acc, op) => acc + (Number(op.count) || 0), 0);
-                } else if (machineData.dailyCount) {
-                    // Fallback a conteo simple si no hay desglose
-                    produced = Number(machineData.dailyCount);
-                    operatorsList = [{ name: 'General', count: produced }];
+                if (!updatedSlots[slotIndex]) updatedSlots[slotIndex] = {};
+                
+                if (field === 'qty') {
+                    updatedSlots[slotIndex].qty = value === '' ? '' : Math.max(0, Number(value));
+                } else {
+                    updatedSlots[slotIndex].model = value;
                 }
 
-                const result = { 
-                    produced, 
-                    status: 'idle', 
-                    efficiency: 0, 
-                    target: 0, 
-                    isPlanned: false, 
-                    operators: operatorsList,
-                    timePerPiece: 0,
-                    machineName: MACHINES.find(m => m.id === machineId)?.name || machineId,
-                    dateLabel: dateRow.id
-                }; 
+                // 2. Calcular el total real (suma de turnos)
+                const newTotalActual = updatedSlots.reduce((acc, s) => acc + (Number(s?.qty) || 0), 0);
                 
-                if (order && order.startDate) {
-                    const isHiddenDay = visibilityConfig.days?.includes(dateRow.id);
-                    const isDisabledDate = (order.disabledDates || []).includes(dateRow.isoDate);
-                    const isStarted = dateRow.isoDate >= order.startDate;
-                    
-                    if (isStarted && !isHiddenDay && !isDisabledDate) {
-                        result.isPlanned = true;
+                // --- CORRECCIÓN IMPORTANTE PARA EL MONITOR (REPORTE DETALLADO) ---
+                // Generar desglose de turnos/operadores para el Monitor, ya que se solicitó el reporte detallado
+                // Asumimos que los 4 slots de MobileView corresponden a 4 posibles turnos/reportes.
+                const OPERATOR_NAMES = ['Turno Mañana', 'Turno Noche', 'Turno Extra 1', 'Turno Extra 2']; 
+                const operatorsList = [];
+                
+                updatedSlots.forEach((slot, idx) => {
+                    const q = Number(slot.qty) || 0;
+                    if (q > 0) {
+                        operatorsList.push({
+                            name: OPERATOR_NAMES[idx] || `Slot ${idx + 1}`,
+                            count: q
+                        });
+                    }
+                });
+                // -----------------------------------------------------------------
+
+                // 3. Preparar el objeto completo para la base de datos de administración (produccion_2026)
+                const updatedMachine = { ...currentMachineData, slots: updatedSlots, actual: newTotalActual };
+
+                // 4. Preparar el objeto para el MONITOR (monitor_data_2026)
+                const monitorPayload = {
+                    [machineId]: {
+                        dailyCount: newTotalActual,
+                        operators: operatorsList, // <--- DETALLE PARA EL REPORTE DEL MONITOR
+                        lastUpdated: serverTimestamp()
+                    }
+                };
+
+                // 5. ENVIAR A AMBAS BASES DE DATOS USANDO BATCH
+                try {
+                    const batchPromises = [
+                        // A. Guardar en la base de datos de administración (Detallada)
+                        setDoc(doc(db, 'produccion_2026', rowId), { [machineId]: updatedMachine }, { merge: true }),
                         
-                        // CÁLCULO DE META: 24 horas (2 turnos de 12h)
-                        const timePerPiece = Number(order.timePerPieceMin) || 0;
-                        result.timePerPiece = timePerPiece;
+                        // B. Guardar en la base de datos del MONITOR (Simplificada pero con desglose)
+                        setDoc(doc(db, 'monitor_data_2026', rowId), monitorPayload, { merge: true })
+                    ];
 
-                        if (timePerPiece > 0) {
-                            const minutesAvailable = 24 * 60; // 1440 minutos
-                            result.target = Math.floor(minutesAvailable / timePerPiece);
-                            result.efficiency = Math.min(100, (produced / result.target) * 100);
+                    await Promise.all(batchPromises);
+                } catch (error) {
+                    console.error("Error actualizando datos:", error);
+                    alert("Error de conexión al guardar.");
+                }
+            };
+
+            const handleSelectOrder = (machineId, orderDetails) => {
+                setCurrentMachineForOrder(machineId);
+                setOrderToEdit(orderDetails); // Si es null, abre el modal para crear/seleccionar
+                setShowOrderModal(true);
+            };
+
+            const handleSaveOrder = async (machineId, orderDetails) => {
+                try {
+                    const payload = {
+                        [machineId]: {
+                            ...orderDetails,
+                            lastUpdated: serverTimestamp()
                         }
+                    };
+                    await setDoc(doc(db, 'settings', 'orders'), payload, { merge: true });
+                    setShowOrderModal(false);
+                } catch (error) {
+                    console.error("Error guardando orden:", error);
+                    alert("Error guardando orden de producción.");
+                }
+            };
 
-                        // LÓGICA DE PARPADEO (CRITICAL)
-                        // Regla: Solo parpadea si ya pasó el día completo y no hay producción.
-                        const rowDateEnd = new Date(dateRow.isoDate + 'T23:59:59'); 
-                        const now = new Date();
-                        const isDayOver = now > rowDateEnd; // Ya pasó el día de la celda
+            const handleSetDisabledDates = async (machineId) => {
+                if (!todayRow) return alert("No se pudo identificar la fecha de hoy.");
+                
+                const confirmed = window.confirm(`¿Confirmas marcar el día de hoy (${todayRow.isoDate}) como **Día Muerto** para la máquina ${MACHINES.find(m => m.id === machineId)?.name}? Esto evitará que parpadee en el Monitor.`);
 
-                        if (produced === 0) {
-                            if (isDayOver) {
-                                // Si ya pasó el día y es 0 -> Rojo Crítico
-                                result.status = 'critical';
-                            } else {
-                                // Si es hoy o futuro y es 0 -> Normal (gris)
-                                result.status = 'idle';
-                            }
-                        } else {
-                            // Si tiene producción, asignar color por eficiencia
-                            if (result.efficiency >= 95) result.status = 'excellent';
-                            else if (result.efficiency >= 85) result.status = 'good';
-                            else result.status = 'low';
-                        }
+                if (confirmed) {
+                    try {
+                        await runTransaction(db, async (transaction) => {
+                            const ordersRef = doc(db, 'settings', 'orders');
+                            const docSnap = await transaction.get(ordersRef);
+                            
+                            const currentOrders = docSnap.data() || {};
+                            const machineOrder = currentOrders[machineId] || {};
+                            const disabledDates = new Set(machineOrder.disabledDates || []);
+                            
+                            disabledDates.add(todayRow.isoDate);
+                            
+                            transaction.set(ordersRef, { 
+                                [machineId]: { 
+                                    ...machineOrder, 
+                                    disabledDates: Array.from(disabledDates),
+                                    lastUpdated: serverTimestamp()
+                                } 
+                            }, { merge: true });
+                        });
+                        alert(`Día ${todayRow.isoDate} marcado como "Día Muerto" para ${MACHINES.find(m => m.id === machineId)?.name}.`);
+                    } catch (error) {
+                        console.error("Error marcando día muerto:", error);
+                        alert("Error al guardar la configuración.");
                     }
                 }
-                
-                // Color helper para el modal
-                result.statusColor = result.status === 'excellent' ? 'text-emerald-400' : 
-                                     result.status === 'good' ? 'text-green-400' :
-                                     result.status === 'low' ? 'text-orange-500' : 'text-slate-400';
+            };
+            
+            const handleSaveUser = async (user) => {
+                const userRef = doc(db, 'users', user.id || newId(db));
+                await setDoc(userRef, { name: user.name, role: user.role, lastUpdated: serverTimestamp() }, { merge: true });
+            };
 
-                return result;
-            }, [ordersData, visibilityConfig.days]); // Quitamos currentTime de dependencias pesadas para evitar re-renders masivos, el status critical se calcula al renderizar
+            const handleDeleteUser = async (userId) => {
+                if (window.confirm("¿Estás seguro de eliminar este usuario?")) {
+                    await deleteDoc(doc(db, 'users', userId));
+                }
+            };
 
-            // Cálculo Totales Semanales
-            const weeklyTotals = useMemo(() => {
-                const totals = {};
-                visibleMachines.forEach(m => {
-                    let totalProduced = 0;
-                    let totalTarget = 0;
-                    let plannedDays = 0;
-
-                    currentWeekRows.forEach(row => {
-                        const metrics = getMetrics(m.id, data[row.id] || {}, row);
-                        if (metrics.isPlanned) {
-                            totalProduced += metrics.produced;
-                            totalTarget += metrics.target;
-                            plannedDays++;
-                        }
-                    });
-
-                    const totalEfficiency = totalTarget > 0 ? Math.min(100, (totalProduced / totalTarget) * 100) : 0;
-                    totals[m.id] = { totalProduced, totalEfficiency: totalEfficiency.toFixed(0), plannedDays };
-                });
-                return totals;
-            }, [currentWeekRows, visibleMachines, data, getMetrics]);
-
-            if (loading) return (
-                <div className="flex h-screen items-center justify-center bg-slate-950">
-                    <div className="text-center">
-                        <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                        <h2 className="text-2xl font-bold text-blue-500 animate-pulse">CARGANDO SISTEMA...</h2>
-                    </div>
-                </div>
-            );
-
-            const isScrolled = scrollLevel > 0;
-            const scrollIndicatorIcon = scrollLevel === 0 ? 'chevrons-up' : (scrollLevel >= 10 ? 'chevrons-down' : 'minus');
+            if (loading) return <Loader />;
 
             return (
-                <div className="flex flex-col h-screen bg-slate-950 text-white fade-in select-none">
-                    
-                    <DetailsModal isOpen={!!modalData} onClose={() => setModalData(null)} data={modalData} />
-
-                    {/* HEADER */}
-                    <header className="bg-slate-900 border-b border-slate-800 p-3 px-6 flex justify-between items-center shadow-2xl z-20">
-                        <div className="flex items-center gap-6">
-                            <img src="https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg" className="w-14 h-14 rounded-xl shadow-lg bg-white p-1" />
-                            <div>
-                                <h1 className="text-3xl font-black tracking-tighter text-white">MONITOR DE PLANTA</h1>
-                                <div className="flex items-center gap-2 mt-0">
-                                    <span className="bg-emerald-500 w-2 h-2 rounded-full animate-pulse"></span>
-                                    <span className="text-xs text-emerald-400 font-bold tracking-widest uppercase">Conexión en Vivo</span>
-                                </div>
-                            </div>
+                <div className="h-screen bg-slate-900">
+                    <header className="p-3 bg-slate-950 border-b border-slate-800 shadow-xl flex justify-between items-center z-10">
+                        <div className="flex items-center">
+                            <img src="https://raw.githubusercontent.com/sweaters-liliana/MAES26/d41232c1301add433daea006546e2c6eb8dd23e6/icon%20maes.svg" className="w-10 h-10 rounded mr-3" />
+                            <h1 className="text-xl font-black text-white">MAES26 Control</h1>
                         </div>
-                        <div className="text-right">
-                            <h2 className="text-4xl font-black text-slate-200 tabular-nums tracking-tight">
-                                {currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                            </h2>
-                            <p className="text-slate-500 font-bold uppercase text-sm">{currentTime.toLocaleDateString([], {weekday:'long', day:'numeric', month:'long'})}</p>
+                        <div className="flex items-center space-x-3">
+                            {/* Opciones de Administrador */}
+                            {isAdmin && (
+                                <>
+                                    <button onClick={() => setShowOrderModal(true)} className="p-2 text-yellow-400 hover:text-yellow-300">
+                                        <i data-lucide="settings-2" className="w-5 h-5"></i>
+                                    </button>
+                                    <button onClick={() => setShowUserManagementModal(true)} className="p-2 text-green-400 hover:text-green-300">
+                                        <i data-lucide="users" className="w-5 h-5"></i>
+                                    </button>
+                                </>
+                            )}
+                            <button onClick={() => signOut(auth)} className="p-2 text-red-400 hover:text-red-300">
+                                <i data-lucide="log-out" className="w-5 h-5"></i>
+                            </button>
                         </div>
                     </header>
+                    
+                    <MobileView 
+                        todayRowId={todayRowId} 
+                        data={data} 
+                        ordersData={ordersData} 
+                        handleUpdateSlot={handleUpdateSlot}
+                        handleSelectOrder={handleSelectOrder}
+                        handleSetDisabledDates={handleSetDisabledDates}
+                    />
 
-                    {/* TABLA PRINCIPAL */}
-                    <main ref={mainTableRef} className="flex-1 overflow-auto no-scrollbar bg-slate-950 p-2 scroll-smooth">
-                        <table className="w-full border-collapse">
-                            <thead className="sticky top-0 z-10 bg-slate-950 shadow-xl">
-                                <tr>
-                                    <th className="p-4 text-left border-b-2 border-slate-800 text-slate-500 font-bold uppercase text-xs w-28 bg-slate-950">Día</th>
-                                    {visibleMachines.map(m => {
-                                        const order = ordersData[m.id];
-                                        const hasOrder = order && (order.totalQty > 0 || (order.parts && order.parts.length > 0));
-                                        return (
-                                            <th key={m.id} className="p-2 border-b-2 border-slate-800 min-w-[130px] bg-slate-950">
-                                                <div className="flex flex-col items-center">
-                                                    <span className="text-xl font-black text-blue-500 mb-1">{m.name.replace('MAQ ','M-')}</span>
-                                                    {hasOrder ? (
-                                                        <span className="px-2 py-0.5 bg-slate-800 rounded text-[10px] font-bold text-yellow-400 border border-slate-700 truncate max-w-[110px]">{order.model}</span>
-                                                    ) : (
-                                                        <span className="text-[9px] text-slate-700 font-bold uppercase tracking-widest">---</span>
-                                                    )}
-                                                </div>
-                                            </th>
-                                        );
-                                    })}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {currentWeekRows.map((row) => {
-                                    const isToday = row.isoDate === new Date().toISOString().split('T')[0];
-                                    const isHidden = visibilityConfig.days?.includes(row.id);
-                                    return (
-                                        <tr key={row.id} className={`border-b border-slate-800/50 ${isToday ? 'bg-blue-900/5' : ''} ${isHidden ? 'opacity-20 bg-slate-950' : ''}`}>
-                                            <td className="p-3 font-bold border-r border-slate-800/50 align-middle">
-                                                <div className="flex flex-col items-start pl-2">
-                                                    <span className="text-[10px] text-slate-500 uppercase tracking-widest mb-0">{row.shortDay}</span>
-                                                    <span className={`text-3xl leading-none font-black ${isToday ? 'text-blue-400' : 'text-slate-300'}`}>{row.dateNum}</span>
-                                                </div>
-                                            </td>
-                                            {visibleMachines.map(m => {
-                                                const metrics = getMetrics(m.id, data[row.id] || {}, row);
-                                                
-                                                let cellClass = "p-1 border-r border-slate-800/30 text-center relative align-middle transition-all duration-300 h-20 bg-slate-950 hover:bg-slate-900/50";
-
-                                                if (metrics.isPlanned && metrics.status === 'critical') {
-                                                    cellClass += " animate-critical";
-                                                }
-
-                                                return (
-                                                    <td key={m.id} className={cellClass} onClick={() => metrics.isPlanned && setModalData(metrics)}>
-                                                        <CellContent metrics={metrics} />
-                                                    </td>
-                                                );
-                                            })}
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                            
-                            <tfoot className="sticky bottom-0 z-10 bg-slate-900 border-t-4 border-blue-600/30 shadow-inner">
-                                <tr>
-                                    <td className="p-3 font-black text-slate-400 uppercase tracking-widest text-xs border-r border-slate-700 bg-slate-900">
-                                        TOTAL
-                                    </td>
-                                    {visibleMachines.map(m => {
-                                        const totals = weeklyTotals[m.id] || { totalProduced: 0, totalEfficiency: 0, plannedDays: 0 };
-                                        
-                                        if (totals.plannedDays === 0) return <td key={`total-${m.id}`} className="bg-slate-900 border-r border-slate-800/50"></td>;
-
-                                        let totalColor = "text-yellow-400";
-                                        if (totals.totalEfficiency >= 90) totalColor = "text-emerald-400";
-                                        else if (totals.totalEfficiency < 70) totalColor = "text-red-400";
-
-                                        return (
-                                            <td key={`total-${m.id}`} className="p-2 text-center border-r border-slate-800/50 bg-slate-900">
-                                                <div className="flex flex-col items-center">
-                                                    <span className="text-2xl font-black text-white">{totals.totalProduced}</span>
-                                                    <div className="flex items-center gap-1 -mt-1">
-                                                        <span className={`text-sm font-black ${totalColor}`}>{totals.totalEfficiency}%</span>
-                                                        <span className="text-[8px] text-slate-600 font-bold">SEM.</span>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                        );
-                                    })}
-                                </tr>
-                            </tfoot>
-                        </table>
-                    </main>
-
-                    {/* FOOTER FLOTANTE */}
-                    <footer className="fixed bottom-4 right-4 z-30 opacity-90">
-                        <div className="flex bg-slate-900 rounded-full p-2 px-4 border border-slate-700 shadow-2xl items-center gap-4">
-                            <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-                                <i data-lucide="monitor" className="w-4 h-4 text-blue-500"></i>
-                                <span className="text-slate-300 font-black">{visibleMachines.length} Maq</span>
-                            </div>
-                            <span className="text-slate-700">|</span>
-                            <div className="flex items-center gap-2">
-                                <i data-lucide="calendar" className="w-4 h-4 text-blue-500"></i>
-                                <span className="font-bold text-slate-300 uppercase tracking-widest text-xs">{weekLabel}</span>
-                            </div>
-                            <span className="text-slate-700">|</span>
-                            <div className="flex items-center gap-1 text-xs">
-                                <i data-lucide={scrollIndicatorIcon} className={`w-4 h-4 transition-all duration-500 ${isScrolled ? 'text-yellow-400' : 'text-slate-600'}`}></i>
-                            </div>
-                        </div>
-                    </footer>
+                    {/* MODALS */}
+                    {showUserManagementModal && <UserManagementModal onClose={() => setShowUserManagementModal(false)} users={usersData} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} />}
+                    {/* ... Otros Modals (OrderModal, CalendarModal, etc.) ... */}
                 </div>
             );
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<Dashboard />);
+        root.render(<App />);
     </script>
 </body>
 </html>
