@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0f172a">
+    
+    <title>MAES26TV REMOTE</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { background-color: #020617; color: white; user-select: none; -webkit-tap-highlight-color: transparent; }
+        .btn-panel {
+            background: linear-gradient(145deg, #1e293b, #0f172a);
+            box-shadow: 5px 5px 10px #0b1120, -5px -5px 10px #2a3a52;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .btn-panel:active { transform: scale(0.96); box-shadow: inset 5px 5px 10px #0b1120; }
+        .btn-main {
+            background: radial-gradient(circle, #1e293b 0%, #0f172a 100%);
+            border: 2px solid rgba(6, 182, 212, 0.2);
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.1);
+        }
+        .btn-main:active { border-color: rgba(6, 182, 212, 0.8); }
+    </style>
+</head>
+<body>
+    <div id="root" class="h-screen w-screen bg-slate-950"></div>
+
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        import { getFirestore, doc, onSnapshot, updateDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const { useState, useEffect } = React;
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBqHgV4vDat1-VmZfKbiPg7nuiX-ROcexw",
+            authDomain: "cirineo-cec21.firebaseapp.com",
+            projectId: "cirineo-cec21",
+            storageBucket: "cirineo-cec21.firebasestorage.app",
+            messagingSenderId: "620210618284",
+            appId: "1:620210618284:web:482bab9bf74650fff18409"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        const MACHINES = [
+            { id: 'm35', name: '35' }, { id: 'm39', name: '39' }, { id: 'm40', name: '40' },
+            { id: 'm36', name: '36' }, { id: 'm38', name: '38' }, { id: 'm37', name: '37' },
+            { id: 'm29', name: '29' }, { id: 'm28', name: '28' }, { id: 'm27', name: '27' },
+            { id: 'm33', name: '33' }, { id: 'm1',  name: '01' }, { id: 'm30', name: '30' },
+            { id: 'm31', name: '31' }, { id: 'm6',  name: '06' }, { id: 'm32', name: '32' },
+            { id: 'm13', name: '13' }, { id: 'm12', name: '12' }, { id: 'm24', name: '24' },
+            { id: 'm8',  name: '08' },
+        ];
+
+        const RemoteControl = () => {
+            const [visibility, setVisibility] = useState({ machines: [] });
+            const [navState, setNavState] = useState({ weekDelta: 0, scrollLevel: 0 });
+            const [connected, setConnected] = useState(false);
+
+            useEffect(() => {
+                signInAnonymously(auth).then(() => setConnected(true));
+                const unsubVis = onSnapshot(doc(db, 'settings', 'visibility'), (s) => {
+                    if(s.exists()) setVisibility(s.data());
+                });
+                const unsubNav = onSnapshot(doc(db, 'settings', 'navigation'), (s) => {
+                    if(s.exists()) setNavState(s.data());
+                    else setDoc(doc(db, 'settings', 'navigation'), { weekDelta: 0, scrollLevel: 0 });
+                });
+                return () => { unsubVis(); unsubNav(); };
+            }, []);
+
+            const updateNav = async (type, delta) => {
+                const navRef = doc(db, 'settings', 'navigation');
+                const currentNav = navState;
+                if (type === 'week') {
+                    await updateDoc(navRef, { weekDelta: (currentNav.weekDelta || 0) + delta, scrollLevel: 0 });
+                } else if (type === 'scroll') {
+                    await updateDoc(navRef, { scrollLevel: Math.max(0, (currentNav.scrollLevel || 0) + delta) });
+                } else if (type === 'reset') {
+                    await updateDoc(navRef, { weekDelta: 0, scrollLevel: 0 });
+                }
+            };
+
+            const toggleMachine = async (id) => {
+                const isHidden = visibility.machines?.includes(id);
+                let newMachines = [...(visibility.machines || [])];
+                isHidden ? newMachines = newMachines.filter(m => m !== id) : newMachines.push(id);
+                await updateDoc(doc(db, 'settings', 'visibility'), { machines: newMachines });
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-slate-950 p-4">
+                    {/* Header */}
+                    <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-2">
+                        <div className="flex items-center gap-2">
+                            <i data-lucide="tv" className="text-cyan-400"></i>
+                            <span className="font-bold text-white tracking-widest">REMOTO</span>
+                        </div>
+                        <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-red-500'}`}></div>
+                    </div>
+
+                    {/* GRID DE CONTROL PRINCIPAL */}
+                    <div className="grid grid-cols-3 gap-4 mb-6">
+                        
+                        {/* COLUMNA IZQUIERDA: SEMANAS */}
+                        <div className="flex flex-col gap-3">
+                            <div className="text-center text-[10px] text-slate-500 font-bold uppercase">Semanas</div>
+                            <button onClick={() => updateNav('week', -1)} 
+                                className="btn-panel flex-1 rounded-xl flex items-center justify-center text-cyan-400">
+                                <i data-lucide="chevrons-up" className="w-8 h-8"></i>
+                            </button>
+                            <button onClick={() => updateNav('week', 1)} 
+                                className="btn-panel flex-1 rounded-xl flex items-center justify-center text-cyan-400">
+                                <i data-lucide="chevrons-down" className="w-8 h-8"></i>
+                            </button>
+                        </div>
+
+                        {/* COLUMNA CENTRAL: RESET */}
+                        <div className="flex flex-col justify-center">
+                            <button onClick={() => updateNav('reset', 0)} 
+                                className="btn-main w-full aspect-square rounded-full flex flex-col items-center justify-center">
+                                <span className="text-2xl font-black text-white">{navState.weekDelta > 0 ? '+' : ''}{navState.weekDelta}</span>
+                                <span className="text-[9px] text-cyan-400 font-bold mt-1">RESET</span>
+                            </button>
+                        </div>
+
+                        {/* COLUMNA DERECHA: DIAS/SCROLL */}
+                        <div className="flex flex-col gap-3">
+                            <div className="text-center text-[10px] text-slate-500 font-bold uppercase">Días</div>
+                            <button onClick={() => updateNav('scroll', -1)} 
+                                className="btn-panel flex-1 rounded-xl flex items-center justify-center text-cyan-400">
+                                <i data-lucide="arrow-up" className="w-8 h-8"></i>
+                            </button>
+                            <button onClick={() => updateNav('scroll', 1)} 
+                                className="btn-panel flex-1 rounded-xl flex items-center justify-center text-cyan-400">
+                                <i data-lucide="arrow-down" className="w-8 h-8"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Selector de Máquinas */}
+                    <div className="flex-1 bg-slate-900/50 rounded-2xl p-2 border border-slate-800 overflow-hidden flex flex-col">
+                        <div className="text-xs font-bold text-slate-500 mb-2 px-2">VISIBILIDAD MÁQUINAS</div>
+                        <div className="overflow-auto grid grid-cols-4 gap-2 pb-10">
+                            {MACHINES.map(m => {
+                                const isHidden = visibility.machines?.includes(m.id);
+                                return (
+                                    <button key={m.id} onClick={() => toggleMachine(m.id)}
+                                        className={`h-12 rounded-lg font-bold text-xs flex flex-col items-center justify-center transition-all ${
+                                            isHidden ? 'bg-slate-800 text-slate-600 opacity-50' : 'bg-cyan-700 text-white shadow-lg border border-cyan-500/30'
+                                        }`}>
+                                        <span className="text-[8px] opacity-60">MAQ</span>
+                                        <span>{m.name}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<RemoteControl />);
+        lucide.createIcons();
+    </script>
+</body>
+</html>
