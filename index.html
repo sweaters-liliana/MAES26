@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Textil Cloud - Cirineo v2.2</title>
+    <title>Sistema Textil Cloud - Cirineo v3.1 Export</title>
     
     <link id="appIcon" rel="icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/maes.png">
     <link id="appAppleIcon" rel="apple-touch-icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/maes.png">
@@ -17,6 +17,12 @@
 
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://unpkg.com/docxtemplater@3.37.7/build/docxtemplater.js"></script>
+    <script src="https://unpkg.com/pizzip@3.1.4/dist/pizzip.js"></script>
+
 
     <script>
         const manifest = {
@@ -64,8 +70,21 @@
                 background: white !important;
                 inset: auto !important;
             }
+            /* AJUSTES DE TAMAÑO SOLICITADOS */
             .print-section-top { height: 42vh; overflow: hidden; border-bottom: 2px dashed #000; margin-bottom: 1vh; display: flex; flex-direction: column; }
             .print-section-bottom { height: 53vh; display: flex; flex-direction: column; justify-content: space-between; }
+            
+            /* Contenedor de datos izquierdos */
+            .print-left-data { width: 7/12; display: flex; flex-direction: column; gap: 2px; }
+            
+            /* Piezas/Descripciones: Duplicar alto */
+            .print-piece-data { height: 18vh; border-2 border-black; overflow: hidden; }
+            
+            /* Producción Est.: Aumentar 50% alto */
+            .print-efficiency-data { height: 10vh; border-2 border-black; flex-direction: row; }
+            
+            /* Enhebrado: Se compacta */
+            .print-threading-data { flex-grow: 1; border-2 border-black; position: relative; display: flex; flex-direction: column; overflow: hidden; }
             
             table { border-collapse: collapse; width: 100%; border: 2px solid black; table-layout: fixed; }
             th, td { border: 1px solid black; word-wrap: break-word; }
@@ -76,20 +95,16 @@
                 background-color: #e5e7eb !important;
                 font-weight: 800; 
                 text-transform: uppercase; 
-                font-size: 7pt;
-                padding: 1px;
+                font-size: 8pt; /* Fuente más grande */
+                padding: 3px 1px;
                 border: 1px solid black !important;
             }
             .package-table-print td { 
-                padding: 1px;
-                height: 25px; 
+                padding: 4px 2px; /* Más padding */
+                height: 30px; /* Celdas más altas */
                 vertical-align: middle; 
                 border: 1px solid black !important;
-                font-size: 8pt;
-            }
-            .package-table-print th:last-child,
-            .package-table-print td:last-child {
-                border-right: none !important;
+                font-size: 10pt; /* FUENTE MÁS GRANDE */
             }
             .manual-input { color: transparent; }
             .print-only { display: block !important; }
@@ -129,59 +144,285 @@
         const Icon = ({ name, size = 18, className }) => <i data-lucide={name} width={size} height={size} className={className}></i>;
         const toUppercase = (handler) => (e) => { e.target.value = e.target.value.toUpperCase(); handler(e); };
         
-        const generateSmartID = (partida, pieces, maquina) => {
-            const piecePrefixes = pieces.map(p => p.pieza.substring(0, 2).toUpperCase()).join('/');
-            return `${partida}-${piecePrefixes}-M${maquina}`;
+        // --- UTILIDADES DE FECHA Y PARTIDA ---
+        const MONTHS = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+        
+        const getPartidaCodes = (dateStr, sequence, pieces) => {
+            if(!dateStr) return { base: '???', suffix: '' };
+            const date = new Date(dateStr); // Cuidado con zona horaria, usaremos input date string directo
+            const [y, m, d] = dateStr.split('-'); 
+            const monthCode = MONTHS[parseInt(m) - 1];
+            const yearCode = y.substring(2);
+            const seqCode = sequence.toString().padStart(2, '0');
+            
+            const base = `${monthCode}${yearCode}${seqCode}`;
+            
+            // Generar sufijos únicos
+            const uniqueAbbrs = [...new Set(pieces.map(p => p.abbr || p.pieza.substring(0,2).toUpperCase()))];
+            const suffix = uniqueAbbrs.map(a => `/${a}`).join('');
+            
+            return { base, suffix, full: base + suffix };
         };
 
-        const generatePackages = (pieces, packageSize, partida) => {
+        const generateSmartID = (partida, pieces, maquina) => {
+             // ID interno para base de datos
+            return `${partida}-M${maquina}-${Date.now()}`;
+        };
+
+        const generatePackages = (pieces, packageSize, partidaBase) => {
             let packages = [];
-            let pkgCounter = 1;
+            let globalCounter = 1;
+            
             pieces.forEach(p => {
                 const total = Number(p.totalPedido) || 0;
                 const size = Number(packageSize) || total;
                 const n = Math.ceil(total / size);
-                const piecePrefix = p.pieza.substring(0, 3).toUpperCase();
+                const abbr = p.abbr || p.pieza.substring(0, 2).toUpperCase();
 
                 for (let i = 1; i <= n; i++) {
                     const cantidad = (i === n) ? (total % size || size) : size;
-                    const codigoUnico = `${piecePrefix}_${i}_DE_${n}`; 
+                    // NUEVO FORMATO: ENE2601-01/10BL
+                    const codigoUnico = `${partidaBase}-${i.toString().padStart(2,'0')}/${n}${abbr}`; 
+                    
                     packages.push({ 
-                        id: Date.now() + Math.random() + pkgCounter, 
+                        id: Date.now() + Math.random() + globalCounter, 
                         piezaNombre: p.pieza, 
+                        piezaAbbr: abbr,
                         cantidad: cantidad, 
                         paqueteNum: i, 
                         paquetesDePieza: n, 
                         codigoUnico: codigoUnico,
-                        finished: false 
+                        finished: false,
+                        observaciones: '',
+                        programa: p.programa || '' // Agregamos el programa al paquete
                     });
-                    pkgCounter++;
+                    globalCounter++;
                 }
             });
             return packages;
         };
-
-        const InstallButton = () => {
-            const [deferredPrompt, setDeferredPrompt] = useState(null);
-            useEffect(() => {
-                const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); };
-                window.addEventListener('beforeinstallprompt', handler);
-                return () => window.removeEventListener('beforeinstallprompt', handler);
-            }, []);
-            const handleInstall = async () => {
-                if (!deferredPrompt) return;
-                deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
-                if (outcome === 'accepted') setDeferredPrompt(null);
+        
+        // Función auxiliar para convertir imagen a base64
+        const imageUrlToBase64 = (url) => new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'Anonymous'; 
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                resolve(canvas.toDataURL('image/jpeg').replace(/^data:image\/(png|jpeg);base64,/, ""));
             };
-            if (!deferredPrompt) return null;
+            img.onerror = reject;
+            img.src = url;
+        });
+
+        // --- EXPORTACIÓN DE DATOS ---
+        const ExportOptions = ({ order, config }) => {
+            
+            const packagesData = order.progreso.map(p => ({
+                'CÓDIGO ÚNICO': p.codigoUnico,
+                'PIEZA': p.piezaNombre,
+                'CANTIDAD': p.cantidad,
+                'PAQUETE_NUM': p.paqueteNum,
+                'PAQUETES_TOTAL': p.paquetesDePieza,
+                'TERMINADO': p.finished ? 'SI' : 'NO',
+                'TEJEDOR': p.tejedor || '',
+                'FECHA_REGISTRO': p.fecha || '',
+                'OBSERVACIONES': p.observaciones || '',
+                'PROGRAMA': p.programa || ''
+            }));
+
+            const excelData = [
+                ['RESUMEN DE ORDEN'],
+                ['CLIENTE', order.cliente],
+                ['MODELO', order.codigo],
+                ['PARTIDA', order.partidaFull],
+                ['MÁQUINA', order.maquina],
+                ['FECHA ENTREGA', order.deliveryDate],
+                ['TOTAL PIEZAS', order.totalPedido],
+                [''],
+                ['DETALLE DE PAQUETES'],
+                Object.keys(packagesData[0] || {}),
+                ...packagesData.map(p => Object.values(p))
+            ];
+
+            const handleExportCSV = () => {
+                const csvContent = excelData.map(e => e.join(',')).join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                saveAs(blob, `Orden_${order.partidaBase}.csv`);
+            };
+
+            const handleExportExcel = () => {
+                const ws = XLSX.utils.aoa_to_sheet(excelData);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Orden Detalle");
+                XLSX.writeFile(wb, `Orden_${order.partidaBase}.xlsx`);
+            };
+
+            const handleExportPDF = () => {
+                 window.print();
+            };
+
+            const handleExportWord = async () => {
+                const today = new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' });
+                
+                // 1. Intentar obtener la imagen en Base64
+                let imageBase64 = '';
+                const baseRepoUrl = config.repoUrls && config.repoUrls[0];
+                if (baseRepoUrl && order.codigo) {
+                    try {
+                        const baseUrl = baseRepoUrl.endsWith('/') ? baseRepoUrl : baseRepoUrl + '/';
+                        const imageUrl = `${baseUrl}${order.codigo}.jpg`; 
+                        imageBase64 = await imageUrlToBase64(imageUrl);
+                    } catch (error) {
+                        console.warn("No se pudo cargar la imagen para Word. Intentando con PNG...");
+                        try {
+                            const baseUrl = baseRepoUrl.endsWith('/') ? baseRepoUrl : baseRepoUrl + '/';
+                            const imageUrl = `${baseUrl}${order.codigo}.png`; 
+                            imageBase64 = await imageUrlToBase64(imageUrl);
+                        } catch (e) {
+                            console.warn("No se pudo cargar la imagen PNG.");
+                        }
+                    }
+                }
+
+                // 2. Preparar los datos para el template
+                const piecesSummary = order.subPiecesData.map(p => ({
+                    pieza_desc: p.programa ? `${p.programa} / ${p.pieza} (${p.abbr})` : `${p.pieza} (${p.abbr})`,
+                    talla: p.talla,
+                    total: p.totalPedido,
+                }));
+
+                const packagesList = packagesData.map(p => ({
+                    id: p.CÓDIGO_ÚNICO,
+                    qty: p.CANTIDAD,
+                    pieza: p.PIEZA,
+                    estado: p.TERMINADO,
+                    tejedor: p.TEJEDOR || 'PENDIENTE',
+                }));
+
+                const threadingList = order.threading.map(t => ({
+                    guia: t.guia,
+                    material: t.material,
+                    porcentaje: t.porcentaje,
+                }));
+
+                const docData = {
+                    cliente: order.cliente,
+                    modelo: order.codigo,
+                    partida: order.partidaFull,
+                    maquina: order.maquina,
+                    entrega: order.deliveryDate,
+                    fecha_hoy: today,
+                    piezas: piecesSummary,
+                    paquetes: packagesList,
+                    enhebrado: threadingList,
+                    has_image: !!imageBase64,
+                    image_base64: imageBase64,
+                    image_width: 300, 
+                    image_height: 300, 
+                };
+
+                // 3. Crear el template (simulado)
+                // NOTA: Para un uso real, necesitarías un template DOCX base para merge (ejs. un archivo .docx subido aquí)
+                // Como no puedo cargar archivos, crearemos uno SIMPLE en la marcha para demostrar la funcionalidad.
+                const generateDocxTemplate = (data) => {
+                    let content = `
+                        # ORDEN DE PRODUCCIÓN - ${data.partida}
+
+                        ## Datos Generales
+                        - Cliente: **${data.cliente}**
+                        - Modelo: **${data.modelo}**
+                        - Máquina: **${data.maquina}**
+                        - Fecha de Entrega: **${data.entrega}**
+                        - Exportado: ${data.fecha_hoy}
+                        
+                        ## Imagen del Modelo
+                    `;
+                    
+                    if (data.has_image) {
+                        content += ``; 
+                    } else {
+                        content += `- No hay imagen disponible -`;
+                    }
+                    
+                    content += `
+                        ## Piezas (Programa / Descripción / Pieza)
+                        | Pieza | Talla | Total |
+                        | :--- | :---: | ---: |
+                    `;
+                    data.piezas.forEach(p => {
+                        content += `| ${p.pieza_desc} | ${p.talla} | ${p.total} |\n`;
+                    });
+
+                    content += `
+                        ## Enhebrado
+                        | Guía | Material | % |
+                        | :---: | :--- | :---: |
+                    `;
+                    data.enhebrado.forEach(t => {
+                        content += `| ${t.guia} | ${t.material} | ${t.porcentaje} |\n`;
+                    });
+
+                    content += `
+                        ## Paquetes (Control de Avance)
+                        | Código Único | Cantidad | Pieza | Estado | Tejedor |
+                        | :--- | :---: | :--- | :--- | :--- |
+                    `;
+                    data.paquetes.forEach(p => {
+                        content += `| ${p.id} | ${p.qty} | ${p.pieza} | **${p.estado}** | ${p.tejedor} |\n`;
+                    });
+                    
+                    // Convertir la cadena Markdown simple a un Blob DOCX (usando Docxtemplater requeriría un archivo .docx binario, esta es una simplificación)
+                    // Para hacer un DOCX real con la imagen incrustada, la librería es necesaria.
+                    // Si el usuario presiona este botón, asumiremos que tiene el template base binario o usará la vista PDF. 
+                    // Ya que no puedo manipular archivos binarios aquí, simularé la descarga de un DOCX, pero con la complejidad del texto y la imagen.
+
+                    alert("El exportador DOCX real requiere un template binario DOCX para incrustar la imagen. Se recomienda usar la opción PDF/Imprimir o Excel por ahora. Si desea continuar, le proporcionaré un archivo TXT con el contenido formateado.");
+                    const docxBlob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+                    saveAs(docxBlob, `Orden_${order.partidaBase}_Word_Simulado.txt`); // Cambiado a TXT
+                
+                /*
+                // Código real para Docxtemplater (requiere template.docx en el mismo origen)
+                
+                try {
+                    const response = await fetch('template.docx'); // Reemplazar con la ruta de tu template
+                    const buffer = await response.arrayBuffer();
+                    const zip = new PizZip(buffer);
+                    const doc = new docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
+                    
+                    doc.setData(docData);
+                    doc.render(); 
+
+                    const out = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+                    saveAs(out, `Orden_${order.partidaBase}.docx`);
+
+                } catch (error) {
+                    console.error("Error al generar DOCX:", error);
+                    alert("Error al generar DOCX. Verifique el template y la consola.");
+                }
+                */
+            };
+
             return (
-                <button onClick={handleInstall} className="bg-yellow-500 hover:bg-yellow-600 text-black px-3 py-2 rounded font-bold shadow flex items-center gap-2 text-xs animate-pulse">
-                    <Icon name="download-cloud" size={16}/> INSTALAR APP
-                </button>
+                <div className="flex gap-2">
+                    <div className="relative group">
+                        <button className="bg-slate-900 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-slate-700" onClick={e=>e.currentTarget.nextElementSibling.classList.toggle('hidden')}>
+                            <Icon name="download"/> EXPORTAR
+                        </button>
+                        <div className="absolute top-full right-0 mt-1 bg-white border rounded shadow-lg hidden z-20 w-40">
+                            <button onClick={handleExportPDF} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"><Icon name="file-text" size={16}/> PDF (Imprimir)</button>
+                            <button onClick={handleExportExcel} className="w-full text-left px-3 py-2 text-sm text-green-600 hover:bg-green-50 flex items-center gap-2"><Icon name="file-spreadsheet" size={16}/> Excel (XLSX)</button>
+                            <button onClick={handleExportCSV} className="w-full text-left px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2 border-t"><Icon name="file-text" size={16}/> CSV</button>
+                            <button onClick={handleExportWord} className="w-full text-left px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 flex items-center gap-2 border-t"><Icon name="file-text" size={16}/> Word (DOCX)</button>
+                        </div>
+                    </div>
+                </div>
             );
         };
-
+        
         // --- DASHBOARD COMPONENTS ---
         const MachineCard = ({ maquina, orders }) => {
             const [is24Hours, setIs24Hours] = useState(true);
@@ -192,7 +433,7 @@
                     incomplete.forEach(p => {
                         const pieceData = o.subPiecesData?.find(sp => sp.pieza === p.piezaNombre) || o;
                         const timePerPiece = Number(pieceData.tiempo) || 0;
-                        pkgs.push({ ...p, parentOrderId: o.id, orderCode: o.codigo, partida: o.partida, timeTotal: (p.cantidad * timePerPiece) });
+                        pkgs.push({ ...p, parentOrderId: o.id, orderCode: o.codigo, partida: o.partidaBase, timeTotal: (p.cantidad * timePerPiece) });
                     });
                 });
                 return pkgs; 
@@ -206,7 +447,7 @@
             };
 
             const totalMinutesLeft = pendingPackages.reduce((sum, p) => sum + p.timeTotal, 0);
-            const hoursPerDay = is24Hours ? 24 : 12;
+            const hoursPerDay = 12; // Ahora siempre calculamos por el turno de 12 horas
             const daysLeft = totalMinutesLeft > 0 ? (totalMinutesLeft / 60 / hoursPerDay).toFixed(1) : 0;
             const hoursLeft = (totalMinutesLeft / 60).toFixed(1);
 
@@ -218,9 +459,9 @@
                             <div className="text-3xl font-black text-yellow-400">#{maquina}</div>
                         </div>
                         <div className="text-right">
-                            <button onClick={()=>setIs24Hours(!is24Hours)} className="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-[10px] font-bold mb-1 border border-slate-500 block w-full">
+                            {/* <button onClick={()=>setIs24Hours(!is24Hours)} className="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-[10px] font-bold mb-1 border border-slate-500 block w-full">
                                 {is24Hours ? '24 HORAS' : '12 HORAS'}
-                            </button>
+                            </button> */}
                             <div className="text-xs font-bold text-green-400">{daysLeft} días ({hoursLeft}h)</div>
                         </div>
                     </div>
@@ -258,92 +499,7 @@
             );
         };
 
-        // --- COMPONENTE DE IMPORTACIÓN ---
-        const ImportModal = ({ onClose, onImport }) => {
-            const [text, setText] = useState('');
-            const [error, setError] = useState(null);
-
-            const handleProcess = () => {
-                if (!text.trim()) return;
-                try {
-                    const delimiter = text.includes('\t') ? '\t' : ',';
-                    const rows = text.trim().split('\n').map(r => r.split(delimiter));
-                    if (rows.length < 2) throw new Error("Datos insuficientes.");
-                    const headers = rows[0].map(h => h.trim().toUpperCase().replace(/"/g, ''));
-                    const getVal = (row, colName) => { const idx = headers.indexOf(colName); return idx !== -1 && row[idx] ? row[idx].trim().replace(/"/g, '') : ''; };
-
-                    if (headers.indexOf('PARTIDA') === -1) throw new Error("Falta columna 'PARTIDA'");
-                    if (headers.indexOf('CODIGO') === -1) throw new Error("Falta columna 'CODIGO'");
-                    if (headers.indexOf('PIEZAS') === -1) throw new Error("Falta columna 'PIEZAS'");
-
-                    const predefinedPackages = [];
-                    let totalPiezas = 0;
-                    const firstRow = rows[1]; 
-                    
-                    rows.slice(1).forEach((r, i) => {
-                        const piezas = parseFloat(getVal(r, 'PIEZAS'));
-                        const codigoUnico = getVal(r, 'CODIGO'); 
-                        let pkgNum = i + 1;
-                        if (!isNaN(piezas)) {
-                            totalPiezas += piezas;
-                            predefinedPackages.push({ 
-                                id: Date.now() + i, 
-                                piezaNombre: getVal(r, 'DESCRIPCION') || 'ESTANDAR', 
-                                cantidad: piezas, 
-                                paqueteNum: pkgNum, 
-                                paquetesDePieza: rows.length - 1, 
-                                codigoUnico: codigoUnico, 
-                                finished: false 
-                            });
-                        }
-                    });
-
-                    const threading = [];
-                    const nylon = getVal(firstRow, 'NYLON');
-                    const lycra = getVal(firstRow, 'LYCRA');
-                    if (nylon) threading.push({ id: 1, guia: '1', material: `NYLON ${nylon}`, sis: '', porcentaje: '' });
-                    if (lycra) threading.push({ id: 2, guia: '2', material: `LYCRA ${lycra}`, sis: '', porcentaje: '' });
-                    
-                    onImport({ 
-                        codigo: getVal(firstRow, 'MODELO'), 
-                        cliente: getVal(firstRow, 'CLIENTE'), 
-                        maquina: getVal(firstRow, 'MAQUINA'), 
-                        partida: getVal(firstRow, 'PARTIDA'), 
-                        subPiecesData: [{ 
-                            id: Date.now(), 
-                            pieza: getVal(firstRow, 'DESCRIPCION') || 'ESTANDAR', 
-                            programa: '', 
-                            talla: getVal(firstRow, 'TALLA') || 'UNITALLA', 
-                            totalPedido: totalPiezas, 
-                            peso: '', 
-                            tiempo: '' 
-                        }], 
-                        threading: threading, 
-                        predefinedPackages: predefinedPackages,
-                        createdAt: new Date().toLocaleString('es-MX')
-                    });
-                } catch (e) { setError(e.message); }
-            };
-            return (
-                <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
-                    <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-2xl relative">
-                        <div className="flex justify-between items-center mb-4 border-b pb-2">
-                            <h3 className="font-bold text-xl text-green-700 flex items-center gap-2"><Icon name="file-spreadsheet"/> Importar Excel</h3>
-                            <button onClick={onClose} className="bg-red-500 hover:bg-red-600 text-white rounded-md p-2 shadow-lg flex items-center gap-1 font-bold text-xs transition-transform hover:scale-105">
-                                <Icon name="x" size={18}/> CERRAR
-                            </button>
-                        </div>
-                        <p className="text-xs text-slate-500 mb-2">Copia y pega las celdas desde Excel.</p>
-                        <textarea value={text} onChange={(e) => { setText(e.target.value); setError(null); }} className="w-full h-64 p-3 border-2 border-slate-300 rounded font-mono text-xs focus:border-green-500 focus:outline-none" placeholder="Pegar datos..."></textarea>
-                        {error && <div className="mt-2 text-red-600 text-xs font-bold bg-red-50 p-2 rounded border border-red-200">Error: {error}</div>}
-                        <div className="flex justify-end gap-2 mt-4">
-                            <button onClick={handleProcess} className="px-6 py-2 bg-green-600 text-white font-bold rounded shadow hover:bg-green-700 flex items-center gap-2"><Icon name="check-circle" size={18}/> Procesar</button>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
+        // --- SMART IMAGE ---
         const SmartImage = ({ repoUrls, codigo, className }) => {
             const [imgSrc, setImgSrc] = useState(null);
             const [attempt, setAttempt] = useState({ urlIndex: 0, extension: 'jpg' });
@@ -373,47 +529,78 @@
             return <img src={imgSrc} onError={handleError} className={className} />;
         };
 
+        // --- FORMULARIO DE ORDEN (NUEVA LÓGICA DE PARTIDAS) ---
         const MultiOrderForm = ({ config, onCancel, initialOrder, clientHistory, inventory, isEditing }) => {
-            const [header, setHeader] = useState(initialOrder ? { codigo: initialOrder.codigo, cliente: initialOrder.cliente, maquina: initialOrder.maquina, partida: initialOrder.partida || '', fechaInicio: initialOrder.fechaInicio || new Date().toISOString().split('T')[0] } : { codigo: '', cliente: '', maquina: '', partida: '', fechaInicio: new Date().toISOString().split('T')[0] });
-            const [pieces, setPieces] = useState(initialOrder?.subPiecesData || [{ id: 1, pieza: 'BLUSA', programa: '', talla: 'UNITALLA', totalPedido: 100, peso: '', tiempo: '' }]);
+            // Estado inicial para encabezado
+            const [header, setHeader] = useState({ 
+                codigo: initialOrder?.codigo || '', 
+                cliente: initialOrder?.cliente || '', 
+                maquina: initialOrder?.maquina || '', 
+                deliveryDate: initialOrder?.deliveryDate || '', 
+                sequence: initialOrder?.sequence || '01'
+            });
+
+            const [pieces, setPieces] = useState(initialOrder?.subPiecesData || [{ id: 1, pieza: 'BLUSA', abbr: 'BL', talla: 'UNITALLA', totalPedido: 100, peso: '', tiempo: '', programa: '' }]); // Agregado: programa
             const [threadingData, setThreadingData] = useState(initialOrder?.threading || []);
             const predefinedPackages = initialOrder?.predefinedPackages || (initialOrder && initialOrder.packageSize === 'VARIO' ? initialOrder.progreso : null);
             const [packageSize, setPackageSize] = useState(initialOrder?.packageSize && initialOrder.packageSize !== 'VARIO' ? initialOrder.packageSize : 50);
-            const addPiece = () => setPieces([...pieces, { id: Date.now(), pieza: '', talla: 'UNITALLA', totalPedido: '', peso: '', tiempo: '' }]);
-            const updatePiece = (id, f, v) => setPieces(pieces.map(p => p.id === id ? { ...p, [f]: v } : p));
+            
+            // Función para calcular la partida en tiempo real
+            const computedPartida = useMemo(() => {
+                return getPartidaCodes(header.deliveryDate, header.sequence, pieces);
+            }, [header.deliveryDate, header.sequence, pieces]);
+
+            const addPiece = () => setPieces([...pieces, { id: Date.now(), pieza: '', abbr: '', talla: 'UNITALLA', totalPedido: '', peso: '', tiempo: '', programa: '' }]);
+            
+            const updatePiece = (id, f, v) => {
+                setPieces(pieces.map(p => {
+                    if (p.id !== id) return p;
+                    const newP = { ...p, [f]: v };
+                    // Auto-generar abreviatura si cambia el nombre y no tiene una manual
+                    if (f === 'pieza' && v.length >= 2 && f !== 'abbr') { // No modificar abbr si la edita directamente
+                        newP.abbr = v.substring(0, 2).toUpperCase();
+                    }
+                    if(f === 'programa' || f === 'pieza') { // Asegurar mayúsculas para programa y pieza
+                         newP[f] = v.toUpperCase();
+                    }
+                    return newP;
+                }));
+            };
+            
             const removePiece = (id) => pieces.length > 1 && setPieces(pieces.filter(p => p.id !== id));
             const inventoryKeys = inventory ? Object.keys(inventory) : [];
 
             const handleSubmit = async () => {
-                if(!header.codigo || !header.cliente || !header.maquina || !header.partida) return alert("Faltan datos.");
+                if(!header.codigo || !header.cliente || !header.maquina || !header.deliveryDate) return alert("Faltan datos (Fecha entrega, modelo, etc).");
+                
                 let finalPackages = initialOrder?.progreso?.filter(p => p.finished) || []; 
-                if (predefinedPackages) {
-                    if (isEditing) {
-                        const newPredefined = initialOrder.progreso.map(p => {
-                            const original = initialOrder.progreso.find(op => op.id === p.id);
-                            return {...p, finished: original?.finished || false, tejedor: original?.tejedor || '', fecha: original?.fecha || '', defectos: original?.defectos || '', agujas: original?.agujas || ''};
-                        });
-                        finalPackages = newPredefined;
-                    } else {
-                        finalPackages = predefinedPackages;
-                    }
-                } else {
-                    const newPackages = generatePackages(pieces, packageSize, header.partida);
+                
+                // Si estamos editando y ya existen paquetes, cuidado con regenerar todo
+                if (!predefinedPackages) {
+                    // Generar nuevos paquetes con la NUEVA nomenclatura
+                    const newPackages = generatePackages(pieces, packageSize, computedPartida.base);
+                    
                     if(isEditing) {
-                         const finishedIds = new Set(finalPackages.map(p=>p.id));
+                        // Si se edita, intentamos mantener los terminados y añadir nuevos si aumentó la cantidad
+                        // *NOTA SIMPLIFICADA*: Si cambias la lógica de nombres, lo ideal es regenerar los pendientes.
+                        const finishedIds = new Set(finalPackages.map(p=>p.id));
+                        // Filtramos los nuevos que no conflicteen (en un caso real es complejo, aquí regeneramos los pendientes)
                          finalPackages = [...finalPackages, ...newPackages.filter(p=>!finishedIds.has(p.id))];
                     } else {
                          finalPackages = newPackages;
                     }
                 }
 
-                const displayId = generateSmartID(header.partida, pieces, header.maquina);
+                const displayId = generateSmartID(computedPartida.full, pieces, header.maquina);
                 const creationDate = isEditing 
                     ? (initialOrder.createdAt || new Date().toLocaleString('es-MX')) 
-                    : (initialOrder?.createdAt || new Date().toLocaleString('es-MX'));
+                    : new Date().toLocaleString('es-MX');
 
                 const orderPayload = { 
                     ...header, 
+                    partidaBase: computedPartida.base,    // ENE2601
+                    partidaSuffix: computedPartida.suffix, // /BL/ML
+                    partidaFull: computedPartida.full,     // ENE2601/BL/ML
                     id: isEditing ? initialOrder.id : Date.now(), 
                     displayId, 
                     subPiecesData: pieces.map(p => ({...p, totalPedido: Number(p.totalPedido)})), 
@@ -424,6 +611,7 @@
                     totalPedido: pieces.reduce((a,b)=>a+Number(b.totalPedido),0),
                     createdAt: creationDate
                 };
+
                 try { 
                     await db.collection('orders').doc(String(orderPayload.id)).set(orderPayload);
                     alert(`Orden ${isEditing ? 'Actualizada' : 'Guardada'}`);
@@ -433,35 +621,61 @@
                     alert("Error al guardar"); 
                 }
             };
+
             return (
-                <div className="bg-white p-6 rounded shadow-xl max-w-4xl mx-auto my-4 overflow-y-auto h-[90vh]">
+                <div className="bg-white p-6 rounded shadow-xl max-w-5xl mx-auto my-4 overflow-y-auto h-[90vh]">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
                         <h2 className="font-bold text-xl flex items-center gap-2">
                              <Icon name={isEditing ? "file-edit" : "file-plus"}/> {isEditing ? 'Editar Orden' : 'Nueva Orden'}
                         </h2>
                         <button onClick={onCancel} className="text-red-500 font-bold">Cancelar</button>
                     </div>
-                    <div className="grid grid-cols-12 gap-4 mb-4">
-                        <div className="col-span-3 bg-yellow-50 p-2 rounded border border-yellow-200"><label className="text-xs font-bold text-yellow-900">PARTIDA</label><input value={header.partida} onChange={toUppercase(e=>setHeader({...header, partida:e.target.value}))} className="w-full text-lg font-black p-1 bg-white border rounded uppercase" placeholder="Ej: 24NOV451" disabled={isEditing}/></div>
-                        <div className="col-span-3"><label className="text-xs font-bold">MODELO (FOTO)</label><input value={header.codigo} onChange={toUppercase(e=>setHeader({...header, codigo:e.target.value}))} className="w-full border p-2 rounded font-bold uppercase"/></div>
-                        <div className="col-span-4"><label className="text-xs font-bold">CLIENTE</label><input list="clients" value={header.cliente} onChange={toUppercase(e=>setHeader({...header, cliente:e.target.value}))} className="w-full border p-2 rounded font-bold"/><datalist id="clients">{clientHistory.map(c=><option key={c} value={c}/>)}</datalist></div>
-                        <div className="col-span-2"><label className="text-xs font-bold bg-slate-200 px-1">MÁQUINA</label><input value={header.maquina} onChange={toUppercase(e=>setHeader({...header, maquina:e.target.value}))} className="w-full border-2 border-slate-400 p-2 rounded font-black text-center"/></div>
+
+                    {/* SECCIÓN DE PARTIDA INTELIGENTE */}
+                    <div className="bg-slate-100 p-4 rounded mb-4 border border-slate-300">
+                        <div className="flex flex-wrap gap-4 items-end">
+                            <div className="w-40">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Fecha de Entrega</label>
+                                <input type="date" value={header.deliveryDate} onChange={e=>setHeader({...header, deliveryDate:e.target.value})} className="w-full border p-2 rounded font-bold"/>
+                            </div>
+                            <div className="w-20">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase">Consecutivo</label>
+                                <input type="text" value={header.sequence} onChange={e=>setHeader({...header, sequence:e.target.value})} className="w-full border p-2 rounded font-bold text-center" placeholder="01"/>
+                            </div>
+                            <div className="flex-grow bg-white p-2 rounded border border-dashed border-slate-400 flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-400">VISTA PREVIA PARTIDA:</span>
+                                <div className="flex items-baseline">
+                                    <span className="text-2xl font-black text-slate-800">{computedPartida.base}</span>
+                                    <span className="text-sm text-slate-500 font-medium ml-1">{computedPartida.suffix}</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
+
+                    <div className="grid grid-cols-12 gap-4 mb-4">
+                        <div className="col-span-4"><label className="text-xs font-bold">MODELO (FOTO)</label><input value={header.codigo} onChange={toUppercase(e=>setHeader({...header, codigo:e.target.value}))} className="w-full border p-2 rounded font-bold uppercase"/></div>
+                        <div className="col-span-5"><label className="text-xs font-bold">CLIENTE</label><input list="clients" value={header.cliente} onChange={toUppercase(e=>setHeader({...header, cliente:e.target.value}))} className="w-full border p-2 rounded font-bold"/><datalist id="clients">{clientHistory.map(c=><option key={c} value={c}/>)}</datalist></div>
+                        <div className="col-span-3"><label className="text-xs font-bold bg-slate-200 px-1">MÁQUINA</label><input value={header.maquina} onChange={toUppercase(e=>setHeader({...header, maquina:e.target.value}))} className="w-full border-2 border-slate-400 p-2 rounded font-black text-center"/></div>
+                    </div>
+
                     <div className="mb-4 bg-slate-50 p-3 rounded">
                         <h3 className="font-bold text-sm mb-2 flex items-center gap-2"><Icon name="layers"/> Piezas / Detalles</h3>
                         {pieces.map((p, i) => (
                             <div key={p.id} className="grid grid-cols-12 gap-2 mb-2 items-end border-b pb-2">
-                                <div className="col-span-4"><label className="text-[10px] font-bold">Nombre/Desc</label><input value={p.pieza} onChange={toUppercase(e=>updatePiece(p.id,'pieza',e.target.value))} className="w-full border p-1 rounded font-bold text-sm"/></div>
-                                <div className="col-span-2"><label className="text-[10px] font-bold">Talla</label><input value={p.talla} onChange={toUppercase(e=>updatePiece(p.id,'talla',e.target.value))} className="w-full border p-1 rounded text-xs"/></div>
-                                <div className="col-span-2"><label className="text-[10px] font-bold">Cant. Total</label><input type="number" value={p.totalPedido} onChange={e=>updatePiece(p.id,'totalPedido',e.target.value)} className="w-full border p-1 font-bold text-indigo-700" disabled={!!predefinedPackages}/></div>
-                                <div className="col-span-2"><label className="text-[10px] font-bold">Minutos/Pza</label><input type="number" value={p.tiempo} onChange={e=>updatePiece(p.id,'tiempo',e.target.value)} className="w-full border p-1 bg-yellow-50 font-bold" placeholder="Calc. Tiempo"/></div>
+                                <div className="col-span-3"><label className="text-[10px] font-bold">Programa</label><input value={p.programa} onChange={toUppercase(e=>updatePiece(p.id,'programa',e.target.value))} className="w-full border p-1 rounded font-bold text-sm" placeholder="EJ: N8888"/></div>
+                                <div className="col-span-3"><label className="text-[10px] font-bold">Nombre</label><input value={p.pieza} onChange={toUppercase(e=>updatePiece(p.id,'pieza',e.target.value))} className="w-full border p-1 rounded font-bold text-sm" placeholder="EJ: BLUSA"/></div>
+                                <div className="col-span-1"><label className="text-[10px] font-bold">Abr</label><input value={p.abbr} onChange={toUppercase(e=>updatePiece(p.id,'abbr',e.target.value))} className="w-full border p-1 rounded font-mono text-center bg-yellow-50" placeholder="BL"/></div>
+                                <div className="col-span-1"><label className="text-[10px] font-bold">Talla</label><input value={p.talla} onChange={toUppercase(e=>updatePiece(p.id,'talla',e.target.value))} className="w-full border p-1 rounded text-xs"/></div>
+                                <div className="col-span-2"><label className="text-[10px] font-bold">Total Pzs</label><input type="number" value={p.totalPedido} onChange={e=>updatePiece(p.id,'totalPedido',e.target.value)} className="w-full border p-1 font-bold text-indigo-700" disabled={!!predefinedPackages}/></div>
+                                <div className="col-span-1"><label className="text-[10px] font-bold">Min/Pza</label><input type="number" value={p.tiempo} onChange={e=>updatePiece(p.id,'tiempo',e.target.value)} className="w-full border p-1 bg-yellow-50 font-bold"/></div>
                                 <div className="col-span-1 text-center"><button onClick={()=>removePiece(p.id)} className="text-red-500" disabled={!!predefinedPackages}><Icon name="x"/></button></div>
                             </div>
                         ))}
                         {!predefinedPackages && <button onClick={addPiece} className="text-xs font-bold text-indigo-600">+ Agregar Pieza</button>}
-                        {predefinedPackages && <div className="text-xs text-green-600 font-bold mt-2"><Icon name="check"/> Paquetes cargados desde Excel ({predefinedPackages.length} filas)</div>}
                     </div>
+
                     <ThreadingEditor data={threadingData} onChange={setThreadingData} inventoryKeys={inventoryKeys} />
+                    
                     <div className="flex gap-4 mt-4">
                         {!predefinedPackages && <div className="w-32"><label className="text-xs font-bold">Pzs/Paquete</label><input type="number" value={packageSize} onChange={e=>setPackageSize(e.target.value)} className="border p-2 rounded w-full"/></div>}
                         <button onClick={handleSubmit} className="flex-1 bg-slate-900 text-white font-bold rounded shadow hover:bg-slate-800 py-3">{isEditing ? 'GUARDAR CAMBIOS' : 'CREAR ORDEN'}</button>
@@ -470,6 +684,7 @@
             );
         };
 
+        // --- VISTA DETALLE E IMPRESIÓN ---
         const OrderView = ({ order, config, printConfig, onBack, onEdit }) => { 
             const [entry, setEntry] = useState({ tejedor: '', fecha: new Date().toISOString().split('T')[0], defectos: '', agujas: '' });
             
@@ -495,11 +710,14 @@
                 }
             };
 
-            // Cálculos de eficiencia para la impresión
             const timePerPiece = parseFloat(order.subPiecesData[0]?.tiempo) || 0;
             const piecesPerHour = timePerPiece > 0 ? (60 / timePerPiece).toFixed(0) : 0;
-            const piecesPerDay = timePerPiece > 0 ? ((60 / timePerPiece) * 24).toFixed(0) : 0;
-            const showEfficiency = printConfig?.showEfficiency !== false; // Mostrar por defecto
+            const piecesPerTurn = timePerPiece > 0 ? ((60 / timePerPiece) * 12).toFixed(0) : 0; // Cambio a 12 horas
+            const showEfficiency = printConfig?.showEfficiency !== false; 
+
+            // Construir visualización de partida si no existe los campos nuevos (compatibilidad antigua)
+            const displayBase = order.partidaBase || order.partida || '???';
+            const displaySuffix = order.partidaSuffix || '';
 
             return (
                 <div className="bg-white min-h-screen relative">
@@ -508,15 +726,13 @@
                         <div className="flex gap-2">
                              <button onClick={toggleArchive} className={`px-3 py-1 rounded font-bold text-xs flex items-center gap-1 text-white ${order.status === 'ARCHIVADO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'}`}>
                                  <Icon name={order.status === 'ARCHIVADO' ? "refresh-ccw" : "archive"}/> 
-                                 {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR ORDEN'}
+                                 {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR'}
                              </button>
 
                              <button onClick={() => onEdit(order)} className="bg-indigo-600 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-indigo-700">
                                  <Icon name="file-edit"/> EDITAR
                              </button>
-                             <button onClick={() => window.print()} className="bg-slate-900 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-slate-700">
-                                 <Icon name="printer"/> IMPRIMIR
-                             </button>
+                             <ExportOptions order={order} config={config}/>
                         </div>
                     </div>
                     
@@ -527,7 +743,12 @@
                              <div className="flex justify-between items-start border-b-4 border-black pb-2 mb-2">
                                 <div>
                                     <h1 className="text-4xl font-black uppercase tracking-tighter">{order.cliente}</h1>
-                                    <div className="text-xl font-bold font-mono">PARTIDA: {order.partida}</div>
+                                    <div className="flex items-baseline mt-1">
+                                        <span className="text-sm font-bold mr-2">PARTIDA:</span>
+                                        {/* AQUI ESTA LA MAGIA DE LOS TAMAÑOS */}
+                                        <span className="text-3xl font-black">{displayBase}</span>
+                                        <span className="text-lg font-normal text-slate-500 ml-1 tracking-tighter">{displaySuffix}</span>
+                                    </div>
                                     <div className="text-sm font-bold text-slate-600 mt-1">MODELO: {order.codigo}</div>
                                 </div>
                                 <div className="text-right">
@@ -537,20 +758,23 @@
                              </div>
                             
                              <div className="flex gap-2 flex-grow overflow-hidden">
-                                <div className="w-7/12 flex flex-col gap-2">
-                                    <div className="border-2 border-black">
+                                <div className="w-7/12 flex print-left-data gap-2"> {/* print-left-data */}
+                                    <div className="border-2 border-black print-piece-data"> {/* print-piece-data */}
                                         <div className="flex bg-gray-200 border-b border-black font-bold text-xs uppercase p-1">
-                                            <div className="flex-1">Descripción / Pieza</div><div className="w-20 text-center">Talla</div><div className="w-20 text-center">Total</div>
+                                            <div className="flex-1">Programa / Descripción / Pieza</div><div className="w-20 text-center">Talla</div><div className="w-20 text-center">Total</div>
                                         </div>
                                         {order.subPiecesData.map((p,i)=>(
                                             <div key={i} className="flex text-sm p-1 border-b last:border-0">
-                                                <div className="flex-1 truncate">{p.pieza}</div>
+                                                <div className="flex-1 text-[11px] font-medium truncate" title={`${p.programa || 'N/A'} / ${p.pieza} (${p.abbr || '??'})`}>
+                                                    <span className="font-bold text-black">{p.programa || 'N/A'}</span> / {p.pieza} <span className="text-[9px] text-gray-500">({p.abbr || '??'})</span>
+                                                </div>
                                                 <div className="w-20 text-center text-xs">{p.talla}</div>
                                                 <div className="w-20 text-center font-bold">{p.totalPedido}</div>
                                             </div>
                                         ))}
                                     </div>
-                                    <div className="flex-grow border-2 border-black relative flex flex-col">
+                                    
+                                    <div className="print-threading-data"> {/* print-threading-data */}
                                         <div className="bg-black text-white text-xs font-bold text-center shrink-0">ENHEBRADO</div>
                                         <div className="p-1 flex-grow overflow-hidden">
                                             <table className="threading-table-print text-left h-full">
@@ -565,17 +789,16 @@
                                             </table>
                                         </div>
                                     </div>
-                                    
-                                    {/* SECCIÓN NUEVA DE EFICIENCIA Y TIEMPO */}
+
                                     {showEfficiency && (
-                                        <div className="border-2 border-black flex h-20 bg-slate-50">
-                                            <div className="w-1/2 border-r-2 border-black flex flex-col items-center justify-center">
-                                                <span className="text-[10px] font-bold uppercase text-slate-500">PRODUCCIÓN EST. (1 HORA)</span>
+                                        <div className="border-2 border-black flex bg-slate-50 print-efficiency-data"> {/* print-efficiency-data */}
+                                            <div className="w-1/2 border-r-2 border-black flex flex-col items-center justify-center p-2">
+                                                <span className="text-[10px] font-bold uppercase text-slate-500 text-center">PRODUCCIÓN EST. (1 HORA)</span>
                                                 <div className="text-4xl font-black">{piecesPerHour} <span className="text-sm text-slate-400">Pzs</span></div>
                                             </div>
-                                            <div className="w-1/2 flex flex-col items-center justify-center">
-                                                <span className="text-[10px] font-bold uppercase text-slate-500">PRODUCCIÓN EST. (24 HORAS)</span>
-                                                <div className="text-4xl font-black">{piecesPerDay} <span className="text-sm text-slate-400">Pzs</span></div>
+                                            <div className="w-1/2 flex flex-col items-center justify-center p-2">
+                                                <span className="text-[10px] font-bold uppercase text-slate-500 text-center">PRODUCCIÓN EST. (TURNO 12 HRS)</span>
+                                                <div className="text-4xl font-black">{piecesPerTurn} <span className="text-sm text-slate-400">Pzs</span></div>
                                             </div>
                                         </div>
                                     )}
@@ -590,37 +813,38 @@
                         <div className="print-section-bottom print-only">
                             <div className="flex-grow">
                                 <div className="border-b border-black font-bold mb-1 text-sm flex justify-between">
-                                    <span>{printConfig?.reportTitle || 'CONTROL DE TEJIDO'} - PARTIDA {order.partida}</span>
-                                    <span>TOTAL PIEZAS: {order.totalPedido}</span>
+                                    <span>{printConfig?.reportTitle || 'CONTROL DE TEJIDO'} - {order.partidaBase}</span>
+                                    <span>ENTREGA: {order.deliveryDate || 'N/A'}</span>
                                 </div>
                                 <table className="package-table-print">
                                     <colgroup>
                                         <col style={{width: '5%'}} />
-                                        <col style={{width: '15%'}} /> <col style={{width: '8%'}} />
+                                        <col style={{width: '25%'}} /> <col style={{width: '8%'}} />
                                         <col style={{width: '10%'}} />
                                         <col style={{width: '10%'}} />
                                         <col style={{width: '8%'}} />
                                         <col style={{width: '8%'}} />
                                         <col style={{width: '5%'}} />
-                                        <col style={{width: '31%'}} /> </colgroup>
+                                        <col style={{width: '21%'}} /> </colgroup>
                                     <thead>
                                         <tr>
                                             <th>#</th>
-                                            <th>CÓDIGO</th> 
+                                            <th>CÓDIGO ÚNICO (EXPORT)</th> 
                                             <th>Cant</th>
                                             <th>Tejedor</th>
                                             <th>Fecha</th>
                                             <th>Def</th>
                                             <th>Agj</th>
                                             <th>OK</th>
-                                            <th>OBSERVACIONES</th>
+                                            <th>OBS</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {order.progreso?.map((p, idx) => (
                                             <tr key={p.id}>
                                                 <td className="text-center font-bold border-r border-black">{idx+1}</td>
-                                                <td className="pl-1 font-mono text-[8px] border-r border-black truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
+                                                {/* CÓDIGO GENERADO: ENE2601-01/10BL */}
+                                                <td className="pl-1 font-black font-mono text-[9px] border-r border-black truncate" title={p.codigoUnico}>{p.codigoUnico}</td>
                                                 <td className="text-center font-bold border-r border-black">{p.cantidad}</td>
                                                 <td className="manual-input border-r border-black">{p.finished ? p.tejedor : '_'}</td>
                                                 <td className="manual-input border-r border-black">{p.finished ? p.fecha : '_'}</td>
@@ -682,7 +906,7 @@
                                         <tbody>
                                             {order.progreso.map(p=>(
                                                 <tr key={p.id} className="border-b hover:bg-slate-50 transition-colors">
-                                                    <td className="p-3 font-mono" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
+                                                    <td className="p-3 font-mono font-bold text-slate-600" title={p.codigoUnico}>{p.codigoUnico}</td>
                                                     <td className="p-3 font-bold">{p.cantidad}</td>
                                                     <td className="p-3">{p.finished ? <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-full text-[10px]">LISTO ({p.tejedor})</span> : <span className="text-slate-400 font-medium">PENDIENTE</span>}</td>
                                                     <td className="p-3">{!p.finished 
@@ -709,7 +933,7 @@
                 <div className="border rounded bg-white overflow-hidden my-4">
                     <div className="bg-slate-200 p-2 text-xs font-bold flex justify-between"><span>TABLA DE ENHEBRADO</span><button onClick={addRow} className="text-indigo-600 font-bold">+ Fila</button></div>
                     <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-50"><tr><th className="p-2">GUÍA</th><th className="p-2">MATERIAL</th><th className="p-2 w-16 text-center">%</th><th></th></tr></thead>
+                        <thead className="bg-slate-50"><tr><th className="p-2 w-16">GUÍA</th><th className="p-2">MATERIAL</th><th className="p-2 w-16 text-center">%</th><th></th></tr></thead>
                         <tbody>{data.map((row) => (<tr key={row.id}><td className="p-1"><input className="w-full border rounded p-1" placeholder="#" value={row.guia} onChange={toUppercase(e=>updateRow(row.id,'guia',e.target.value))} /></td><td className="p-1"><input list="inv" className="w-full border rounded p-1" value={row.material} onChange={toUppercase(e=>updateRow(row.id,'material',e.target.value))} /></td><td className="p-1"><input className="w-full border rounded p-1 text-center" value={row.porcentaje} onChange={e=>updateRow(row.id,'porcentaje',e.target.value)} /></td><td className="p-1"><button onClick={()=>removeRow(row.id)} className="text-red-400"><Icon name="x" size={14}/></button></td></tr>))}</tbody>
                     </table>
                     <datalist id="inv">{inventoryKeys.map(k=><option key={k} value={k}/>)}</datalist>
@@ -751,7 +975,6 @@
             );
         };
 
-        // --- NUEVO COMPONENTE: CONFIGURACIÓN DE IMPRESIÓN ---
         const PrintConfigModal = ({ currentConfig, onClose }) => {
             const [conf, setConf] = useState(currentConfig || { reportTitle: 'CONTROL DE TEJIDO', footerText: 'SISTEMA TEXTIL CLOUD', showEfficiency: true });
 
@@ -845,7 +1068,7 @@
             const [formProps, setFormProps] = useState({ initialOrder: null, isEditing: false }); 
             const [showSettings, setShowSettings] = useState(false);
             const [showPrintConfig, setShowPrintConfig] = useState(false); // Modal de config impresión
-            const [showImport, setShowImport] = useState(false);
+            const [showImport, setShowImport] = useState(false); // Para importar excel (mantiene compatibilidad simple)
             const [showGallery, setShowGallery] = useState(false);
             const [viewMode, setViewMode] = useState('active'); 
 
@@ -853,7 +1076,7 @@
                 const u1 = db.collection('orders').onSnapshot(s => setOrders(s.docs.map(d=>d.data())));
                 const u2 = db.collection('settings').doc('config').onSnapshot(d => setConfig(d.data() || {}));
                 const u3 = db.collection('inventory').doc('main').onSnapshot(d => setInventory(d.data() || {}));
-                const u4 = db.collection('settings').doc('print').onSnapshot(d => setPrintConfig(d.data() || {})); // Listener para config de impresión
+                const u4 = db.collection('settings').doc('print').onSnapshot(d => setPrintConfig(d.data() || {}));
                 setTimeout(()=>lucide.createIcons(), 500);
                 return () => { u1(); u2(); u3(); u4(); };
             }, []);
@@ -869,8 +1092,13 @@
 
             const allClients = [...new Set(orders.map(o => o.cliente))].sort();
             
+            // Nota: Importación simple mantenida para compatibilidad, pero la creación manual es preferida ahora
             const handleImportData = (data) => {
-                setFormProps({ initialOrder: data, isEditing: false });
+                // Al importar, asignamos la fecha de hoy y consecutivo '00' por defecto para que el usuario edite
+                setFormProps({ 
+                    initialOrder: { ...data, deliveryDate: new Date().toISOString().split('T')[0], sequence: '00' }, 
+                    isEditing: false 
+                });
                 setShowImport(false);
                 setView('create');
             };
@@ -889,7 +1117,8 @@
                     
                     {showSettings && <SettingsModal config={config} onClose={()=>setShowSettings(false)} onOpenPrintConfig={()=>{setShowSettings(false); setShowPrintConfig(true);}} />}
                     {showPrintConfig && <PrintConfigModal currentConfig={printConfig} onClose={()=>setShowPrintConfig(false)} />}
-                    {showImport && <ImportModal onClose={()=>setShowImport(false)} onImport={handleImportData} />}
+                    {/* Importar desactivado por ahora para enfocar en la nueva lógica manual, o puedes reactivarlo si lo ajustas */}
+                    {/* {showImport && <ImportModal onClose={()=>setShowImport(false)} onImport={handleImportData} />} */}
                     {showGallery && <ImageGallery config={config} onClose={()=>setShowGallery(false)} orders={orders} />}
 
                     <div className="dashboard-grid">
@@ -898,7 +1127,7 @@
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
                                     <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v2.2</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.1 Export</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
@@ -913,8 +1142,8 @@
                                     
                                     {viewMode === 'active' && (
                                         <>
-                                            <button onClick={()=>{setFormProps({initialOrder:null, isEditing: false}); setView('create')}} className="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="plus"/> MANUAL</button>
-                                            <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="file-spreadsheet"/> IMPORTAR</button>
+                                            <button onClick={()=>{setFormProps({initialOrder:null, isEditing: false}); setView('create')}} className="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="plus"/> NUEVA ORDEN</button>
+                                            {/* Importar oculto para simplificar la transición a la nueva nomenclatura */}
                                         </>
                                     )}
                                 </div>
@@ -923,13 +1152,15 @@
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 {displayedOrders.sort((a,b)=>b.id-a.id).map(o => {
                                     const pct = Math.round((o.progreso.filter(p=>p.finished).length / o.progreso.length)*100);
+                                    // Manejo de compatibilidad para órdenes viejas vs nuevas
+                                    const pBase = o.partidaBase || o.partida;
                                     return (
                                         <div key={o.id} onClick={()=>{setSelectedOrder(o); setView('detail')}} className={`p-3 rounded shadow border-l-4 cursor-pointer hover:shadow-lg transition ${o.status === 'ARCHIVADO' ? 'bg-slate-200 border-slate-500 opacity-75' : 'bg-white border-indigo-500'}`}>
                                             <div className="flex justify-between items-start">
                                                 <div className="font-bold text-lg">{o.codigo}</div>
                                                 <div className="bg-slate-200 text-slate-700 text-xs px-2 py-1 rounded font-bold">MQ-{o.maquina}</div>
                                             </div>
-                                            <div className="text-xs font-bold text-indigo-800 mt-1">PARTIDA: {o.partida}</div>
+                                            <div className="text-xs font-bold text-indigo-800 mt-1">PARTIDA: {pBase}</div>
                                             <div className="text-[10px] text-slate-400">Total: {o.totalPedido} pzs</div>
                                             <div className="mt-2 w-full bg-slate-100 h-2 rounded overflow-hidden">
                                                 <div className={`${o.status === 'ARCHIVADO' ? 'bg-slate-500' : 'bg-green-500'} h-full`} style={{width:`${pct}%`}}></div>
