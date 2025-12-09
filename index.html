@@ -113,13 +113,13 @@
         const { useState, useEffect, useMemo } = React;
         
         const firebaseConfig = {
-            apiKey: "AIzaSyBqHgV4vDat1-VmZfKbiPg7nuiX-ROcexw",
-            authDomain: "cirineo-cec21.firebaseapp.com",
-            projectId: "cirineo-cec21",
-            storageBucket: "cirineo-cec21.firebasestorage.app",
-            messagingSenderId: "620210618284",
-            appId: "1:620210618284:web:482bab9bf74650fff18409",
-            measurementId: "G-B7YLM78RVW"
+            apiKey: "AIzaSyCQTsg5pkyOOUtUz2-3D7vz5nsKV40xNWo",
+            authDomain: "maes-6ac53.firebaseapp.com",
+            projectId: "maes-6ac53",
+            storageBucket: "maes-6ac53.firebasestorage.app",
+            messagingSenderId: "298060807774",
+            appId: "1:298060807774:web:2e027a9217363cfaaf7ecf",
+            measurementId: "G-0KCFFE9TJD"
         };
 
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
@@ -470,9 +470,14 @@
                 }
             };
 
-            // --- FUNCIÓN PARA EXPORTAR A EXCEL (CSV) ---
+            // --- FUNCIÓN PARA EXPORTAR A EXCEL (CSV MEJORADO) ---
             const exportOrderToCSV = () => {
-                // Definimos las cabeceras compatibles con la importación
+                // Preparamos el string de Enhebrado concatenado
+                const threadingStr = order.threading && order.threading.length > 0 
+                    ? order.threading.map(t => `G${t.guia}:${t.material}`).join(' / ') 
+                    : '';
+
+                // Definimos las cabeceras compatibles con la importación + nuevas columnas
                 const headers = [
                     "PARTIDA", 
                     "MODELO", 
@@ -480,20 +485,24 @@
                     "MAQUINA", 
                     "DESCRIPCION", 
                     "TALLA", 
+                    "TIEMPO (MIN)",  // Nueva columna solicitada
+                    "ENHEBRADO",     // Nueva columna solicitada
                     "PIEZAS", 
-                    "CODIGO", 
+                    "CODIGO_PAQUETE", 
                     "TEJEDOR", 
                     "FECHA",
                     "DEFECTOS",
                     "AGUJAS",
-                    "OBSERVACIONES"
+                    "OBSERVACIONES",
+                    "ESTADO"
                 ];
 
                 // Mapeamos cada paquete (fila del progreso) a una fila del Excel
                 const rows = order.progreso.map(p => {
-                    // Buscamos la talla correspondiente a la pieza
+                    // Buscamos datos específicos de la pieza (tiempo, talla)
                     const subPiece = order.subPiecesData.find(sp => sp.pieza === p.piezaNombre);
                     const talla = subPiece ? subPiece.talla : 'UNITALLA';
+                    const tiempo = subPiece ? subPiece.tiempo : '0';
 
                     return [
                         order.partida,           // PARTIDA
@@ -502,18 +511,21 @@
                         order.maquina,           // MAQUINA
                         p.piezaNombre,           // DESCRIPCION
                         talla,                   // TALLA
+                        tiempo,                  // TIEMPO POR LIENZO (Minutos)
+                        threadingStr,            // ENHEBRADO (Concatenado)
                         p.cantidad,              // PIEZAS
                         p.codigoUnico || '',     // CODIGO (ID Único del paquete)
                         p.finished ? p.tejedor : '', // TEJEDOR
                         p.finished ? p.fecha : '',   // FECHA
                         p.finished ? p.defectos : '', // DEFECTOS
                         p.finished ? p.agujas : '',   // AGUJAS
-                        p.observaciones || ''    // OBSERVACIONES
+                        p.observaciones || '',   // OBSERVACIONES
+                        p.finished ? 'TERMINADO' : 'PENDIENTE'
                     ].map(field => `"${String(field || '').replace(/"/g, '""')}"`).join(','); // Escapar comillas para CSV
                 });
 
-                // Unimos cabeceras y filas
-                const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n'); // \uFEFF es para que Excel reconozca acentos (BOM)
+                // Unimos cabeceras y filas con BOM para acentos
+                const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n');
 
                 // Crear blob y descargar
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
