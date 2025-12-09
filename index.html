@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Textil Cloud - Cirineo v3.0 Export</title>
+    <title>Sistema Textil Cloud - Cirineo</title>
     
     <link id="appIcon" rel="icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/maes.png">
     <link id="appAppleIcon" rel="apple-touch-icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/maes.png">
@@ -64,31 +64,48 @@
                 background: white !important;
                 inset: auto !important;
             }
-            .print-section-top { height: 42vh; overflow: hidden; border-bottom: 2px dashed #000; margin-bottom: 1vh; display: flex; flex-direction: column; }
-            .print-section-bottom { height: 53vh; display: flex; flex-direction: column; justify-content: space-between; }
+            .print-section-top { height: 40vh; overflow: hidden; border-bottom: 2px dashed #000; margin-bottom: 1vh; display: flex; flex-direction: column; }
+            /* Ajustamos un poco la altura inferior para dar espacio al footer */
+            .print-section-bottom { height: 55vh; display: flex; flex-direction: column; justify-content: space-between; }
             
             table { border-collapse: collapse; width: 100%; border: 2px solid black; table-layout: fixed; }
             th, td { border: 1px solid black; word-wrap: break-word; }
-            .threading-table-print { font-size: 8pt; }
+            .threading-table-print { font-size: 9pt; }
             .threading-table-print th { background-color: #ddd !important; }
-            .package-table-print { font-size: 9pt; width: 100%; border: 2px solid black !important; }
+            .package-table-print { font-size: 10pt; width: 100%; border: 2px solid black !important; }
             .package-table-print th { 
                 background-color: #e5e7eb !important;
                 font-weight: 800; 
                 text-transform: uppercase; 
-                font-size: 7pt;
-                padding: 1px;
+                font-size: 9pt;
+                padding: 2px;
                 border: 1px solid black !important;
             }
             .package-table-print td { 
-                padding: 1px;
-                height: 25px; 
+                padding: 3px;
+                height: 28px; 
                 vertical-align: middle; 
                 border: 1px solid black !important;
-                font-size: 8pt;
+                font-size: 10pt; /* Aumentado para mejor legibilidad */
+            }
+            .package-table-print th:last-child,
+            .package-table-print td:last-child {
+                border-right: none !important;
             }
             .manual-input { color: transparent; }
             .print-only { display: block !important; }
+
+            /* NUEVOS AJUSTES SOLICITADOS */
+            /* Hacemos que el bloque de Programa/Descripción/Pieza crezca el doble hacia abajo */
+            .package-desc { min-height: 180px !important; }
+
+            /* Reducimos el área de enhebrado para compensar */
+            .threading-area { max-height: 80px !important; overflow: auto !important; }
+
+            /* Incrementamos el alto del área de imagen/producto (producción por hora/turno visual) 50% hacia arriba */
+            .product-image-area { min-height: 240px !important; display:flex; align-items:center; justify-content:center; }
+
+            .print-section-top .left-column { display: flex; flex-direction: column; gap: 8px; }
         }
 
         .print-only { display: none; }
@@ -125,66 +142,46 @@
         const Icon = ({ name, size = 18, className }) => <i data-lucide={name} width={size} height={size} className={className}></i>;
         const toUppercase = (handler) => (e) => { e.target.value = e.target.value.toUpperCase(); handler(e); };
         
-        // --- UTILIDADES DE FECHA Y PARTIDA ---
-        const MONTHS = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-        
-        const getPartidaCodes = (dateStr, sequence, pieces) => {
-            if(!dateStr) return { base: '???', suffix: '' };
-            const date = new Date(dateStr); // Cuidado con zona horaria, usaremos input date string directo
-            const [y, m, d] = dateStr.split('-'); 
-            const monthCode = MONTHS[parseInt(m) - 1];
-            const yearCode = y.substring(2);
-            const seqCode = sequence.toString().padStart(2, '0');
-            
-            const base = `${monthCode}${yearCode}${seqCode}`;
-            
-            // Generar sufijos únicos
-            const uniqueAbbrs = [...new Set(pieces.map(p => p.abbr || p.pieza.substring(0,2).toUpperCase()))];
-            const suffix = uniqueAbbrs.map(a => `/${a}`).join('');
-            
-            return { base, suffix, full: base + suffix };
-        };
-
         const generateSmartID = (partida, pieces, maquina) => {
-             // ID interno para base de datos
-            return `${partida}-M${maquina}-${Date.now()}`;
+            const piecePrefixes = pieces.map(p => p.pieza.substring(0, 2).toUpperCase()).join('/');
+            return `${partida}-${piecePrefixes}-M${maquina}`;
         };
 
-        const generatePackages = (pieces, packageSize, partidaBase) => {
+        const generatePackages = (pieces, packageSize, partida) => {
             let packages = [];
-            let globalCounter = 1;
-            
+            let pkgCounter = 1;
             pieces.forEach(p => {
                 const total = Number(p.totalPedido) || 0;
                 const size = Number(packageSize) || total;
                 const n = Math.ceil(total / size);
-                const abbr = p.abbr || p.pieza.substring(0, 2).toUpperCase();
+                const piecePrefix = p.pieza.substring(0, 3).toUpperCase();
 
                 for (let i = 1; i <= n; i++) {
                     const cantidad = (i === n) ? (total % size || size) : size;
-                    // NUEVO FORMATO: ENE2601-01/10BL
-                    const codigoUnico = `${partidaBase}-${i.toString().padStart(2,'0')}/${n}${abbr}`; 
-                    
+                    const codigoUnico = `${piecePrefix}_${i}_DE_${n}`; 
                     packages.push({ 
-                        id: Date.now() + Math.random() + globalCounter, 
+                        id: Date.now() + Math.random() + pkgCounter, 
                         piezaNombre: p.pieza, 
-                        piezaAbbr: abbr,
                         cantidad: cantidad, 
                         paqueteNum: i, 
                         paquetesDePieza: n, 
                         codigoUnico: codigoUnico,
                         finished: false 
                     });
-                    globalCounter++;
+                    pkgCounter++;
                 }
             });
             return packages;
         };
 
+        // --- COMPONENTE BOTÓN DE INSTALACIÓN ---
         const InstallButton = () => {
             const [deferredPrompt, setDeferredPrompt] = useState(null);
             useEffect(() => {
-                const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); };
+                const handler = (e) => {
+                    e.preventDefault();
+                    setDeferredPrompt(e);
+                };
                 window.addEventListener('beforeinstallprompt', handler);
                 return () => window.removeEventListener('beforeinstallprompt', handler);
             }, []);
@@ -212,7 +209,7 @@
                     incomplete.forEach(p => {
                         const pieceData = o.subPiecesData?.find(sp => sp.pieza === p.piezaNombre) || o;
                         const timePerPiece = Number(pieceData.tiempo) || 0;
-                        pkgs.push({ ...p, parentOrderId: o.id, orderCode: o.codigo, partida: o.partidaBase, timeTotal: (p.cantidad * timePerPiece) });
+                        pkgs.push({ ...p, parentOrderId: o.id, orderCode: o.codigo, partida: o.partida, timeTotal: (p.cantidad * timePerPiece) });
                     });
                 });
                 return pkgs; 
@@ -226,7 +223,7 @@
             };
 
             const totalMinutesLeft = pendingPackages.reduce((sum, p) => sum + p.timeTotal, 0);
-            const hoursPerDay = is24Hours ? 24 : 12;
+            const hoursPerDay = is24Hours ? 24 : 12; // USUARIO SOLICITÓ 12 HORAS POR TURNO
             const daysLeft = totalMinutesLeft > 0 ? (totalMinutesLeft / 60 / hoursPerDay).toFixed(1) : 0;
             const hoursLeft = (totalMinutesLeft / 60).toFixed(1);
 
@@ -278,7 +275,95 @@
             );
         };
 
-        // --- SMART IMAGE ---
+        // --- COMPONENTE DE IMPORTACIÓN (CORREGIDO + FECHA CREACIÓN) ---
+        const ImportModal = ({ onClose, onImport }) => {
+            const [text, setText] = useState('');
+            const [error, setError] = useState(null);
+
+            const handleProcess = () => {
+                if (!text.trim()) return;
+                try {
+                    const delimiter = text.includes('	') ? '	' : ',';
+                    const rows = text.trim().split('
+').map(r => r.split(delimiter));
+                    if (rows.length < 2) throw new Error("Datos insuficientes.");
+                    const headers = rows[0].map(h => h.trim().toUpperCase().replace(/"/g, ''));
+                    const getVal = (row, colName) => { const idx = headers.indexOf(colName); return idx !== -1 && row[idx] ? row[idx].trim().replace(/"/g, '') : ''; };
+
+                    if (headers.indexOf('PARTIDA') === -1) throw new Error("Falta columna 'PARTIDA'");
+                    if (headers.indexOf('CODIGO') === -1) throw new Error("Falta columna 'CODIGO'");
+                    if (headers.indexOf('PIEZAS') === -1) throw new Error("Falta columna 'PIEZAS'");
+
+                    const predefinedPackages = [];
+                    let totalPiezas = 0;
+                    const firstRow = rows[1]; 
+                    
+                    rows.slice(1).forEach((r, i) => {
+                        const piezas = parseFloat(getVal(r, 'PIEZAS'));
+                        const codigoUnico = getVal(r, 'CODIGO'); 
+                        let pkgNum = i + 1;
+                        if (!isNaN(piezas)) {
+                            totalPiezas += piezas;
+                            predefinedPackages.push({ 
+                                id: Date.now() + i, 
+                                piezaNombre: getVal(r, 'DESCRIPCION') || 'ESTANDAR', 
+                                cantidad: piezas, 
+                                paqueteNum: pkgNum, 
+                                paquetesDePieza: rows.length - 1, 
+                                codigoUnico: codigoUnico, 
+                                finished: false 
+                            });
+                        }
+                    });
+
+                    const threading = [];
+                    const nylon = getVal(firstRow, 'NYLON');
+                    const lycra = getVal(firstRow, 'LYCRA');
+                    if (nylon) threading.push({ id: 1, guia: '1', material: `NYLON ${nylon}`, sis: '', porcentaje: '' });
+                    if (lycra) threading.push({ id: 2, guia: '2', material: `LYCRA ${lycra}`, sis: '', porcentaje: '' });
+                    
+                    // IMPORTANTE: Ahora incluimos createdAt
+                    onImport({ 
+                        codigo: getVal(firstRow, 'MODELO'), 
+                        cliente: getVal(firstRow, 'CLIENTE'), 
+                        maquina: getVal(firstRow, 'MAQUINA'), 
+                        partida: getVal(firstRow, 'PARTIDA'), 
+                        subPiecesData: [{ 
+                            id: Date.now(), 
+                            pieza: getVal(firstRow, 'DESCRIPCION') || 'ESTANDAR', 
+                            programa: '', 
+                            talla: getVal(firstRow, 'TALLA') || 'UNITALLA', 
+                            totalPedido: totalPiezas, 
+                            peso: '', 
+                            tiempo: '' 
+                        }], 
+                        threading: threading, 
+                        predefinedPackages: predefinedPackages,
+                        createdAt: new Date().toLocaleString('es-MX') // FECHA DE CREACIÓN AL IMPORTAR
+                    });
+                } catch (e) { setError(e.message); }
+            };
+            return (
+                <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
+                    <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-2xl relative">
+                        <div className="flex justify-between items-center mb-4 border-b pb-2">
+                            <h3 className="font-bold text-xl text-green-700 flex items-center gap-2"><Icon name="file-spreadsheet"/> Importar Excel</h3>
+                            <button onClick={onClose} className="bg-red-500 hover:bg-red-600 text-white rounded-md p-2 shadow-lg flex items-center gap-1 font-bold text-xs transition-transform hover:scale-105">
+                                <Icon name="x" size={18}/> CERRAR
+                            </button>
+                        </div>
+                        <p className="text-xs text-slate-500 mb-2">Copia y pega las celdas desde Excel.</p>
+                        <textarea value={text} onChange={(e) => { setText(e.target.value); setError(null); }} className="w-full h-64 p-3 border-2 border-slate-300 rounded font-mono text-xs focus:border-green-500 focus:outline-none" placeholder="Pegar datos..."></textarea>
+                        {error && <div className="mt-2 text-red-600 text-xs font-bold bg-red-50 p-2 rounded border border-red-200">Error: {error}</div>}
+                        <div className="flex justify-end gap-2 mt-4">
+                            <button onClick={handleProcess} className="px-6 py-2 bg-green-600 text-white font-bold rounded shadow hover:bg-green-700 flex items-center gap-2"><Icon name="check-circle" size={18}/> Procesar</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- COMPONENTE IMAGEN ---
         const SmartImage = ({ repoUrls, codigo, className }) => {
             const [imgSrc, setImgSrc] = useState(null);
             const [attempt, setAttempt] = useState({ urlIndex: 0, extension: 'jpg' });
@@ -308,75 +393,49 @@
             return <img src={imgSrc} onError={handleError} className={className} />;
         };
 
-        // --- FORMULARIO DE ORDEN (NUEVA LÓGICA DE PARTIDAS) ---
+        // --- FORMULARIO DE ORDEN (CREAR Y EDITAR - CON FECHA CREACIÓN) ---
         const MultiOrderForm = ({ config, onCancel, initialOrder, clientHistory, inventory, isEditing }) => {
-            // Estado inicial para encabezado
-            const [header, setHeader] = useState({ 
-                codigo: initialOrder?.codigo || '', 
-                cliente: initialOrder?.cliente || '', 
-                maquina: initialOrder?.maquina || '', 
-                deliveryDate: initialOrder?.deliveryDate || '', 
-                sequence: initialOrder?.sequence || '01'
-            });
-
-            const [pieces, setPieces] = useState(initialOrder?.subPiecesData || [{ id: 1, pieza: 'BLUSA', abbr: 'BL', talla: 'UNITALLA', totalPedido: 100, peso: '', tiempo: '' }]);
+            const [header, setHeader] = useState(initialOrder ? { codigo: initialOrder.codigo, cliente: initialOrder.cliente, maquina: initialOrder.maquina, partida: initialOrder.partida || '', fechaInicio: initialOrder.fechaInicio || new Date().toISOString().split('T')[0] } : { codigo: '', cliente: '', maquina: '', partida: '', fechaInicio: new Date().toISOString().split('T')[0] });
+            const [pieces, setPieces] = useState(initialOrder?.subPiecesData || [{ id: 1, pieza: 'BLUSA', programa: '', talla: 'UNITALLA', totalPedido: 100, peso: '', tiempo: '' }]);
             const [threadingData, setThreadingData] = useState(initialOrder?.threading || []);
             const predefinedPackages = initialOrder?.predefinedPackages || (initialOrder && initialOrder.packageSize === 'VARIO' ? initialOrder.progreso : null);
             const [packageSize, setPackageSize] = useState(initialOrder?.packageSize && initialOrder.packageSize !== 'VARIO' ? initialOrder.packageSize : 50);
-            
-            // Función para calcular la partida en tiempo real
-            const computedPartida = useMemo(() => {
-                return getPartidaCodes(header.deliveryDate, header.sequence, pieces);
-            }, [header.deliveryDate, header.sequence, pieces]);
-
-            const addPiece = () => setPieces([...pieces, { id: Date.now(), pieza: '', abbr: '', talla: 'UNITALLA', totalPedido: '', peso: '', tiempo: '' }]);
-            
-            const updatePiece = (id, f, v) => {
-                setPieces(pieces.map(p => {
-                    if (p.id !== id) return p;
-                    const newP = { ...p, [f]: v };
-                    // Auto-generar abreviatura si cambia el nombre y no tiene una manual
-                    if (f === 'pieza' && v.length >= 2) {
-                        newP.abbr = v.substring(0, 2).toUpperCase();
-                    }
-                    return newP;
-                }));
-            };
-            
+            const addPiece = () => setPieces([...pieces, { id: Date.now(), pieza: '', programa: '', talla: 'UNITALLA', totalPedido: '', peso: '', tiempo: '' }]);
+            const updatePiece = (id, f, v) => setPieces(pieces.map(p => p.id === id ? { ...p, [f]: v } : p));
             const removePiece = (id) => pieces.length > 1 && setPieces(pieces.filter(p => p.id !== id));
             const inventoryKeys = inventory ? Object.keys(inventory) : [];
 
             const handleSubmit = async () => {
-                if(!header.codigo || !header.cliente || !header.maquina || !header.deliveryDate) return alert("Faltan datos (Fecha entrega, modelo, etc).");
-                
+                if(!header.codigo || !header.cliente || !header.maquina || !header.partida) return alert("Faltan datos.");
                 let finalPackages = initialOrder?.progreso?.filter(p => p.finished) || []; 
-                
-                // Si estamos editando y ya existen paquetes, cuidado con regenerar todo
-                if (!predefinedPackages) {
-                    // Generar nuevos paquetes con la NUEVA nomenclatura
-                    const newPackages = generatePackages(pieces, packageSize, computedPartida.base);
-                    
+                if (predefinedPackages) {
+                    if (isEditing) {
+                        const newPredefined = initialOrder.progreso.map(p => {
+                            const original = initialOrder.progreso.find(op => op.id === p.id);
+                            return {...p, finished: original?.finished || false, tejedor: original?.tejedor || '', fecha: original?.fecha || '', defectos: original?.defectos || '', agujas: original?.agujas || ''};
+                        });
+                        finalPackages = newPredefined;
+                    } else {
+                        finalPackages = predefinedPackages;
+                    }
+                } else {
+                    const newPackages = generatePackages(pieces, packageSize, header.partida);
                     if(isEditing) {
-                        // Si se edita, intentamos mantener los terminados y añadir nuevos si aumentó la cantidad
-                        // *NOTA SIMPLIFICADA*: Si cambias la lógica de nombres, lo ideal es regenerar los pendientes.
-                        const finishedIds = new Set(finalPackages.map(p=>p.id));
-                        // Filtramos los nuevos que no conflicteen (en un caso real es complejo, aquí regeneramos los pendientes)
+                         const finishedIds = new Set(finalPackages.map(p=>p.id));
                          finalPackages = [...finalPackages, ...newPackages.filter(p=>!finishedIds.has(p.id))];
                     } else {
                          finalPackages = newPackages;
                     }
                 }
 
-                const displayId = generateSmartID(computedPartida.full, pieces, header.maquina);
+                const displayId = generateSmartID(header.partida, pieces, header.maquina);
+                // LOGICA DE FECHA DE CREACIÓN
                 const creationDate = isEditing 
                     ? (initialOrder.createdAt || new Date().toLocaleString('es-MX')) 
-                    : new Date().toLocaleString('es-MX');
+                    : (initialOrder?.createdAt || new Date().toLocaleString('es-MX'));
 
                 const orderPayload = { 
                     ...header, 
-                    partidaBase: computedPartida.base,    // ENE2601
-                    partidaSuffix: computedPartida.suffix, // /BL/ML
-                    partidaFull: computedPartida.full,     // ENE2601/BL/ML
                     id: isEditing ? initialOrder.id : Date.now(), 
                     displayId, 
                     subPiecesData: pieces.map(p => ({...p, totalPedido: Number(p.totalPedido)})), 
@@ -385,9 +444,8 @@
                     packageSize: predefinedPackages ? 'VARIO' : Number(packageSize), 
                     status: initialOrder?.status || 'EN PROCESO', 
                     totalPedido: pieces.reduce((a,b)=>a+Number(b.totalPedido),0),
-                    createdAt: creationDate
+                    createdAt: creationDate // GUARDAMOS LA FECHA
                 };
-
                 try { 
                     await db.collection('orders').doc(String(orderPayload.id)).set(orderPayload);
                     alert(`Orden ${isEditing ? 'Actualizada' : 'Guardada'}`);
@@ -397,7 +455,6 @@
                     alert("Error al guardar"); 
                 }
             };
-
             return (
                 <div className="bg-white p-6 rounded shadow-xl max-w-4xl mx-auto my-4 overflow-y-auto h-[90vh]">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
@@ -406,51 +463,28 @@
                         </h2>
                         <button onClick={onCancel} className="text-red-500 font-bold">Cancelar</button>
                     </div>
-
-                    {/* SECCIÓN DE PARTIDA INTELIGENTE */}
-                    <div className="bg-slate-100 p-4 rounded mb-4 border border-slate-300">
-                        <div className="flex flex-wrap gap-4 items-end">
-                            <div className="w-40">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Fecha de Entrega</label>
-                                <input type="date" value={header.deliveryDate} onChange={e=>setHeader({...header, deliveryDate:e.target.value})} className="w-full border p-2 rounded font-bold"/>
-                            </div>
-                            <div className="w-20">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase">Consecutivo</label>
-                                <input type="text" value={header.sequence} onChange={e=>setHeader({...header, sequence:e.target.value})} className="w-full border p-2 rounded font-bold text-center" placeholder="01"/>
-                            </div>
-                            <div className="flex-grow bg-white p-2 rounded border border-dashed border-slate-400 flex items-center gap-2">
-                                <span className="text-xs font-bold text-slate-400">VISTA PREVIA PARTIDA:</span>
-                                <div className="flex items-baseline">
-                                    <span className="text-2xl font-black text-slate-800">{computedPartida.base}</span>
-                                    <span className="text-sm text-slate-500 font-medium ml-1">{computedPartida.suffix}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <div className="grid grid-cols-12 gap-4 mb-4">
-                        <div className="col-span-4"><label className="text-xs font-bold">MODELO (FOTO)</label><input value={header.codigo} onChange={toUppercase(e=>setHeader({...header, codigo:e.target.value}))} className="w-full border p-2 rounded font-bold uppercase"/></div>
-                        <div className="col-span-5"><label className="text-xs font-bold">CLIENTE</label><input list="clients" value={header.cliente} onChange={toUppercase(e=>setHeader({...header, cliente:e.target.value}))} className="w-full border p-2 rounded font-bold"/><datalist id="clients">{clientHistory.map(c=><option key={c} value={c}/>)}</datalist></div>
-                        <div className="col-span-3"><label className="text-xs font-bold bg-slate-200 px-1">MÁQUINA</label><input value={header.maquina} onChange={toUppercase(e=>setHeader({...header, maquina:e.target.value}))} className="w-full border-2 border-slate-400 p-2 rounded font-black text-center"/></div>
+                        <div className="col-span-3 bg-yellow-50 p-2 rounded border border-yellow-200"><label className="text-xs font-bold text-yellow-900">PARTIDA</label><input value={header.partida} onChange={toUppercase(e=>setHeader({...header, partida:e.target.value}))} className="w-full text-lg font-black p-1 bg-white border rounded uppercase" placeholder="Ej: 24NOV451" disabled={isEditing}/></div>
+                        <div className="col-span-3"><label className="text-xs font-bold">MODELO (FOTO)</label><input value={header.codigo} onChange={toUppercase(e=>setHeader({...header, codigo:e.target.value}))} className="w-full border p-2 rounded font-bold uppercase"/></div>
+                        <div className="col-span-4"><label className="text-xs font-bold">CLIENTE</label><input list="clients" value={header.cliente} onChange={toUppercase(e=>setHeader({...header, cliente:e.target.value}))} className="w-full border p-2 rounded font-bold"/><datalist id="clients">{clientHistory.map(c=><option key={c} value={c}/>)}</datalist></div>
+                        <div className="col-span-2"><label className="text-xs font-bold bg-slate-200 px-1">MÁQUINA</label><input value={header.maquina} onChange={toUppercase(e=>setHeader({...header, maquina:e.target.value}))} className="w-full border-2 border-slate-400 p-2 rounded font-black text-center"/></div>
                     </div>
-
                     <div className="mb-4 bg-slate-50 p-3 rounded">
                         <h3 className="font-bold text-sm mb-2 flex items-center gap-2"><Icon name="layers"/> Piezas / Detalles</h3>
                         {pieces.map((p, i) => (
                             <div key={p.id} className="grid grid-cols-12 gap-2 mb-2 items-end border-b pb-2">
-                                <div className="col-span-3"><label className="text-[10px] font-bold">Nombre</label><input value={p.pieza} onChange={toUppercase(e=>updatePiece(p.id,'pieza',e.target.value))} className="w-full border p-1 rounded font-bold text-sm" placeholder="EJ: BLUSA"/></div>
-                                <div className="col-span-1"><label className="text-[10px] font-bold">Abr</label><input value={p.abbr} onChange={toUppercase(e=>updatePiece(p.id,'abbr',e.target.value))} className="w-full border p-1 rounded font-mono text-center bg-yellow-50" placeholder="BL"/></div>
+                                <div className="col-span-3"><label className="text-[10px] font-bold">Programa</label><input value={p.programa} onChange={toUppercase(e=>updatePiece(p.id,'programa',e.target.value))} className="w-full border p-1 rounded font-bold text-sm"/></div>
+                                <div className="col-span-4"><label className="text-[10px] font-bold">Nombre/Desc</label><input value={p.pieza} onChange={toUppercase(e=>updatePiece(p.id,'pieza',e.target.value))} className="w-full border p-1 rounded font-bold text-sm"/></div>
                                 <div className="col-span-2"><label className="text-[10px] font-bold">Talla</label><input value={p.talla} onChange={toUppercase(e=>updatePiece(p.id,'talla',e.target.value))} className="w-full border p-1 rounded text-xs"/></div>
-                                <div className="col-span-2"><label className="text-[10px] font-bold">Total Pzs</label><input type="number" value={p.totalPedido} onChange={e=>updatePiece(p.id,'totalPedido',e.target.value)} className="w-full border p-1 font-bold text-indigo-700" disabled={!!predefinedPackages}/></div>
-                                <div className="col-span-2"><label className="text-[10px] font-bold">Min/Pza</label><input type="number" value={p.tiempo} onChange={e=>updatePiece(p.id,'tiempo',e.target.value)} className="w-full border p-1 bg-yellow-50 font-bold"/></div>
+                                <div className="col-span-1"><label className="text-[10px] font-bold">Cant.</label><input type="number" value={p.totalPedido} onChange={e=>updatePiece(p.id,'totalPedido',e.target.value)} className="w-full border p-1 font-bold text-indigo-700" disabled={!!predefinedPackages}/></div>
+                                <div className="col-span-1"><label className="text-[10px] font-bold">Min/Pza</label><input type="number" value={p.tiempo} onChange={e=>updatePiece(p.id,'tiempo',e.target.value)} className="w-full border p-1 bg-yellow-50" placeholder="Calc. Tiempo"/></div>
                                 <div className="col-span-1 text-center"><button onClick={()=>removePiece(p.id)} className="text-red-500" disabled={!!predefinedPackages}><Icon name="x"/></button></div>
                             </div>
                         ))}
                         {!predefinedPackages && <button onClick={addPiece} className="text-xs font-bold text-indigo-600">+ Agregar Pieza</button>}
+                        {predefinedPackages && <div className="text-xs text-green-600 font-bold mt-2"><Icon name="check"/> Paquetes cargados desde Excel ({predefinedPackages.length} filas)</div>}
                     </div>
-
                     <ThreadingEditor data={threadingData} onChange={setThreadingData} inventoryKeys={inventoryKeys} />
-                    
                     <div className="flex gap-4 mt-4">
                         {!predefinedPackages && <div className="w-32"><label className="text-xs font-bold">Pzs/Paquete</label><input type="number" value={packageSize} onChange={e=>setPackageSize(e.target.value)} className="border p-2 rounded w-full"/></div>}
                         <button onClick={handleSubmit} className="flex-1 bg-slate-900 text-white font-bold rounded shadow hover:bg-slate-800 py-3">{isEditing ? 'GUARDAR CAMBIOS' : 'CREAR ORDEN'}</button>
@@ -459,8 +493,8 @@
             );
         };
 
-        // --- VISTA DETALLE E IMPRESIÓN ---
-        const OrderView = ({ order, config, printConfig, onBack, onEdit }) => { 
+        // --- VISUALIZACIÓN E IMPRESIÓN ---
+        const OrderView = ({ order, config, onBack, onEdit }) => { 
             const [entry, setEntry] = useState({ tejedor: '', fecha: new Date().toISOString().split('T')[0], defectos: '', agujas: '' });
             
             const markPackage = async (pkgId) => {
@@ -485,14 +519,91 @@
                 }
             };
 
-            const timePerPiece = parseFloat(order.subPiecesData[0]?.tiempo) || 0;
-            const piecesPerHour = timePerPiece > 0 ? (60 / timePerPiece).toFixed(0) : 0;
-            const piecesPerDay = timePerPiece > 0 ? ((60 / timePerPiece) * 24).toFixed(0) : 0;
-            const showEfficiency = printConfig?.showEfficiency !== false; 
+            const isOrderComplete = order.progreso.every(p => p.finished);
 
-            // Construir visualización de partida si no existe los campos nuevos (compatibilidad antigua)
-            const displayBase = order.partidaBase || order.partida || '???';
-            const displaySuffix = order.partidaSuffix || '';
+            // --- FUNCIONES DE DESCARGA ---
+            const makeCSV = () => {
+                const cols = ['#','CODIGO','CANT','TEJEDOR','FECHA','DEF','AGJ','OK','OBSERVACIONES'];
+                const rows = order.progreso.map((p,idx)=>[
+                    idx+1,
+                    (p.codigoUnico || p.piezaNombre),
+                    p.cantidad,
+                    p.finished ? p.tejedor : '',
+                    p.finished ? p.fecha : '',
+                    p.finished ? p.defectos : '',
+                    p.finished ? p.agujas : '',
+                    p.finished ? 'OK' : '',
+                    p.observaciones || ''
+                ]);
+                let csv = cols.join(',') + '
+' + rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('
+');
+                const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `${order.partida || order.codigo || 'orden'}_control.csv`;
+                a.click();
+            };
+
+            const makeExcel = () => {
+                // Generamos CSV pero con extensión .xls para abrir en Excel fácilmente
+                const cols = ['#','CODIGO','CANT','TEJEDOR','FECHA','DEF','AGJ','OK','OBSERVACIONES'];
+                const rows = order.progreso.map((p,idx)=>[
+                    idx+1,
+                    (p.codigoUnico || p.piezaNombre),
+                    p.cantidad,
+                    p.finished ? p.tejedor : '',
+                    p.finished ? p.fecha : '',
+                    p.finished ? p.defectos : '',
+                    p.finished ? p.agujas : '',
+                    p.finished ? 'OK' : '',
+                    p.observaciones || ''
+                ]);
+                let csv = cols.join('	') + '
+' + rows.map(r=>r.map(c=>String(c).replace(/	/g,' ')).join('	')).join('
+');
+                const blob = new Blob([csv], {type: 'application/vnd.ms-excel'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `${order.partida || order.codigo || 'orden'}_control.xls`;
+                a.click();
+            };
+
+            const makePrintableHTML = () => {
+                // Creamos una versión simple del área imprimible para que el usuario pueda guardarla como PDF desde el navegador
+                const clone = document.createElement('div');
+                clone.innerHTML = document.querySelector('.print-visible-wrapper')?.innerHTML || document.body.innerHTML;
+                return `<!doctype html><html><head><meta charset="utf-8"><title>Impresión</title><style>body{font-family: Arial, Helvetica, sans-serif;margin:10px;}table{border-collapse:collapse;width:100%}th,td{border:1px solid #000;padding:4px;font-size:10pt}</style></head><body>${clone.innerHTML}</body></html>`;
+            };
+
+            const downloadPDF = () => {
+                const html = makePrintableHTML();
+                const w = window.open('', '_blank');
+                w.document.open();
+                w.document.write(html);
+                w.document.close();
+                // El usuario puede guardar como PDF desde la ventana emergente (Archivo -> Guardar como PDF)
+            };
+
+            const downloadWord = () => {
+                // Generamos un archivo .doc (HTML) que Word puede abrir. Incluir imagen del repositorio si existe.
+                const repo = (config.repoUrls && config.repoUrls[0]) ? config.repoUrls[0].endsWith('/') ? config.repoUrls[0] : config.repoUrls[0] + '/' : '';
+                const imgSrc = repo ? `${repo}${order.codigo}.jpg` : '';
+                let html = '<html><head><meta charset="utf-8"><title>Orden</title></head><body>';
+                if (imgSrc) html += `<div><img src="${imgSrc}" style="max-width:300px;display:block;margin-bottom:10px;"/></div>`;
+                html += `<h2>PARTIDA: ${order.partida}</h2><h3>CLIENTE: ${order.cliente}</h3><h4>MODELO: ${order.codigo}</h4>`;
+                html += '<table><thead><tr><th>#</th><th>CODIGO/PIEZA</th><th>Pzs</th><th>Tejedor</th><th>Fecha</th><th>Obs</th></tr></thead><tbody>';
+                order.progreso.forEach((p,idx)=>{
+                    html += `<tr><td>${idx+1}</td><td>${p.codigoUnico || p.piezaNombre}</td><td>${p.cantidad}</td><td>${p.finished ? p.tejedor : ''}</td><td>${p.finished ? p.fecha : ''}</td><td>${p.observaciones || ''}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                html += '</body></html>';
+                const blob = new Blob(['﻿', html], {type: 'application/msword'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `${order.partida || order.codigo || 'orden'}_control.doc`;
+                a.click();
+            };
 
             return (
                 <div className="bg-white min-h-screen relative">
@@ -501,7 +612,7 @@
                         <div className="flex gap-2">
                              <button onClick={toggleArchive} className={`px-3 py-1 rounded font-bold text-xs flex items-center gap-1 text-white ${order.status === 'ARCHIVADO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'}`}>
                                  <Icon name={order.status === 'ARCHIVADO' ? "refresh-ccw" : "archive"}/> 
-                                 {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR'}
+                                 {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR ORDEN'}
                              </button>
 
                              <button onClick={() => onEdit(order)} className="bg-indigo-600 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-indigo-700">
@@ -510,6 +621,12 @@
                              <button onClick={() => window.print()} className="bg-slate-900 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-slate-700">
                                  <Icon name="printer"/> IMPRIMIR
                              </button>
+
+                             {/* NUEVOS BOTONES DE DESCARGA */}
+                             <button onClick={makeCSV} className="bg-white border px-3 py-1 rounded font-bold text-xs flex items-center gap-1">CSV</button>
+                             <button onClick={makeExcel} className="bg-white border px-3 py-1 rounded font-bold text-xs flex items-center gap-1">Excel</button>
+                             <button onClick={downloadPDF} className="bg-white border px-3 py-1 rounded font-bold text-xs flex items-center gap-1">PDF</button>
+                             <button onClick={downloadWord} className="bg-white border px-3 py-1 rounded font-bold text-xs flex items-center gap-1">Word</button>
                         </div>
                     </div>
                     
@@ -520,12 +637,7 @@
                              <div className="flex justify-between items-start border-b-4 border-black pb-2 mb-2">
                                 <div>
                                     <h1 className="text-4xl font-black uppercase tracking-tighter">{order.cliente}</h1>
-                                    <div className="flex items-baseline mt-1">
-                                        <span className="text-sm font-bold mr-2">PARTIDA:</span>
-                                        {/* AQUI ESTA LA MAGIA DE LOS TAMAÑOS */}
-                                        <span className="text-3xl font-black">{displayBase}</span>
-                                        <span className="text-lg font-normal text-slate-500 ml-1 tracking-tighter">{displaySuffix}</span>
-                                    </div>
+                                    <div className="text-xl font-bold font-mono">PARTIDA: {order.partida}</div>
                                     <div className="text-sm font-bold text-slate-600 mt-1">MODELO: {order.codigo}</div>
                                 </div>
                                 <div className="text-right">
@@ -535,23 +647,23 @@
                              </div>
                             
                              <div className="flex gap-2 flex-grow overflow-hidden">
-                                <div className="w-7/12 flex flex-col gap-2">
-                                    <div className="border-2 border-black">
+                                <div className="w-7/12 flex flex-col gap-2 left-column">
+                                    <div className="border-2 border-black package-desc">
                                         <div className="flex bg-gray-200 border-b border-black font-bold text-xs uppercase p-1">
-                                            <div className="flex-1">Descripción / Pieza</div><div className="w-20 text-center">Talla</div><div className="w-20 text-center">Total</div>
+                                            <div className="flex-1">Programa / Descripción / Pieza</div><div className="w-20 text-center">Talla</div><div className="w-20 text-center">Total</div>
                                         </div>
                                         {order.subPiecesData.map((p,i)=>(
                                             <div key={i} className="flex text-sm p-1 border-b last:border-0">
-                                                <div className="flex-1 truncate">{p.pieza} <span className="text-[9px] text-gray-500">({p.abbr || '??'})</span></div>
+                                                <div className="flex-1 truncate"><strong>{p.programa ? `${p.programa} — ` : ''}</strong>{p.pieza}</div>
                                                 <div className="w-20 text-center text-xs">{p.talla}</div>
                                                 <div className="w-20 text-center font-bold">{p.totalPedido}</div>
                                             </div>
                                         ))}
                                     </div>
-                                    <div className="flex-grow border-2 border-black relative flex flex-col">
-                                        <div className="bg-black text-white text-xs font-bold text-center shrink-0">ENHEBRADO</div>
-                                        <div className="p-1 flex-grow overflow-hidden">
-                                            <table className="threading-table-print text-left h-full">
+                                    <div className="flex-grow border-2 border-black relative threading-area">
+                                        <div className="bg-black text-white text-xs font-bold text-center">ENHEBRADO</div>
+                                        <div className="p-1">
+                                            <table className="threading-table-print text-left">
                                                 <thead><tr className="bg-gray-200 border-b border-black"><th className="p-1 w-10">Pos</th><th className="p-1">Material</th><th className="p-1 w-10 text-center">%</th></tr></thead>
                                                 <tbody>{order.threading && order.threading.map((row, i) => (
                                                     <tr key={i} className="border-b border-gray-300">
@@ -563,22 +675,8 @@
                                             </table>
                                         </div>
                                     </div>
-                                    
-                                    {showEfficiency && (
-                                        <div className="border-2 border-black flex h-20 bg-slate-50">
-                                            <div className="w-1/2 border-r-2 border-black flex flex-col items-center justify-center">
-                                                <span className="text-[10px] font-bold uppercase text-slate-500">PRODUCCIÓN EST. (1 HORA)</span>
-                                                <div className="text-4xl font-black">{piecesPerHour} <span className="text-sm text-slate-400">Pzs</span></div>
-                                            </div>
-                                            <div className="w-1/2 flex flex-col items-center justify-center">
-                                                <span className="text-[10px] font-bold uppercase text-slate-500">PRODUCCIÓN EST. (24 HORAS)</span>
-                                                <div className="text-4xl font-black">{piecesPerDay} <span className="text-sm text-slate-400">Pzs</span></div>
-                                            </div>
-                                        </div>
-                                    )}
-
                                 </div>
-                                <div className="w-5/12 border-2 border-black flex items-center justify-center relative bg-slate-50 overflow-hidden group">
+                                <div className="w-5/12 border-2 border-black flex items-center justify-center relative bg-slate-50 overflow-hidden group product-image-area">
                                      <SmartImage repoUrls={config.repoUrls} codigo={order.codigo} className="max-h-full max-w-full object-contain"/>
                                 </div>
                             </div>
@@ -587,38 +685,37 @@
                         <div className="print-section-bottom print-only">
                             <div className="flex-grow">
                                 <div className="border-b border-black font-bold mb-1 text-sm flex justify-between">
-                                    <span>{printConfig?.reportTitle || 'CONTROL DE TEJIDO'} - {order.partidaBase}</span>
-                                    <span>ENTREGA: {order.deliveryDate || 'N/A'}</span>
+                                    <span>CONTROL DE TEJIDO - PARTIDA {order.partida}</span>
+                                    <span>TOTAL PIEZAS: {order.totalPedido}</span>
                                 </div>
                                 <table className="package-table-print">
                                     <colgroup>
                                         <col style={{width: '5%'}} />
-                                        <col style={{width: '25%'}} /> <col style={{width: '8%'}} />
+                                        <col style={{width: '15%'}} /> <col style={{width: '8%'}} />
                                         <col style={{width: '10%'}} />
                                         <col style={{width: '10%'}} />
                                         <col style={{width: '8%'}} />
                                         <col style={{width: '8%'}} />
                                         <col style={{width: '5%'}} />
-                                        <col style={{width: '21%'}} /> </colgroup>
+                                        <col style={{width: '31%'}} /> </colgroup>
                                     <thead>
                                         <tr>
                                             <th>#</th>
-                                            <th>CÓDIGO ÚNICO (EXPORT)</th> 
+                                            <th>CÓDIGO</th> 
                                             <th>Cant</th>
                                             <th>Tejedor</th>
                                             <th>Fecha</th>
                                             <th>Def</th>
                                             <th>Agj</th>
                                             <th>OK</th>
-                                            <th>OBS</th>
+                                            <th>OBSERVACIONES</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {order.progreso?.map((p, idx) => (
                                             <tr key={p.id}>
                                                 <td className="text-center font-bold border-r border-black">{idx+1}</td>
-                                                {/* CÓDIGO GENERADO: ENE2601-01/10BL */}
-                                                <td className="pl-1 font-black font-mono text-[9px] border-r border-black truncate" title={p.codigoUnico}>{p.codigoUnico}</td>
+                                                <td className="pl-1 font-mono text-[8px] border-r border-black truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
                                                 <td className="text-center font-bold border-r border-black">{p.cantidad}</td>
                                                 <td className="manual-input border-r border-black">{p.finished ? p.tejedor : '_'}</td>
                                                 <td className="manual-input border-r border-black">{p.finished ? p.fecha : '_'}</td>
@@ -631,12 +728,10 @@
                                 </table>
                              </div>
 
+                             {/* --- AQUÍ ESTÁ EL PIE DE PÁGINA CON LAS FECHAS --- */}
                              <div className="mt-auto text-center border-t border-gray-300 pt-1">
-                                <div className="text-[10px] text-gray-500 font-bold uppercase">{printConfig?.footerText || 'SISTEMA TEXTIL CLOUD'}</div>
-                                <div className="flex justify-between px-10 text-[8px] text-gray-400 font-mono mt-1">
-                                    <span>CREADO: {order.createdAt || 'N/A'}</span>
-                                    <span>IMPRESO: {new Date().toLocaleString('es-MX')}</span>
-                                </div>
+                                <div className="text-[10px] text-gray-400 font-mono">FECHA CREACIÓN: {order.createdAt || 'N/A'}</div>
+                                <div className="text-[10px] text-gray-400 font-mono">IMPRESO: {new Date().toLocaleString('es-MX')}</div>
                              </div>
 
                         </div>
@@ -680,7 +775,7 @@
                                         <tbody>
                                             {order.progreso.map(p=>(
                                                 <tr key={p.id} className="border-b hover:bg-slate-50 transition-colors">
-                                                    <td className="p-3 font-mono font-bold text-slate-600" title={p.codigoUnico}>{p.codigoUnico}</td>
+                                                    <td className="p-3 font-mono" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
                                                     <td className="p-3 font-bold">{p.cantidad}</td>
                                                     <td className="p-3">{p.finished ? <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-full text-[10px]">LISTO ({p.tejedor})</span> : <span className="text-slate-400 font-medium">PENDIENTE</span>}</td>
                                                     <td className="p-3">{!p.finished 
@@ -715,80 +810,11 @@
             );
         };
 
-        const SettingsModal = ({ config, onClose, onOpenPrintConfig }) => {
+        const SettingsModal = ({ config, onClose }) => {
             const [localUrls, setLocalUrls] = useState(config.repoUrls || []);
             const [newUrl, setNewUrl] = useState('');
             const save = async () => { await db.collection('settings').doc('config').set({ ...config, repoUrls: localUrls }); onClose(); };
-            return (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-                    <div className="bg-white p-6 rounded w-96 shadow-xl">
-                        <h3 className="font-bold mb-4 text-lg">Configuración General</h3>
-                        
-                        <div className="mb-4">
-                            <label className="text-xs font-bold block mb-1">Repositorios de Imágenes</label>
-                            <div className="mb-2 max-h-40 overflow-y-auto bg-slate-50 border rounded p-1">
-                                {localUrls.map((u,i)=><div key={i} className="text-xs truncate mb-1 border-b last:border-0 p-1 flex justify-between"><span>{u}</span><button onClick={()=>setLocalUrls(localUrls.filter((_,x)=>x!==i))} className="text-red-500 font-bold">X</button></div>)}
-                            </div>
-                            <div className="flex gap-2">
-                                <input value={newUrl} onChange={e=>setNewUrl(e.target.value)} className="border p-1 flex-1 text-xs rounded" placeholder="URL GitHub Raw"/>
-                                <button onClick={()=>{if(newUrl)setLocalUrls([...localUrls,newUrl]);setNewUrl('')}} className="bg-blue-100 text-blue-700 px-2 font-bold rounded">+</button>
-                            </div>
-                        </div>
-
-                        <hr className="my-4"/>
-                        <button onClick={onOpenPrintConfig} className="w-full mb-4 bg-indigo-100 text-indigo-800 py-2 rounded font-bold text-sm flex items-center justify-center gap-2 hover:bg-indigo-200">
-                            <Icon name="printer" size={16}/> CONFIGURAR IMPRESIÓN
-                        </button>
-
-                        <div className="flex gap-2">
-                            <button onClick={onClose} className="flex-1 bg-gray-200 text-gray-800 py-2 rounded font-bold">Cancelar</button>
-                            <button onClick={save} className="flex-1 bg-slate-900 text-white py-2 rounded font-bold">Guardar</button>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        const PrintConfigModal = ({ currentConfig, onClose }) => {
-            const [conf, setConf] = useState(currentConfig || { reportTitle: 'CONTROL DE TEJIDO', footerText: 'SISTEMA TEXTIL CLOUD', showEfficiency: true });
-
-            const handleSave = async () => {
-                try {
-                    await db.collection('settings').doc('print').set(conf);
-                    alert("Configuración de impresión guardada.");
-                    onClose();
-                } catch(e) { alert("Error al guardar: " + e.message); }
-            };
-
-            return (
-                <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
-                    <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
-                        <div className="flex justify-between items-center mb-4">
-                             <h3 className="font-bold text-lg flex items-center gap-2"><Icon name="layout-template"/> Personalizar Impresión</h3>
-                             <button onClick={onClose}><Icon name="x"/></button>
-                        </div>
-                        
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 mb-1">TÍTULO DEL REPORTE</label>
-                                <input type="text" value={conf.reportTitle} onChange={(e)=>setConf({...conf, reportTitle: e.target.value})} className="w-full border p-2 rounded text-sm font-bold" placeholder="Ej: ORDEN DE PRODUCCIÓN"/>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 mb-1">PIE DE PÁGINA</label>
-                                <input type="text" value={conf.footerText} onChange={(e)=>setConf({...conf, footerText: e.target.value})} className="w-full border p-2 rounded text-sm" placeholder="Ej: TEXTIL CIRINEO S.A."/>
-                            </div>
-                            <div className="flex items-center gap-3 bg-slate-100 p-3 rounded">
-                                <input type="checkbox" id="effCheck" checked={conf.showEfficiency !== false} onChange={(e)=>setConf({...conf, showEfficiency: e.target.checked})} className="w-5 h-5 accent-indigo-600"/>
-                                <label htmlFor="effCheck" className="text-sm font-bold text-slate-700 cursor-pointer">Mostrar Cálculos de Eficiencia (Pzs/Hora)</label>
-                            </div>
-                        </div>
-
-                        <button onClick={handleSave} className="w-full mt-6 bg-slate-900 text-white py-3 rounded font-bold hover:bg-slate-800 flex items-center justify-center gap-2">
-                            <Icon name="save"/> GUARDAR CAMBIOS
-                        </button>
-                    </div>
-                </div>
-            );
+            return (<div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"><div className="bg-white p-6 rounded w-96"><h3 className="font-bold mb-4">Configuración Imágenes</h3><div className="mb-2 max-h-40 overflow-y-auto">{localUrls.map((u,i)=><div key={i} className="text-xs truncate mb-1 border p-1 flex justify-between"><span>{u}</span><button onClick={()=>setLocalUrls(localUrls.filter((_,x)=>x!==i))} className="text-red-500 font-bold">X</button></div>)}</div><div className="flex gap-2 mb-4"><input value={newUrl} onChange={e=>setNewUrl(e.target.value)} className="border p-1 flex-1 text-xs" placeholder="URL GitHub Raw"/><button onClick={()=>{if(newUrl)setLocalUrls([...localUrls,newUrl]);setNewUrl('')}} className="bg-blue-100 text-blue-700 px-2 font-bold">+</button></div><button onClick={save} className="bg-slate-900 text-white w-full py-2 rounded font-bold">Guardar</button></div></div>);
         };
 
         const ImageGallery = ({ config, onClose, orders }) => {
@@ -836,26 +862,24 @@
             const [view, setView] = useState('dashboard');
             const [orders, setOrders] = useState([]);
             const [config, setConfig] = useState({});
-            const [printConfig, setPrintConfig] = useState({}); // Nuevo estado para config de impresión
             const [inventory, setInventory] = useState({});
             const [selectedOrder, setSelectedOrder] = useState(null);
             const [formProps, setFormProps] = useState({ initialOrder: null, isEditing: false }); 
             const [showSettings, setShowSettings] = useState(false);
-            const [showPrintConfig, setShowPrintConfig] = useState(false); // Modal de config impresión
-            const [showImport, setShowImport] = useState(false); // Para importar excel (mantiene compatibilidad simple)
+            const [showImport, setShowImport] = useState(false);
             const [showGallery, setShowGallery] = useState(false);
-            const [viewMode, setViewMode] = useState('active'); 
+            const [viewMode, setViewMode] = useState('active'); // 'active' o 'history'
 
             useEffect(() => {
                 const u1 = db.collection('orders').onSnapshot(s => setOrders(s.docs.map(d=>d.data())));
                 const u2 = db.collection('settings').doc('config').onSnapshot(d => setConfig(d.data() || {}));
                 const u3 = db.collection('inventory').doc('main').onSnapshot(d => setInventory(d.data() || {}));
-                const u4 = db.collection('settings').doc('print').onSnapshot(d => setPrintConfig(d.data() || {}));
                 setTimeout(()=>lucide.createIcons(), 500);
-                return () => { u1(); u2(); u3(); u4(); };
+                return () => { u1(); u2(); u3(); };
             }, []);
             useEffect(()=>lucide.createIcons(), [view, orders, viewMode]);
 
+            // FILTRO MODIFICADO PARA SOPORTAR HISTORIAL
             const displayedOrders = useMemo(() => {
                 if(viewMode === 'active') {
                     return orders.filter(o => o.status !== 'ARCHIVADO');
@@ -866,13 +890,8 @@
 
             const allClients = [...new Set(orders.map(o => o.cliente))].sort();
             
-            // Nota: Importación simple mantenida para compatibilidad, pero la creación manual es preferida ahora
             const handleImportData = (data) => {
-                // Al importar, asignamos la fecha de hoy y consecutivo '00' por defecto para que el usuario edite
-                setFormProps({ 
-                    initialOrder: { ...data, deliveryDate: new Date().toISOString().split('T')[0], sequence: '00' }, 
-                    isEditing: false 
-                });
+                setFormProps({ initialOrder: data, isEditing: false });
                 setShowImport(false);
                 setView('create');
             };
@@ -887,12 +906,10 @@
                 <div className="h-screen bg-slate-100 overflow-hidden">
                     {view === 'create' && <div className="absolute inset-0 z-50 bg-black/50 flex items-center justify-center"><MultiOrderForm config={config} onCancel={()=>setView('dashboard')} initialOrder={formProps.initialOrder} clientHistory={allClients} inventory={inventory} isEditing={formProps.isEditing}/></div>}
                     
-                    {view === 'detail' && selectedOrder && <div className="absolute inset-0 z-40 bg-white overflow-y-auto print-visible-wrapper"><OrderView order={orders.find(o=>o.id===selectedOrder.id) || selectedOrder} config={config} printConfig={printConfig} onBack={()=>setView('dashboard')} onEdit={handleEditOrder}/></div>}
+                    {view === 'detail' && selectedOrder && <div className="absolute inset-0 z-40 bg-white overflow-y-auto print-visible-wrapper"><OrderView order={orders.find(o=>o.id===selectedOrder.id) || selectedOrder} config={config} onBack={()=>setView('dashboard')} onEdit={handleEditOrder}/></div>}
                     
-                    {showSettings && <SettingsModal config={config} onClose={()=>setShowSettings(false)} onOpenPrintConfig={()=>{setShowSettings(false); setShowPrintConfig(true);}} />}
-                    {showPrintConfig && <PrintConfigModal currentConfig={printConfig} onClose={()=>setShowPrintConfig(false)} />}
-                    {/* Importar desactivado por ahora para enfocar en la nueva lógica manual, o puedes reactivarlo si lo ajustas */}
-                    {/* {showImport && <ImportModal onClose={()=>setShowImport(false)} onImport={handleImportData} />} */}
+                    {showSettings && <SettingsModal config={config} onClose={()=>setShowSettings(false)} />}
+                    {showImport && <ImportModal onClose={()=>setShowImport(false)} onImport={handleImportData} />}
                     {showGallery && <ImageGallery config={config} onClose={()=>setShowGallery(false)} orders={orders} />}
 
                     <div className="dashboard-grid">
@@ -901,11 +918,12 @@
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
                                     <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.0 Export</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v2.1 PWA</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
                                     
+                                    {/* BOTÓN PARA CAMBIAR ENTRE ACTIVOS E HISTORIAL */}
                                     <button onClick={()=>setViewMode(viewMode === 'active' ? 'history' : 'active')} className={`px-4 py-2 rounded font-bold shadow flex items-center gap-2 text-xs transition ${viewMode === 'active' ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-slate-700 text-white'}`}>
                                         <Icon name={viewMode === 'active' ? 'history' : 'activity'}/> 
                                         {viewMode === 'active' ? 'HISTORIAL' : 'VER PLANTA'}
@@ -916,8 +934,8 @@
                                     
                                     {viewMode === 'active' && (
                                         <>
-                                            <button onClick={()=>{setFormProps({initialOrder:null, isEditing: false}); setView('create')}} className="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="plus"/> NUEVA ORDEN</button>
-                                            {/* Importar oculto para simplificar la transición a la nueva nomenclatura */}
+                                            <button onClick={()=>{setFormProps({initialOrder:null, isEditing: false}); setView('create')}} className="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="plus"/> MANUAL</button>
+                                            <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="file-spreadsheet"/> IMPORTAR</button>
                                         </>
                                     )}
                                 </div>
@@ -926,15 +944,13 @@
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 {displayedOrders.sort((a,b)=>b.id-a.id).map(o => {
                                     const pct = Math.round((o.progreso.filter(p=>p.finished).length / o.progreso.length)*100);
-                                    // Manejo de compatibilidad para órdenes viejas vs nuevas
-                                    const pBase = o.partidaBase || o.partida;
                                     return (
                                         <div key={o.id} onClick={()=>{setSelectedOrder(o); setView('detail')}} className={`p-3 rounded shadow border-l-4 cursor-pointer hover:shadow-lg transition ${o.status === 'ARCHIVADO' ? 'bg-slate-200 border-slate-500 opacity-75' : 'bg-white border-indigo-500'}`}>
                                             <div className="flex justify-between items-start">
                                                 <div className="font-bold text-lg">{o.codigo}</div>
                                                 <div className="bg-slate-200 text-slate-700 text-xs px-2 py-1 rounded font-bold">MQ-{o.maquina}</div>
                                             </div>
-                                            <div className="text-xs font-bold text-indigo-800 mt-1">PARTIDA: {pBase}</div>
+                                            <div className="text-xs font-bold text-indigo-800 mt-1">PARTIDA: {o.partida}</div>
                                             <div className="text-[10px] text-slate-400">Total: {o.totalPedido} pzs</div>
                                             <div className="mt-2 w-full bg-slate-100 h-2 rounded overflow-hidden">
                                                 <div className={`${o.status === 'ARCHIVADO' ? 'bg-slate-500' : 'bg-green-500'} h-full`} style={{width:`${pct}%`}}></div>
