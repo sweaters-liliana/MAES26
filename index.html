@@ -42,58 +42,21 @@
     </script>
 
     <style>
-        /* ESTILOS DE IMPRESIÓN */
         @media print {
             @page { margin: 0.5cm; size: letter portrait; }
-            body, html, #root { 
-                background: white;
-                -webkit-print-color-adjust: exact; 
-                width: 100%;
-                height: auto !important;
-                overflow: visible !important;
-                position: static !important;
-            }
-            .no-print, .dashboard-grid { display: none !important; }
-            .print-visible-wrapper {
-                position: static !important;
-                display: block !important;
-                width: 100% !important;
-                height: auto !important;
-                overflow: visible !important;
-                z-index: 99999 !important;
-                background: white !important;
-                inset: auto !important;
-            }
+            body { background: white; -webkit-print-color-adjust: exact; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
             .print-section-top { height: 40vh; overflow: hidden; border-bottom: 2px dashed #000; margin-bottom: 1vh; display: flex; flex-direction: column; }
             .print-section-bottom { height: 55vh; display: block; }
-            table { border-collapse: collapse; width: 100%; border: 2px solid black; table-layout: fixed; }
-            th, td { border: 1px solid black; word-wrap: break-word; }
-            .threading-table-print { font-size: 9pt; }
+            table, th, td { border: 1px solid black !important; border-collapse: collapse; }
+            .threading-table-print { font-size: 9pt; width: 100%; }
             .threading-table-print th { background-color: #ddd !important; }
-            .package-table-print { font-size: 9pt; width: 100%; border: 2px solid black !important; }
-            .package-table-print th { 
-                background-color: #e5e7eb !important;
-                font-weight: 800; 
-                text-transform: uppercase; 
-                font-size: 7pt;
-                padding: 1px;
-                border: 1px solid black !important;
-            }
-            .package-table-print td { 
-                padding: 1px;
-                height: 25px; 
-                vertical-align: middle; 
-                border: 1px solid black !important;
-                font-size: 8pt;
-            }
-            .package-table-print th:last-child,
-            .package-table-print td:last-child {
-                border-right: none !important;
-            }
+            .package-table-print { font-size: 9pt; width: 100%; }
+            .package-table-print th { background-color: #e5e7eb !important; font-weight: 800; text-transform: uppercase; font-size: 8pt; padding: 2px; }
+            .package-table-print td { padding: 2px; height: 25px; vertical-align: middle; }
             .manual-input { color: transparent; }
-            .print-only { display: block !important; }
         }
-
         .print-only { display: none; }
         .dashboard-grid { display: grid; grid-template-rows: 60vh 1fr; height: 100vh; overflow: hidden; }
         .top-pane { overflow-y: auto; border-bottom: 4px solid #334155; }
@@ -102,6 +65,8 @@
         .pkg-list { overflow-y: auto; flex-grow: 1; margin-top: 10px; padding-right: 4px; }
         .pkg-list::-webkit-scrollbar { width: 6px; }
         .pkg-list::-webkit-scrollbar-thumb { background: #64748b; border-radius: 4px; }
+        
+        /* Input invisible para observaciones */
         .obs-input { background: transparent; border: none; color: #cbd5e1; width: 100%; font-size: 10px; border-bottom: 1px solid #475569; }
         .obs-input:focus { outline: none; border-bottom: 1px solid #94a3b8; color: white; }
     </style>
@@ -111,8 +76,8 @@
 
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
-        
-                const firebaseConfig = {
+
+        const firebaseConfig = {
             apiKey: "AIzaSyBqHgV4vDat1-VmZfKbiPg7nuiX-ROcexw",
             authDomain: "cirineo-cec21.firebaseapp.com",
             projectId: "cirineo-cec21",
@@ -127,42 +92,16 @@
 
         const Icon = ({ name, size = 18, className }) => <i data-lucide={name} width={size} height={size} className={className}></i>;
         const toUppercase = (handler) => (e) => { e.target.value = e.target.value.toUpperCase(); handler(e); };
-        
+
         const generateSmartID = (partida, pieces, maquina) => {
             const piecePrefixes = pieces.map(p => p.pieza.substring(0, 2).toUpperCase()).join('/');
             return `${partida}-${piecePrefixes}-M${maquina}`;
         };
 
-        const generatePackages = (pieces, packageSize, partida) => {
-            let packages = [];
-            let pkgCounter = 1;
-            pieces.forEach(p => {
-                const total = Number(p.totalPedido) || 0;
-                const size = Number(packageSize) || total;
-                const n = Math.ceil(total / size);
-                const piecePrefix = p.pieza.substring(0, 3).toUpperCase();
-
-                for (let i = 1; i <= n; i++) {
-                    const cantidad = (i === n) ? (total % size || size) : size;
-                    const codigoUnico = `${piecePrefix}_${i}_DE_${n}`; 
-                    packages.push({ 
-                        id: Date.now() + Math.random() + pkgCounter, 
-                        piezaNombre: p.pieza, 
-                        cantidad: cantidad, 
-                        paqueteNum: i, 
-                        paquetesDePieza: n, 
-                        codigoUnico: codigoUnico,
-                        finished: false 
-                    });
-                    pkgCounter++;
-                }
-            });
-            return packages;
-        };
-
         // --- COMPONENTE BOTÓN DE INSTALACIÓN ---
         const InstallButton = () => {
             const [deferredPrompt, setDeferredPrompt] = useState(null);
+
             useEffect(() => {
                 const handler = (e) => {
                     e.preventDefault();
@@ -171,13 +110,16 @@
                 window.addEventListener('beforeinstallprompt', handler);
                 return () => window.removeEventListener('beforeinstallprompt', handler);
             }, []);
+
             const handleInstall = async () => {
                 if (!deferredPrompt) return;
                 deferredPrompt.prompt();
                 const { outcome } = await deferredPrompt.userChoice;
                 if (outcome === 'accepted') setDeferredPrompt(null);
             };
+
             if (!deferredPrompt) return null;
+
             return (
                 <button onClick={handleInstall} className="bg-yellow-500 hover:bg-yellow-600 text-black px-3 py-2 rounded font-bold shadow flex items-center gap-2 text-xs animate-pulse">
                     <Icon name="download-cloud" size={16}/> INSTALAR APP
@@ -185,9 +127,11 @@
             );
         };
 
-        // --- DASHBOARD COMPONENTS ---
+        // --- DASHBOARD COMPONENTS (MÁQUINAS Y TIEMPOS) ---
         const MachineCard = ({ maquina, orders }) => {
             const [is24Hours, setIs24Hours] = useState(true);
+            
+            // Calculamos los paquetes pendientes y el tiempo total
             const pendingPackages = useMemo(() => {
                 let pkgs = [];
                 orders.forEach(o => {
@@ -195,13 +139,21 @@
                     incomplete.forEach(p => {
                         const pieceData = o.subPiecesData?.find(sp => sp.pieza === p.piezaNombre) || o;
                         const timePerPiece = Number(pieceData.tiempo) || 0;
-                        pkgs.push({ ...p, parentOrderId: o.id, orderCode: o.codigo, partida: o.partida, timeTotal: (p.cantidad * timePerPiece) });
+                        
+                        pkgs.push({ 
+                            ...p, 
+                            parentOrderId: o.id, // Necesario para guardar observaciones
+                            orderCode: o.codigo, 
+                            partida: o.partida,
+                            timeTotal: (p.cantidad * timePerPiece) 
+                        });
                     });
                 });
                 return pkgs; 
             }, [orders]);
 
             const updateObs = async (pkgId, parentOrderId, newVal) => {
+                // Función optimista simple: no esperamos la UI, solo enviamos a FB
                 const order = orders.find(o => o.id === parentOrderId);
                 if(!order) return;
                 const newProgreso = order.progreso.map(p => p.id === pkgId ? {...p, observaciones: newVal} : p);
@@ -231,13 +183,24 @@
                         {pendingPackages.length === 0 && <div className="text-center text-slate-500 text-xs py-4">Máquina Libre</div>}
                         {pendingPackages.map((p, i) => (
                             <div key={i} className="bg-slate-800 p-2 rounded flex gap-2 items-center text-xs border border-slate-700">
+                                {/* Cantidad Grande */}
                                 <div className="font-black text-white text-lg w-10 text-right shrink-0">{p.cantidad}</div>
+                                
+                                {/* Info Corta (Pieza y Partida truncada) */}
                                 <div className="w-24 shrink-0 overflow-hidden">
                                     <div className="font-bold text-slate-300 truncate text-[10px]" title={p.piezaNombre}>{p.piezaNombre}</div>
                                     <div className="text-[9px] text-yellow-500 font-black truncate">{p.partida}</div>
                                 </div>
+                                
+                                {/* Observaciones (Input ocupa el resto) */}
                                 <div className="flex-grow pl-2 border-l border-slate-600">
-                                    <input className="obs-input placeholder-slate-600" placeholder="Observaciones..." defaultValue={p.observaciones || ''} onBlur={(e) => updateObs(p.id, p.parentOrderId, e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter') e.target.blur(); }}/>
+                                    <input 
+                                        className="obs-input placeholder-slate-600" 
+                                        placeholder="Observaciones..." 
+                                        defaultValue={p.observaciones || ''}
+                                        onBlur={(e) => updateObs(p.id, p.parentOrderId, e.target.value)}
+                                        onKeyDown={(e) => { if(e.key === 'Enter') e.target.blur(); }}
+                                    />
                                 </div>
                             </div>
                         ))}
@@ -249,7 +212,10 @@
         const DashboardBottom = ({ activeOrders }) => {
             const machineGroups = useMemo(() => {
                 const groups = {};
-                activeOrders.forEach(o => { if(!groups[o.maquina]) groups[o.maquina] = []; groups[o.maquina].push(o); });
+                activeOrders.forEach(o => { 
+                    if(!groups[o.maquina]) groups[o.maquina] = []; 
+                    groups[o.maquina].push(o); 
+                });
                 return Object.keys(groups).sort((a,b) => parseInt(a)-parseInt(b)).map(k => ({ id: k, orders: groups[k] }));
             }, [activeOrders]);
 
@@ -261,7 +227,7 @@
             );
         };
 
-        // --- COMPONENTE DE IMPORTACIÓN ---
+        // --- COMPONENTE DE IMPORTACIÓN EXCEL/CSV ---
         const ImportModal = ({ onClose, onImport }) => {
             const [text, setText] = useState('');
             const [error, setError] = useState(null);
@@ -272,8 +238,12 @@
                     const delimiter = text.includes('\t') ? '\t' : ',';
                     const rows = text.trim().split('\n').map(r => r.split(delimiter));
                     if (rows.length < 2) throw new Error("Datos insuficientes.");
+
                     const headers = rows[0].map(h => h.trim().toUpperCase().replace(/"/g, ''));
-                    const getVal = (row, colName) => { const idx = headers.indexOf(colName); return idx !== -1 && row[idx] ? row[idx].trim().replace(/"/g, '') : ''; };
+                    const getVal = (row, colName) => {
+                        const idx = headers.indexOf(colName);
+                        return idx !== -1 && row[idx] ? row[idx].trim().replace(/"/g, '') : '';
+                    };
 
                     if (headers.indexOf('PARTIDA') === -1) throw new Error("Falta columna 'PARTIDA'");
                     if (headers.indexOf('CODIGO') === -1) throw new Error("Falta columna 'CODIGO'");
@@ -285,11 +255,20 @@
                     
                     rows.slice(1).forEach((r, i) => {
                         const piezas = parseFloat(getVal(r, 'PIEZAS'));
-                        const codigoUnico = getVal(r, 'CODIGO'); 
+                        const codigoUnico = getVal(r, 'CODIGO');
                         let pkgNum = i + 1;
+                        
                         if (!isNaN(piezas)) {
                             totalPiezas += piezas;
-                            predefinedPackages.push({ id: Date.now() + i, piezaNombre: getVal(r, 'DESCRIPCION') || 'ESTANDAR', cantidad: piezas, paqueteNum: pkgNum, paquetesDePieza: rows.length - 1, codigoUnico: codigoUnico, finished: false });
+                            predefinedPackages.push({
+                                id: Date.now() + i,
+                                piezaNombre: getVal(r, 'DESCRIPCION') || 'ESTANDAR',
+                                cantidad: piezas,
+                                paqueteNum: pkgNum,
+                                paquetesDePieza: rows.length - 1,
+                                codigoUnico: codigoUnico,
+                                finished: false
+                            });
                         }
                     });
 
@@ -298,33 +277,60 @@
                     const lycra = getVal(firstRow, 'LYCRA');
                     if (nylon) threading.push({ id: 1, guia: '1', material: `NYLON ${nylon}`, sis: '', porcentaje: '' });
                     if (lycra) threading.push({ id: 2, guia: '2', material: `LYCRA ${lycra}`, sis: '', porcentaje: '' });
-                    onImport({ codigo: getVal(firstRow, 'MODELO'), cliente: getVal(firstRow, 'CLIENTE'), maquina: getVal(firstRow, 'MAQUINA'), partida: getVal(firstRow, 'PARTIDA'), pieces: [{ id: Date.now(), pieza: getVal(firstRow, 'DESCRIPCION') || 'ESTANDAR', programa: '', talla: getVal(firstRow, 'TALLA') || 'UNITALLA', totalPedido: totalPiezas, peso: '', tiempo: '' }], threading: threading, predefinedPackages: predefinedPackages });
-                } catch (e) { setError(e.message); }
+
+                    const importedData = {
+                        codigo: getVal(firstRow, 'MODELO'),
+                        cliente: getVal(firstRow, 'CLIENTE'),
+                        maquina: getVal(firstRow, 'MAQUINA'),
+                        partida: getVal(firstRow, 'PARTIDA'),
+                        pieces: [{
+                            id: Date.now(),
+                            pieza: getVal(firstRow, 'DESCRIPCION') || 'ESTANDAR',
+                            programa: '',
+                            talla: getVal(firstRow, 'TALLA') || 'UNITALLA',
+                            totalPedido: totalPiezas,
+                            peso: '',
+                            tiempo: ''
+                        }],
+                        threading: threading,
+                        predefinedPackages: predefinedPackages
+                    };
+
+                    onImport(importedData);
+                } catch (e) {
+                    setError(e.message);
+                }
             };
+
             return (
                 <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
-                    <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-2xl relative">
-                        <div className="flex justify-between items-center mb-4 border-b pb-2">
-                            <h3 className="font-bold text-xl text-green-700 flex items-center gap-2"><Icon name="file-spreadsheet"/> Importar Excel</h3>
-                            <button onClick={onClose} className="bg-red-500 hover:bg-red-600 text-white rounded-md p-2 shadow-lg flex items-center gap-1 font-bold text-xs transition-transform hover:scale-105">
-                                <Icon name="x" size={18}/> CERRAR
-                            </button>
+                    <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-2xl">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-xl text-green-700 flex items-center gap-2"><Icon name="file-spreadsheet"/> Importar Excel (Por Partida)</h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><Icon name="x"/></button>
                         </div>
-                        <p className="text-xs text-slate-500 mb-2">Copia y pega las celdas desde Excel.</p>
-                        <textarea value={text} onChange={(e) => { setText(e.target.value); setError(null); }} className="w-full h-64 p-3 border-2 border-slate-300 rounded font-mono text-xs focus:border-green-500 focus:outline-none" placeholder="Pegar datos..."></textarea>
+                        <textarea 
+                            value={text} 
+                            onChange={(e) => { setText(e.target.value); setError(null); }}
+                            className="w-full h-64 p-3 border-2 border-slate-300 rounded font-mono text-xs focus:border-green-500 focus:outline-none"
+                            placeholder="Copia y pega las celdas del Excel aquí... (Incluyendo encabezados: PARTIDA, CODIGO, PIEZAS...)"
+                        ></textarea>
                         {error && <div className="mt-2 text-red-600 text-xs font-bold bg-red-50 p-2 rounded border border-red-200">Error: {error}</div>}
                         <div className="flex justify-end gap-2 mt-4">
-                            <button onClick={handleProcess} className="px-6 py-2 bg-green-600 text-white font-bold rounded shadow hover:bg-green-700 flex items-center gap-2"><Icon name="check-circle" size={18}/> Procesar</button>
+                            <button onClick={handleProcess} className="px-6 py-2 bg-green-600 text-white font-bold rounded shadow hover:bg-green-700 flex items-center gap-2">
+                                <Icon name="check-circle" size={18}/> Procesar Partida
+                            </button>
                         </div>
                     </div>
                 </div>
             );
         };
 
-        // --- COMPONENTE IMAGEN ---
+        // --- COMPONENTE IMAGEN INTELIGENTE (MULTI-REPO) ---
         const SmartImage = ({ repoUrls, codigo, className }) => {
             const [imgSrc, setImgSrc] = useState(null);
             const [attempt, setAttempt] = useState({ urlIndex: 0, extension: 'jpg' });
+
             useEffect(() => {
                 if (!repoUrls || !repoUrls.length || !codigo) { setImgSrc(null); return; }
                 setAttempt({ urlIndex: 0, extension: 'jpg' });
@@ -347,17 +353,28 @@
                     setAttempt({ ...attempt, extension: 'fail' });
                 }
             };
-            if (attempt.extension === 'fail' || !imgSrc) return <div className={`bg-slate-100 flex flex-col items-center justify-center text-slate-300 ${className}`}><Icon name="image-off" size={48} className="mb-2"/><span className="text-[10px] text-center px-2">No imagen</span></div>;
+
+            if (attempt.extension === 'fail' || !imgSrc) return <div className={`bg-slate-100 flex flex-col items-center justify-center text-slate-300 ${className}`}>
+                <Icon name="image-off" size={48} className="mb-2"/>
+                <span className="text-[10px] text-center px-2">No se encontró: {codigo}<br/>(Verifica el Modelo)</span>
+            </div>;
             return <img src={imgSrc} onError={handleError} className={className} />;
         };
 
-        // --- FORMULARIO DE ORDEN (CREAR Y EDITAR) ---
-        const MultiOrderForm = ({ config, onCancel, initialOrder, clientHistory, inventory, isEditing }) => {
-            const [header, setHeader] = useState(initialOrder ? { codigo: initialOrder.codigo, cliente: initialOrder.cliente, maquina: initialOrder.maquina, partida: initialOrder.partida || '', fechaInicio: initialOrder.fechaInicio || new Date().toISOString().split('T')[0] } : { codigo: '', cliente: '', maquina: '', partida: '', fechaInicio: new Date().toISOString().split('T')[0] });
-            const [pieces, setPieces] = useState(initialOrder?.subPiecesData || [{ id: 1, pieza: 'BLUSA', programa: '', talla: 'UNITALLA', totalPedido: 100, peso: '', tiempo: '' }]);
+        // --- FORMULARIO DE ORDEN ---
+        const MultiOrderForm = ({ config, onCancel, initialOrder, clientHistory, inventory }) => {
+            const [header, setHeader] = useState(initialOrder ? { 
+                codigo: initialOrder.codigo, 
+                cliente: initialOrder.cliente, 
+                maquina: initialOrder.maquina, 
+                partida: initialOrder.partida || '', 
+                fechaInicio: new Date().toISOString().split('T')[0] 
+            } : { codigo: '', cliente: '', maquina: '', partida: '', fechaInicio: new Date().toISOString().split('T')[0] });
+
+            const [pieces, setPieces] = useState(initialOrder?.pieces || [{ id: 1, pieza: 'BLUSA', programa: '', talla: 'UNITALLA', totalPedido: 100, peso: '', tiempo: '' }]);
             const [threadingData, setThreadingData] = useState(initialOrder?.threading || []);
-            const predefinedPackages = initialOrder?.predefinedPackages || (initialOrder && initialOrder.packageSize === 'VARIO' ? initialOrder.progreso : null);
-            const [packageSize, setPackageSize] = useState(initialOrder?.packageSize && initialOrder.packageSize !== 'VARIO' ? initialOrder.packageSize : 50);
+            const predefinedPackages = initialOrder?.predefinedPackages || null;
+            const [packageSize, setPackageSize] = useState(50);
             const addPiece = () => setPieces([...pieces, { id: Date.now(), pieza: '', talla: 'UNITALLA', totalPedido: '', peso: '', tiempo: '' }]);
             const updatePiece = (id, f, v) => setPieces(pieces.map(p => p.id === id ? { ...p, [f]: v } : p));
             const removePiece = (id) => pieces.length > 1 && setPieces(pieces.filter(p => p.id !== id));
@@ -365,58 +382,38 @@
 
             const handleSubmit = async () => {
                 if(!header.codigo || !header.cliente || !header.maquina || !header.partida) return alert("Faltan datos.");
-                let finalPackages = initialOrder?.progreso?.filter(p => p.finished) || []; 
+                let finalPackages = [];
                 if (predefinedPackages) {
-                    if (isEditing) {
-                        const newPredefined = initialOrder.progreso.map(p => {
-                            const original = initialOrder.progreso.find(op => op.id === p.id);
-                            return {...p, finished: original?.finished || false, tejedor: original?.tejedor || '', fecha: original?.fecha || '', defectos: original?.defectos || '', agujas: original?.agujas || ''};
-                        });
-                        finalPackages = newPredefined;
-                    } else {
-                        finalPackages = predefinedPackages;
-                    }
+                    finalPackages = predefinedPackages;
                 } else {
-                    const newPackages = generatePackages(pieces, packageSize, header.partida);
-                    if(isEditing) {
-                         const finishedIds = new Set(finalPackages.map(p=>p.id));
-                         finalPackages = [...finalPackages, ...newPackages.filter(p=>!finishedIds.has(p.id))];
-                    } else {
-                         finalPackages = newPackages;
-                    }
+                    pieces.forEach(p => {
+                        const total = Number(p.totalPedido)||0; const size = Number(packageSize)||total; const n = Math.ceil(total/size);
+                        for(let i=1; i<=n; i++) finalPackages.push({ 
+                            id: Date.now()+Math.random(), 
+                            piezaNombre: p.pieza, 
+                            cantidad: (i===n)?(total%size||size):size, 
+                            paqueteNum: i, 
+                            paquetesDePieza: n, 
+                            codigoUnico: `${header.partida}_${i}_${n}_${(i===n)?(total%size||size):size}`,
+                            finished: false 
+                        });
+                    });
                 }
-
                 const displayId = generateSmartID(header.partida, pieces, header.maquina);
                 const orderPayload = { 
-                    ...header, 
-                    id: isEditing ? initialOrder.id : Date.now(), 
-                    displayId, 
-                    subPiecesData: pieces.map(p => ({...p, totalPedido: Number(p.totalPedido)})), 
-                    progreso: finalPackages, 
-                    threading: threadingData, 
-                    packageSize: predefinedPackages ? 'VARIO' : Number(packageSize), 
-                    status: initialOrder?.status || 'EN PROCESO', 
-                    totalPedido: pieces.reduce((a,b)=>a+Number(b.totalPedido),0) 
+                    ...header, id: Date.now(), displayId, subPiecesData: pieces.map(p => ({...p, totalPedido: Number(p.totalPedido)})), progreso: finalPackages, threading: threadingData, packageSize: predefinedPackages ? 'VARIO' : Number(packageSize), status: 'EN PROCESO', totalPedido: pieces.reduce((a,b)=>a+Number(b.totalPedido),0) 
                 };
-                try { 
+                try {
                     await db.collection('orders').doc(String(orderPayload.id)).set(orderPayload);
-                    alert(`Orden ${isEditing ? 'Actualizada' : 'Guardada'}`);
-                    onCancel(); 
-                } catch(e) { 
-                    console.error(e);
-                    alert("Error al guardar"); 
-                }
+                    alert("Orden Guardada"); onCancel();
+                } catch(e) { console.error(e); alert("Error"); }
             };
+
             return (
                 <div className="bg-white p-6 rounded shadow-xl max-w-4xl mx-auto my-4 overflow-y-auto h-[90vh]">
-                    <div className="flex justify-between items-center mb-4 border-b pb-2">
-                        <h2 className="font-bold text-xl flex items-center gap-2">
-                             <Icon name={isEditing ? "file-edit" : "file-plus"}/> {isEditing ? 'Editar Orden' : 'Nueva Orden'}
-                        </h2>
-                        <button onClick={onCancel} className="text-red-500 font-bold">Cancelar</button>
-                    </div>
+                    <div className="flex justify-between items-center mb-4 border-b pb-2"><h2 className="font-bold text-xl flex items-center gap-2"><Icon name="file-plus"/> Nueva Orden</h2><button onClick={onCancel} className="text-red-500 font-bold">Cancelar</button></div>
                     <div className="grid grid-cols-12 gap-4 mb-4">
-                        <div className="col-span-3 bg-yellow-50 p-2 rounded border border-yellow-200"><label className="text-xs font-bold text-yellow-900">PARTIDA</label><input value={header.partida} onChange={toUppercase(e=>setHeader({...header, partida:e.target.value}))} className="w-full text-lg font-black p-1 bg-white border rounded uppercase" placeholder="Ej: 24NOV451" disabled={isEditing}/></div>
+                        <div className="col-span-3 bg-yellow-50 p-2 rounded border border-yellow-200"><label className="text-xs font-bold text-yellow-900">PARTIDA</label><input value={header.partida} onChange={toUppercase(e=>setHeader({...header, partida:e.target.value}))} className="w-full text-lg font-black p-1 bg-white border rounded uppercase" placeholder="Ej: 24NOV451"/></div>
                         <div className="col-span-3"><label className="text-xs font-bold">MODELO (FOTO)</label><input value={header.codigo} onChange={toUppercase(e=>setHeader({...header, codigo:e.target.value}))} className="w-full border p-2 rounded font-bold uppercase"/></div>
                         <div className="col-span-4"><label className="text-xs font-bold">CLIENTE</label><input list="clients" value={header.cliente} onChange={toUppercase(e=>setHeader({...header, cliente:e.target.value}))} className="w-full border p-2 rounded font-bold"/><datalist id="clients">{clientHistory.map(c=><option key={c} value={c}/>)}</datalist></div>
                         <div className="col-span-2"><label className="text-xs font-bold bg-slate-200 px-1">MÁQUINA</label><input value={header.maquina} onChange={toUppercase(e=>setHeader({...header, maquina:e.target.value}))} className="w-full border-2 border-slate-400 p-2 rounded font-black text-center"/></div>
@@ -429,7 +426,7 @@
                                 <div className="col-span-2"><label className="text-[10px] font-bold">Talla</label><input value={p.talla} onChange={toUppercase(e=>updatePiece(p.id,'talla',e.target.value))} className="w-full border p-1 rounded text-xs"/></div>
                                 <div className="col-span-2"><label className="text-[10px] font-bold">Cant. Total</label><input type="number" value={p.totalPedido} onChange={e=>updatePiece(p.id,'totalPedido',e.target.value)} className="w-full border p-1 font-bold text-indigo-700" disabled={!!predefinedPackages}/></div>
                                 <div className="col-span-2"><label className="text-[10px] font-bold">Minutos/Pza</label><input type="number" value={p.tiempo} onChange={e=>updatePiece(p.id,'tiempo',e.target.value)} className="w-full border p-1 bg-yellow-50" placeholder="Calc. Tiempo"/></div>
-                                <div className="col-span-1 text-center"><button onClick={()=>removePiece(p.id)} className="text-red-500" disabled={!!predefinedPackages}><Icon name="x"/></button></div>
+                                <div className="col-span-1 text-center"><button onClick={()=>removePiece(p.id)} className="text-red-500"><Icon name="x"/></button></div>
                             </div>
                         ))}
                         {!predefinedPackages && <button onClick={addPiece} className="text-xs font-bold text-indigo-600">+ Agregar Pieza</button>}
@@ -438,104 +435,31 @@
                     <ThreadingEditor data={threadingData} onChange={setThreadingData} inventoryKeys={inventoryKeys} />
                     <div className="flex gap-4 mt-4">
                         {!predefinedPackages && <div className="w-32"><label className="text-xs font-bold">Pzs/Paquete</label><input type="number" value={packageSize} onChange={e=>setPackageSize(e.target.value)} className="border p-2 rounded w-full"/></div>}
-                        <button onClick={handleSubmit} className="flex-1 bg-slate-900 text-white font-bold rounded shadow hover:bg-slate-800 py-3">{isEditing ? 'GUARDAR CAMBIOS' : 'CREAR ORDEN'}</button>
+                        <button onClick={handleSubmit} className="flex-1 bg-slate-900 text-white font-bold rounded shadow hover:bg-slate-800 py-3">CREAR ORDEN</button>
                     </div>
                 </div>
             );
         };
 
-        // --- VISUALIZACIÓN E IMPRESIÓN (CON EXPORTACIÓN A EXCEL) ---
-        const OrderView = ({ order, config, onBack, onEdit }) => { 
+        // --- VISUALIZACIÓN E IMPRESIÓN (CON EDICIÓN DE FOTO) ---
+        const OrderView = ({ order, config, onBack }) => {
             const [entry, setEntry] = useState({ tejedor: '', fecha: new Date().toISOString().split('T')[0], defectos: '', agujas: '' });
             
+            // ESTADO PARA EDICIÓN DE MODELO (FOTO)
+            const [isEditingModel, setIsEditingModel] = useState(false);
+            const [tempModel, setTempModel] = useState(order.codigo);
+
             const markPackage = async (pkgId) => {
-                if(!entry.tejedor) return alert("Por favor selecciona un TEJEDOR");
+                if(!entry.tejedor) return alert("Ingresa las iniciales del tejedor");
                 const newProgreso = order.progreso.map(p => p.id === pkgId ? {...p, finished: true, tejedor: entry.tejedor, fecha: entry.fecha, defectos: entry.defectos, agujas: entry.agujas} : p);
                 await db.collection('orders').doc(String(order.id)).update({progreso: newProgreso});
             };
 
-            const unmarkPackage = async (pkgId) => {
-                const newProgreso = order.progreso.map(p => p.id === pkgId ? {...p, finished: false, tejedor: '', fecha: '', defectos: '', agujas: ''} : p);
-                await db.collection('orders').doc(String(order.id)).update({progreso: newProgreso});
-            };
-
-            const toggleArchive = async () => {
-                const isArchived = order.status === 'ARCHIVADO';
-                const msg = isArchived ? "¿Desarchivar esta orden?" : "¿Marcar orden como TERMINADA y archivarla?";
-                if(window.confirm(msg)){
-                    await db.collection('orders').doc(String(order.id)).update({
-                        status: isArchived ? 'EN PROCESO' : 'ARCHIVADO'
-                    });
-                    onBack();
+            const saveModelChange = async () => {
+                if(tempModel !== order.codigo) {
+                    await db.collection('orders').doc(String(order.id)).update({ codigo: tempModel });
                 }
-            };
-
-            // --- FUNCIÓN PARA EXPORTAR A EXCEL (CSV MEJORADO) ---
-            const exportOrderToCSV = () => {
-                // Preparamos el string de Enhebrado concatenado
-                const threadingStr = order.threading && order.threading.length > 0 
-                    ? order.threading.map(t => `G${t.guia}:${t.material}`).join(' / ') 
-                    : '';
-
-                // Definimos las cabeceras compatibles con la importación + nuevas columnas
-                const headers = [
-                    "PARTIDA", 
-                    "MODELO", 
-                    "CLIENTE", 
-                    "MAQUINA", 
-                    "DESCRIPCION", 
-                    "TALLA", 
-                    "TIEMPO (MIN)",  // Nueva columna solicitada
-                    "ENHEBRADO",     // Nueva columna solicitada
-                    "PIEZAS", 
-                    "CODIGO_PAQUETE", 
-                    "TEJEDOR", 
-                    "FECHA",
-                    "DEFECTOS",
-                    "AGUJAS",
-                    "OBSERVACIONES",
-                    "ESTADO"
-                ];
-
-                // Mapeamos cada paquete (fila del progreso) a una fila del Excel
-                const rows = order.progreso.map(p => {
-                    // Buscamos datos específicos de la pieza (tiempo, talla)
-                    const subPiece = order.subPiecesData.find(sp => sp.pieza === p.piezaNombre);
-                    const talla = subPiece ? subPiece.talla : 'UNITALLA';
-                    const tiempo = subPiece ? subPiece.tiempo : '0';
-
-                    return [
-                        order.partida,           // PARTIDA
-                        order.codigo,            // MODELO
-                        order.cliente,           // CLIENTE
-                        order.maquina,           // MAQUINA
-                        p.piezaNombre,           // DESCRIPCION
-                        talla,                   // TALLA
-                        tiempo,                  // TIEMPO POR LIENZO (Minutos)
-                        threadingStr,            // ENHEBRADO (Concatenado)
-                        p.cantidad,              // PIEZAS
-                        p.codigoUnico || '',     // CODIGO (ID Único del paquete)
-                        p.finished ? p.tejedor : '', // TEJEDOR
-                        p.finished ? p.fecha : '',   // FECHA
-                        p.finished ? p.defectos : '', // DEFECTOS
-                        p.finished ? p.agujas : '',   // AGUJAS
-                        p.observaciones || '',   // OBSERVACIONES
-                        p.finished ? 'TERMINADO' : 'PENDIENTE'
-                    ].map(field => `"${String(field || '').replace(/"/g, '""')}"`).join(','); // Escapar comillas para CSV
-                });
-
-                // Unimos cabeceras y filas con BOM para acentos
-                const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n');
-
-                // Crear blob y descargar
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.setAttribute("download", `${order.partida}_${order.codigo}_EXPORT.csv`);
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                setIsEditingModel(false);
             };
 
             return (
@@ -543,35 +467,34 @@
                     <div className="no-print p-4 border-b flex justify-between bg-slate-50 sticky top-0 z-10 shadow-sm">
                         <button onClick={onBack} className="flex items-center gap-2 text-slate-600 font-bold"><Icon name="arrow-left"/> Volver</button>
                         <div className="flex gap-2">
-                             {/* Botón Exportar Excel */}
-                             <button onClick={exportOrderToCSV} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 shadow transition-transform active:scale-95">
-                                 <Icon name="file-spreadsheet"/> EXPORTAR EXCEL
-                             </button>
-
-                             {/* Botón de Archivar */}
-                             <button onClick={toggleArchive} className={`px-3 py-1 rounded font-bold text-xs flex items-center gap-1 text-white ${order.status === 'ARCHIVADO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-slate-600 hover:bg-slate-700'}`}>
-                                 <Icon name={order.status === 'ARCHIVADO' ? "refresh-ccw" : "archive"}/> 
-                                 {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR ORDEN'}
-                             </button>
-
-                             <button onClick={() => onEdit(order)} className="bg-indigo-600 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-indigo-700">
-                                 <Icon name="file-edit"/> EDITAR
-                             </button>
-                             <button onClick={() => window.print()} className="bg-slate-900 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-slate-700">
-                                 <Icon name="printer"/> IMPRIMIR
-                             </button>
+                             <button onClick={()=>setIsEditingModel(true)} className="bg-blue-100 text-blue-700 px-3 py-1 rounded font-bold text-xs flex items-center gap-1"><Icon name="image"/> CAMBIAR FOTO/MODELO</button>
+                             <button onClick={()=>window.print()} className="bg-slate-900 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1"><Icon name="printer"/> IMPRIMIR</button>
                         </div>
                     </div>
                     
                     <div className="p-8 print:p-0">
-                        {order.status === 'ARCHIVADO' && <div className="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-4 mb-4 font-bold text-center no-print">ESTA ORDEN ESTÁ ARCHIVADA / TERMINADA</div>}
-
                         <div className="print-section-top">
                              <div className="flex justify-between items-start border-b-4 border-black pb-2 mb-2">
                                 <div>
                                     <h1 className="text-4xl font-black uppercase tracking-tighter">{order.cliente}</h1>
                                     <div className="text-xl font-bold font-mono">PARTIDA: {order.partida}</div>
-                                    <div className="text-sm font-bold text-slate-600 mt-1">MODELO: {order.codigo}</div>
+                                    
+                                    {/* SECCION EDITABLE DEL MODELO */}
+                                    <div className="no-print mt-1">
+                                        {isEditingModel ? (
+                                            <div className="flex gap-1 items-center bg-blue-50 p-1 rounded border border-blue-200 w-fit">
+                                                <input value={tempModel} onChange={toUppercase(e=>setTempModel(e.target.value))} className="border p-1 text-sm font-bold uppercase w-32" autoFocus/>
+                                                <button onClick={saveModelChange} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><Icon name="check" size={16}/></button>
+                                                <button onClick={()=>{setTempModel(order.codigo); setIsEditingModel(false)}} className="text-red-500 p-1"><Icon name="x" size={16}/></button>
+                                            </div>
+                                        ) : (
+                                            <div className="text-sm font-bold text-slate-600 group flex items-center gap-2 cursor-pointer hover:bg-slate-100 w-fit p-1 rounded" onClick={()=>setIsEditingModel(true)} title="Clic para cambiar foto">
+                                                MODELO: {order.codigo} <Icon name="pencil" size={12} className="opacity-0 group-hover:opacity-100 text-blue-500"/>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {/* SOLO IMPRESIÓN */}
+                                    <div className="print-only text-sm font-bold text-slate-600">MODELO: {order.codigo}</div>
                                 </div>
                                 <div className="text-right">
                                     <span className="bg-black text-white px-2 py-1 text-sm font-bold uppercase">MÁQUINA</span>
@@ -579,7 +502,7 @@
                                 </div>
                              </div>
                             
-                             <div className="flex gap-2 flex-grow overflow-hidden">
+                            <div className="flex gap-2 flex-grow overflow-hidden">
                                 <div className="w-7/12 flex flex-col gap-2">
                                     <div className="border-2 border-black">
                                         <div className="flex bg-gray-200 border-b border-black font-bold text-xs uppercase p-1">
@@ -611,50 +534,29 @@
                                 </div>
                                 <div className="w-5/12 border-2 border-black flex items-center justify-center relative bg-slate-50 overflow-hidden group">
                                      <SmartImage repoUrls={config.repoUrls} codigo={order.codigo} className="max-h-full max-w-full object-contain"/>
+                                     {/* Botón flotante para editar foto si falla */}
+                                     <button onClick={()=>setIsEditingModel(true)} className="no-print absolute bottom-2 right-2 bg-white/80 p-1 rounded shadow hover:bg-white text-slate-600 opacity-0 group-hover:opacity-100 transition"><Icon name="refresh-cw" size={16}/></button>
                                 </div>
                             </div>
                         </div>
 
                         <div className="print-section-bottom print-only">
                              <div className="border-b border-black font-bold mb-1 text-sm flex justify-between">
-                                 <span>CONTROL DE TEJIDO - PARTIDA {order.partida}</span>
+                                <span>CONTROL DE TEJIDO - PARTIDA {order.partida}</span>
                                 <span>TOTAL PIEZAS: {order.totalPedido}</span>
                              </div>
-                             <table className="package-table-print">
-                                <colgroup>
-                                    <col style={{width: '5%'}} />
-                                    <col style={{width: '15%'}} /> <col style={{width: '8%'}} />
-                                    <col style={{width: '10%'}} />
-                                    <col style={{width: '10%'}} />
-                                    <col style={{width: '8%'}} />
-                                    <col style={{width: '8%'}} />
-                                    <col style={{width: '5%'}} />
-                                    <col style={{width: '31%'}} /> </colgroup>
+                             <table className="package-table-print border-2 border-black w-full">
                                 <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>CÓDIGO</th> 
-                                        <th>Cant</th>
-                                        <th>Tejedor</th>
-                                        <th>Fecha</th>
-                                        <th>Def</th>
-                                        <th>Agj</th>
-                                        <th>OK</th>
-                                        <th>OBSERVACIONES</th>
-                                    </tr>
+                                    <tr><th className="w-8">#</th><th>CÓDIGO ÚNICO (Papeleta)</th><th className="w-12">Cant</th><th className="w-16">Tejedor</th><th className="w-16">Fecha</th><th className="w-12">Def</th><th className="w-10">Agj</th><th className="w-8">OK</th></tr>
                                 </thead>
                                 <tbody>
                                     {order.progreso?.map((p, idx) => (
                                         <tr key={p.id}>
                                             <td className="text-center font-bold border-r border-black">{idx+1}</td>
-                                            <td className="pl-1 font-mono text-[8px] border-r border-black truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
+                                            <td className="pl-2 font-mono text-[10px] border-r border-black">{p.codigoUnico}</td>
                                             <td className="text-center font-bold border-r border-black">{p.cantidad}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? p.tejedor : '_'}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? p.fecha : '_'}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? p.defectos : '_'}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? p.agujas : '_'}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? 'OK' : '_'}</td>
-                                            <td className="manual-input">{p.observaciones || '_'}</td> </tr>
+                                            <td className="manual-input border-r border-black">_</td><td className="manual-input border-r border-black">_</td><td className="manual-input border-r border-black">_</td><td className="manual-input border-r border-black">_</td><td className="manual-input">_</td>
+                                        </tr>
                                     ))}
                                 </tbody>
                              </table>
@@ -662,55 +564,21 @@
 
                         <div className="no-print mt-4">
                             <div className="bg-slate-100 p-4 rounded border mb-6">
-                                <h3 className="font-bold text-lg mb-2 text-slate-700">Registro Digital Simplificado</h3>
-                                <div className="flex gap-4 items-end mb-4 bg-white p-3 rounded shadow-sm border">
-                                    
-                                    {/* SELECCIÓN SIMPLIFICADA DE TEJEDOR */}
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-500 mb-1">TEJEDOR</label>
-                                        <select 
-                                            value={entry.tejedor} 
-                                            onChange={e=>setEntry({...entry, tejedor: e.target.value})} 
-                                            className="border-2 border-slate-300 p-2 rounded w-40 font-bold text-indigo-700 focus:border-indigo-500 outline-none"
-                                        >
-                                            <option value="">Seleccionar...</option>
-                                            <option value="BALTA">BALTA</option>
-                                            <option value="ANDRÉS">ANDRÉS</option>
-                                        </select>
-                                    </div>
-
-                                    {/* SELECCIÓN DE FECHA CON CALENDARIO */}
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-500 mb-1">FECHA</label>
-                                        <input 
-                                            type="date" 
-                                            value={entry.fecha} 
-                                            onChange={e=>setEntry({...entry, fecha: e.target.value})} 
-                                            className="border-2 border-slate-300 p-2 rounded font-mono cursor-pointer hover:bg-slate-50"
-                                        />
-                                    </div>
+                                <h3 className="font-bold text-lg mb-2 text-slate-700">Registro Digital</h3>
+                                <div className="flex gap-2 items-end mb-2">
+                                    <input placeholder="TEJEDOR" value={entry.tejedor} onChange={toUppercase(e=>setEntry({...entry,tejedor:e.target.value}))} className="border p-2 rounded w-32"/>
+                                    <input type="date" value={entry.fecha} onChange={e=>setEntry({...entry,fecha:e.target.value})} className="border p-2 rounded"/>
                                 </div>
-                                
-                                <div className="max-h-80 overflow-y-auto bg-white border rounded shadow-inner">
+                                <div className="max-h-64 overflow-y-auto bg-white border rounded">
                                     <table className="w-full text-xs text-left">
-                                        <thead className="bg-slate-200 sticky top-0 shadow-sm z-0">
-                                            <tr>
-                                                <th className="p-3">CÓDIGO/PIEZA</th>
-                                                <th className="p-3">Pzs</th>
-                                                <th className="p-3">Estado</th>
-                                                <th className="p-3">Acción</th>
-                                            </tr>
-                                        </thead>
+                                        <thead className="bg-slate-200 sticky top-0"><tr><th className="p-2">CÓDIGO</th><th className="p-2">Pzs</th><th className="p-2">Estado</th><th className="p-2">Acción</th></tr></thead>
                                         <tbody>
                                             {order.progreso.map(p=>(
-                                                <tr key={p.id} className="border-b hover:bg-slate-50 transition-colors">
-                                                    <td className="p-3 font-mono" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
-                                                    <td className="p-3 font-bold">{p.cantidad}</td>
-                                                    <td className="p-3">{p.finished ? <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-full text-[10px]">LISTO ({p.tejedor})</span> : <span className="text-slate-400 font-medium">PENDIENTE</span>}</td>
-                                                    <td className="p-3">{!p.finished 
-                                                        ? <button onClick={()=>markPackage(p.id)} disabled={!entry.tejedor} className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded font-bold hover:bg-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed transition">Registrar</button>
-                                                        : <button onClick={()=>unmarkPackage(p.id)} className="bg-red-100 text-red-700 px-3 py-1 rounded font-bold hover:bg-red-200 transition">Deshacer</button>}
-                                                    </td>
+                                                <tr key={p.id} className="border-b">
+                                                    <td className="p-2 font-mono">{p.codigoUnico}</td>
+                                                    <td className="p-2 font-bold">{p.cantidad}</td>
+                                                    <td className="p-2">{p.finished ? <span className="text-green-600 font-bold">LISTO</span> : <span className="text-slate-400">PENDIENTE</span>}</td>
+                                                    <td className="p-2">{!p.finished && <button onClick={()=>markPackage(p.id)} className="bg-green-100 text-green-700 px-2 py-1 rounded font-bold">Registrar</button>}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -738,53 +606,11 @@
                 </div>
             );
         };
-
         const SettingsModal = ({ config, onClose }) => {
             const [localUrls, setLocalUrls] = useState(config.repoUrls || []);
             const [newUrl, setNewUrl] = useState('');
             const save = async () => { await db.collection('settings').doc('config').set({ ...config, repoUrls: localUrls }); onClose(); };
             return (<div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"><div className="bg-white p-6 rounded w-96"><h3 className="font-bold mb-4">Configuración Imágenes</h3><div className="mb-2 max-h-40 overflow-y-auto">{localUrls.map((u,i)=><div key={i} className="text-xs truncate mb-1 border p-1 flex justify-between"><span>{u}</span><button onClick={()=>setLocalUrls(localUrls.filter((_,x)=>x!==i))} className="text-red-500 font-bold">X</button></div>)}</div><div className="flex gap-2 mb-4"><input value={newUrl} onChange={e=>setNewUrl(e.target.value)} className="border p-1 flex-1 text-xs" placeholder="URL GitHub Raw"/><button onClick={()=>{if(newUrl)setLocalUrls([...localUrls,newUrl]);setNewUrl('')}} className="bg-blue-100 text-blue-700 px-2 font-bold">+</button></div><button onClick={save} className="bg-slate-900 text-white w-full py-2 rounded font-bold">Guardar</button></div></div>);
-        };
-
-        const ImageGallery = ({ config, onClose, orders }) => {
-            const [filter, setFilter] = useState('');
-            const allCodes = useMemo(() => {
-                const uniqueCodes = new Set(orders.map(o => o.codigo).filter(c => c));
-                return Array.from(uniqueCodes).sort();
-            }, [orders]);
-            const filteredCodes = useMemo(() => {
-                if (!filter) return allCodes;
-                return allCodes.filter(c => c.toUpperCase().includes(filter.toUpperCase()));
-            }, [allCodes, filter]);
-            return (
-                <div className="fixed inset-0 bg-black/80 z-[60] flex flex-col items-center justify-center p-4">
-                    <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-4xl h-full flex flex-col">
-                        <div className="flex justify-between items-center mb-4 border-b pb-2 shrink-0">
-                            <h3 className="font-bold text-xl text-indigo-700 flex items-center gap-2"><Icon name="images"/> Galería de Modelos</h3>
-                            <button onClick={onClose} className="bg-red-500 hover:bg-red-600 text-white rounded-md p-2 shadow-lg flex items-center gap-1 font-bold text-xs transition-transform hover:scale-105">
-                                <Icon name="x" size={18}/> CERRAR
-                            </button>
-                        </div>
-                        <input type="text" placeholder="Filtrar por código de modelo..." value={filter} onChange={(e) => setFilter(e.target.value)} className="w-full p-2 mb-4 border rounded shadow-sm" />
-                        <div className="flex-grow overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-2">
-                            {config.repoUrls && config.repoUrls.map((repo, idx) => (
-                                <div key={idx} className="col-span-full border-b pb-2 mb-2">
-                                    <h4 className="font-bold text-sm text-slate-600 mb-2">Carpeta: <span className="font-mono text-xs">{repo}</span></h4>
-                                    <div className="grid grid-cols-subgrid gap-4">
-                                        {filteredCodes.map(codigo => (
-                                            <div key={`${repo}-${codigo}`} className="aspect-square border rounded shadow overflow-hidden flex flex-col">
-                                                <SmartImage repoUrls={[repo]} codigo={codigo} className="w-full h-2/3 object-contain bg-slate-100 p-1" />
-                                                <div className="text-center text-xs font-bold p-1 bg-gray-100 h-1/3 flex items-center justify-center">{codigo}</div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
-                            {!config.repoUrls && <div className="text-center text-slate-500 col-span-full">Configura las URLs de los repositorios en Ajustes.</div>}
-                        </div>
-                    </div>
-                </div>
-            );
         };
 
         const App = () => {
@@ -793,11 +619,9 @@
             const [config, setConfig] = useState({});
             const [inventory, setInventory] = useState({});
             const [selectedOrder, setSelectedOrder] = useState(null);
-            const [formProps, setFormProps] = useState({ initialOrder: null, isEditing: false }); 
+            const [formProps, setFormProps] = useState(null); 
             const [showSettings, setShowSettings] = useState(false);
             const [showImport, setShowImport] = useState(false);
-            const [showGallery, setShowGallery] = useState(false);
-            const [viewMode, setViewMode] = useState('active'); // 'active' o 'history'
 
             useEffect(() => {
                 const u1 = db.collection('orders').onSnapshot(s => setOrders(s.docs.map(d=>d.data())));
@@ -806,94 +630,56 @@
                 setTimeout(()=>lucide.createIcons(), 500);
                 return () => { u1(); u2(); u3(); };
             }, []);
-            useEffect(()=>lucide.createIcons(), [view, orders, viewMode]);
+            useEffect(()=>lucide.createIcons(), [view, orders]);
 
-            // FILTRO MODIFICADO PARA SOPORTAR HISTORIAL
-            const displayedOrders = useMemo(() => {
-                if(viewMode === 'active') {
-                    return orders.filter(o => o.status !== 'ARCHIVADO');
-                } else {
-                    return orders.filter(o => o.status === 'ARCHIVADO');
-                }
-            }, [orders, viewMode]);
-
+            const activeOrders = orders.filter(o => o.status !== 'ARCHIVADO');
             const allClients = [...new Set(orders.map(o => o.cliente))].sort();
-            
+
             const handleImportData = (data) => {
-                setFormProps({ initialOrder: data, isEditing: false });
+                setFormProps({ initialOrder: data });
                 setShowImport(false);
                 setView('create');
             };
 
-            const handleEditOrder = (order) => {
-                setFormProps({ initialOrder: order, isEditing: true });
-                setView('create');
-                setSelectedOrder(null);
-            };
-
             return (
                 <div className="h-screen bg-slate-100 overflow-hidden">
-                    {view === 'create' && <div className="absolute inset-0 z-50 bg-black/50 flex items-center justify-center"><MultiOrderForm config={config} onCancel={()=>setView('dashboard')} initialOrder={formProps.initialOrder} clientHistory={allClients} inventory={inventory} isEditing={formProps.isEditing}/></div>}
-                    
-                    {view === 'detail' && selectedOrder && <div className="absolute inset-0 z-40 bg-white overflow-y-auto print-visible-wrapper"><OrderView order={orders.find(o=>o.id===selectedOrder.id) || selectedOrder} config={config} onBack={()=>setView('dashboard')} onEdit={handleEditOrder}/></div>}
-                    
+                    {view === 'create' && <div className="absolute inset-0 z-50 bg-black/50 flex items-center justify-center"><MultiOrderForm config={config} onCancel={()=>setView('dashboard')} initialOrder={formProps.initialOrder} clientHistory={allClients} inventory={inventory}/></div>}
+                    {view === 'detail' && selectedOrder && <div className="absolute inset-0 z-40 bg-white overflow-y-auto"><OrderView order={orders.find(o=>o.id===selectedOrder.id) || selectedOrder} config={config} onBack={()=>setView('dashboard')}/></div>}
                     {showSettings && <SettingsModal config={config} onClose={()=>setShowSettings(false)} />}
                     {showImport && <ImportModal onClose={()=>setShowImport(false)} onImport={handleImportData} />}
-                    {showGallery && <ImageGallery config={config} onClose={()=>setShowGallery(false)} orders={orders} />}
 
                     <div className="dashboard-grid">
                         <div className="top-pane bg-slate-100 p-4">
                             <div className="flex justify-between items-center mb-4">
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
-                                    <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v2.1 PWA</span>
+                                    <span>PLANTA</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v2.0 PWA</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
-                                    
-                                    {/* BOTÓN PARA CAMBIAR ENTRE ACTIVOS E HISTORIAL */}
-                                    <button onClick={()=>setViewMode(viewMode === 'active' ? 'history' : 'active')} className={`px-4 py-2 rounded font-bold shadow flex items-center gap-2 text-xs transition ${viewMode === 'active' ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-slate-700 text-white'}`}>
-                                        <Icon name={viewMode === 'active' ? 'history' : 'activity'}/> 
-                                        {viewMode === 'active' ? 'HISTORIAL' : 'VER PLANTA'}
-                                    </button>
-
-                                    <button onClick={()=>setShowGallery(true)} className="bg-sky-500 hover:bg-sky-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2 text-xs"><Icon name="image-search"/> GALERÍA</button>
                                     <button onClick={()=>setShowSettings(true)} className="bg-slate-300 hover:bg-slate-400 text-slate-800 p-2 rounded shadow"><Icon name="settings"/></button>
-                                    
-                                    {viewMode === 'active' && (
-                                        <>
-                                            <button onClick={()=>{setFormProps({initialOrder:null, isEditing: false}); setView('create')}} className="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="plus"/> MANUAL</button>
-                                            <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="file-spreadsheet"/> IMPORTAR</button>
-                                        </>
-                                    )}
+                                    <button onClick={()=>{setFormProps({initialOrder:null}); setView('create')}} className="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="plus"/> MANUAL</button>
+                                    <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="file-spreadsheet"/> IMPORTAR</button>
                                 </div>
                             </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                {displayedOrders.sort((a,b)=>b.id-a.id).map(o => {
+                                {activeOrders.sort((a,b)=>b.id-a.id).map(o => {
                                     const pct = Math.round((o.progreso.filter(p=>p.finished).length / o.progreso.length)*100);
                                     return (
-                                        <div key={o.id} onClick={()=>{setSelectedOrder(o); setView('detail')}} className={`p-3 rounded shadow border-l-4 cursor-pointer hover:shadow-lg transition ${o.status === 'ARCHIVADO' ? 'bg-slate-200 border-slate-500 opacity-75' : 'bg-white border-indigo-500'}`}>
-                                            <div className="flex justify-between items-start">
-                                                <div className="font-bold text-lg">{o.codigo}</div>
-                                                <div className="bg-slate-200 text-slate-700 text-xs px-2 py-1 rounded font-bold">MQ-{o.maquina}</div>
-                                            </div>
+                                        <div key={o.id} onClick={()=>{setSelectedOrder(o); setView('detail')}} className="bg-white p-3 rounded shadow border-l-4 border-indigo-500 cursor-pointer hover:shadow-lg transition">
+                                            <div className="flex justify-between items-start"><div className="font-bold text-lg">{o.codigo}</div><div className="bg-slate-200 text-slate-700 text-xs px-2 py-1 rounded font-bold">MQ-{o.maquina}</div></div>
                                             <div className="text-xs font-bold text-indigo-800 mt-1">PARTIDA: {o.partida}</div>
                                             <div className="text-[10px] text-slate-400">Total: {o.totalPedido} pzs</div>
-                                            <div className="mt-2 w-full bg-slate-100 h-2 rounded overflow-hidden">
-                                                <div className={`${o.status === 'ARCHIVADO' ? 'bg-slate-500' : 'bg-green-500'} h-full`} style={{width:`${pct}%`}}></div>
-                                            </div>
-                                            {o.status === 'ARCHIVADO' && <div className="text-center text-[10px] font-bold text-slate-500 mt-1">ARCHIVADO</div>}
+                                            <div className="mt-2 w-full bg-slate-100 h-2 rounded overflow-hidden"><div className="bg-green-500 h-full" style={{width:`${pct}%`}}></div></div>
                                         </div>
                                     );
                                 })}
-                                {displayedOrders.length === 0 && <div className="col-span-4 text-center text-slate-400 py-10 font-bold">No hay órdenes en esta vista.</div>}
                             </div>
                         </div>
                         
-                        {viewMode === 'active' && <DashboardBottom activeOrders={displayedOrders} />}
-                        {viewMode === 'history' && <div className="bg-slate-800 text-white flex items-center justify-center p-10 font-bold text-xl opacity-50">MODO HISTORIAL - SOLO LECTURA</div>}
+                        <DashboardBottom activeOrders={activeOrders} />
                         
                     </div>
                 </div>
