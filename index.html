@@ -123,7 +123,17 @@
             .package-table-print td:last-child {
                 border-right: none !important;
             }
-            .manual-input { color: transparent; }
+            .manual-input { 
+                color: transparent; /* Hace el texto invisible para que se pueda escribir encima */
+                text-shadow: none !important;
+            } 
+            /* Se mantiene el espacio visual de la linea guion bajo si está vacío */
+            .manual-input:empty::after {
+                content: '_';
+                color: black;
+                font-size: 1px; /* Hace el guión muy pequeño, solo como marcador */
+            }
+
             .print-only { display: block !important; }
         }
 
@@ -337,8 +347,12 @@
                     const threading = [];
                     const nylon = getVal(firstRow, 'NYLON');
                     const lycra = getVal(firstRow, 'LYCRA');
-                    if (nylon) threading.push({ id: 1, guia: '1', material: `NYLON ${nylon}`, sis: '', porcentaje: '' });
-                    if (lycra) threading.push({ id: 2, guia: '2', material: `LYCRA ${lycra}`, sis: '', porcentaje: '' });
+                    // MODIFICADO: ELIMINAMOS GUIA, SOLO MATERIAL Y %
+                    const nylonPercent = getVal(firstRow, 'NYLON_PERC') || 'N/A';
+                    const lycraPercent = getVal(firstRow, 'LYCRA_PERC') || 'N/A';
+                    
+                    if (nylon) threading.push({ id: 1, material: `NYLON ${nylon}`, porcentaje: nylonPercent });
+                    if (lycra) threading.push({ id: 2, material: `LYCRA ${lycra}`, porcentaje: lycraPercent });
                     
                     // IMPORTANTE: Ahora incluimos createdAt
                     onImport({ 
@@ -591,7 +605,7 @@
                                     <td className="text-center font-bold border-r border-black">{startIdx + idx + 1}</td>
                                     <td className="pl-1 font-mono text-[8px] border-r border-black truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
                                     <td className="text-center font-bold border-r border-black">{p.cantidad}</td>
-                                    {/* Usamos '_' para los campos vacíos de impresión, y si no es empty, muestra el valor */}
+                                    {/* CLASE manual-input: Mantiene el espacio pero hace el texto invisible para escribir a mano */}
                                     <td className="manual-input border-r border-black">{p.finished ? p.tejedor : '_'}</td>
                                     <td className="manual-input border-r border-black">{p.finished ? p.fecha : '_'}</td>
                                     <td className="manual-input border-r border-black">{p.finished ? p.defectos : '_'}</td>
@@ -657,7 +671,7 @@
                                             ))}
                                         </div>
                                         
-                                        {/* TABLA DE ENHEBRADO SIMPLIFICADA (Material y Porcentaje) - Solicitud de modificación */}
+                                        {/* TABLA DE ENHEBRADO SIMPLIFICADA (Material y Porcentaje) - Solicitud anterior */}
                                         <div className="border-2 border-black">
                                             <div className="flex bg-gray-200 border-b border-black font-bold text-xs uppercase p-1">
                                                 <div className="flex-1">MATERIAL</div>
@@ -687,12 +701,16 @@
                                                 <div className="text-4xl font-black text-indigo-700">{piecesPerShift}</div>
                                             </div>
                                         </div>
-                                        {/* SECCIÓN DE OBSERVACIONES GENERALES */}
-                                        <div className="border-2 border-black p-1 flex-grow">
-                                            <div className="font-bold text-xs uppercase border-b border-black mb-1">OBSERVACIONES GENERALES</div>
-                                            <div className="text-xs">
-                                                <div className="h-10 border-b border-dashed border-gray-400"></div>
-                                                <div className="h-10"></div>
+                                        
+                                        {/* SECCIÓN DE OBSERVACIONES GENERALES AMPLIADA (5 renglones) */}
+                                        <div className="border-2 border-black p-2 flex-grow">
+                                            <div className="font-bold text-xs uppercase border-b border-black mb-1">OBSERVACIONES GENERALES / NOTAS DEL TEJEDOR</div>
+                                            <div className="text-xs space-y-2">
+                                                <div className="h-5 border-b border-dashed border-gray-400"></div>
+                                                <div className="h-5 border-b border-dashed border-gray-400"></div>
+                                                <div className="h-5 border-b border-dashed border-gray-400"></div>
+                                                <div className="h-5 border-b border-dashed border-gray-400"></div>
+                                                <div className="h-5"></div>
                                             </div>
                                         </div>
 
@@ -785,8 +803,9 @@
                 <div className="border rounded bg-white overflow-hidden my-4">
                     <div className="bg-slate-200 p-2 text-xs font-bold flex justify-between"><span>TABLA DE ENHEBRADO</span><button onClick={addRow} className="text-indigo-600 font-bold">+ Fila</button></div>
                     <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-50"><tr><th className="p-2">GUÍA</th><th className="p-2">MATERIAL</th><th className="p-2 w-16 text-center">%</th><th></th></tr></thead>
-                        <tbody>{data.map((row) => (<tr key={row.id}><td className="p-1"><input className="w-full border rounded p-1" placeholder="#" value={row.guia} onChange={toUppercase(e=>updateRow(row.id,'guia',e.target.value))} /></td><td className="p-1"><input list="inv" className="w-full border rounded p-1" value={row.material} onChange={toUppercase(e=>updateRow(row.id,'material',e.target.value))} /></td><td className="p-1"><input className="w-full border rounded p-1 text-center" value={row.porcentaje} onChange={e=>updateRow(row.id,'porcentaje',e.target.value)} /></td><td className="p-1"><button onClick={()=>removeRow(row.id)} className="text-red-400"><Icon name="x" size={14}/></button></td></tr>))}</tbody>
+                        {/* Se eliminó la columna de GUÍA del encabezado */}
+                        <thead className="bg-slate-50"><tr><th className="p-2">MATERIAL</th><th className="p-2 w-16 text-center">%</th><th></th></tr></thead>
+                        <tbody>{data.map((row) => (<tr key={row.id}><td className="p-1"><input list="inv" className="w-full border rounded p-1" value={row.material} onChange={toUppercase(e=>updateRow(row.id,'material',e.target.value))} /></td><td className="p-1"><input className="w-full border rounded p-1 text-center" value={row.porcentaje} onChange={e=>updateRow(row.id,'porcentaje',e.target.value)} /></td><td className="p-1"><button onClick={()=>removeRow(row.id)} className="text-red-400"><Icon name="x" size={14}/></button></td></tr>))}</tbody>
                     </table>
                     <datalist id="inv">{inventoryKeys.map(k=><option key={k} value={k}/>)}</datalist>
                 </div>
