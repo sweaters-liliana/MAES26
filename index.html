@@ -64,41 +64,10 @@
                 background: white !important;
                 inset: auto !important;
             }
-            /* AJUSTE PARA DEJAR ESPACIO PARA LAS NUEVAS SECCIONES EN LA PARTE INFERIOR DE LA HOJA 1 */
-            .print-section-page-1 { 
-                min-height: 98vh; /* Ajuste para forzar la paginación */
-                display: flex; 
-                flex-direction: column;
-                justify-content: space-between;
-                page-break-after: always; /* Importante para forzar la segunda página */
-            }
-
-            .print-section-top { 
-                height: auto; /* Se ajusta el contenido */
-                overflow: visible; 
-                border-bottom: 2px dashed #000; 
-                margin-bottom: 1vh; 
-                display: flex; 
-                flex-direction: column; 
-            }
+            .print-section-top { height: 40vh; overflow: hidden; border-bottom: 2px dashed #000; margin-bottom: 1vh; display: flex; flex-direction: column; }
+            /* Ajustamos un poco la altura inferior para dar espacio al footer */
+            .print-section-bottom { height: 55vh; display: flex; flex-direction: column; justify-content: space-between; }
             
-            /* NUEVA SECCIÓN PARA LA SEGUNDA PÁGINA */
-            .print-section-page-2 {
-                min-height: 98vh;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                page-break-before: always;
-            }
-
-            /* Contenido inferior que incluye la tabla y el pie de página */
-            .print-content-bottom { 
-                flex-grow: 1; /* Ocupa el espacio restante */
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-            }
-
             table { border-collapse: collapse; width: 100%; border: 2px solid black; table-layout: fixed; }
             th, td { border: 1px solid black; word-wrap: break-word; }
             .threading-table-print { font-size: 9pt; }
@@ -123,17 +92,7 @@
             .package-table-print td:last-child {
                 border-right: none !important;
             }
-            .manual-input { 
-                color: transparent; /* Hace el texto invisible para que se pueda escribir encima */
-                text-shadow: none !important;
-            } 
-            /* Se mantiene el espacio visual de la linea guion bajo si está vacío */
-            .manual-input:empty::after {
-                content: '_';
-                color: black;
-                font-size: 1px; /* Hace el guión muy pequeño, solo como marcador */
-            }
-
+            .manual-input { color: transparent; }
             .print-only { display: block !important; }
         }
 
@@ -347,12 +306,8 @@
                     const threading = [];
                     const nylon = getVal(firstRow, 'NYLON');
                     const lycra = getVal(firstRow, 'LYCRA');
-                    // MODIFICADO: ELIMINAMOS GUIA, SOLO MATERIAL Y %
-                    const nylonPercent = getVal(firstRow, 'NYLON_PERC') || 'N/A';
-                    const lycraPercent = getVal(firstRow, 'LYCRA_PERC') || 'N/A';
-                    
-                    if (nylon) threading.push({ id: 1, material: `NYLON ${nylon}`, porcentaje: nylonPercent });
-                    if (lycra) threading.push({ id: 2, material: `LYCRA ${lycra}`, porcentaje: lycraPercent });
+                    if (nylon) threading.push({ id: 1, guia: '1', material: `NYLON ${nylon}`, sis: '', porcentaje: '' });
+                    if (lycra) threading.push({ id: 2, guia: '2', material: `LYCRA ${lycra}`, sis: '', porcentaje: '' });
                     
                     // IMPORTANTE: Ahora incluimos createdAt
                     onImport({ 
@@ -524,27 +479,9 @@
             );
         };
 
-        // --- VISUALIZACIÓN E IMPRESIÓN (MODIFICADO) ---
+        // --- VISUALIZACIÓN E IMPRESIÓN ---
         const OrderView = ({ order, config, onBack, onEdit }) => { 
             const [entry, setEntry] = useState({ tejedor: '', fecha: new Date().toISOString().split('T')[0], defectos: '', agujas: '' });
-            
-            // Lógica para añadir filas vacías y llegar a un total de 25
-            const totalRows = 25;
-            const emptyRows = Array.from({length: Math.max(0, totalRows - (order.progreso?.length || 0))}, (_, i) => ({ 
-                id: `empty_${i}`, 
-                codigoUnico: '_', 
-                piezaNombre: '_',
-                cantidad: '_',
-                finished: false, 
-                empty: true 
-            }));
-            const tableData = [...(order.progreso || []), ...emptyRows].slice(0, totalRows);
-            const totalPieces = order.totalPedido;
-            // Simulando una velocidad de producción para los grandes textos, asumiendo 30 min/pieza grande
-            const piecesPerMinute = order.subPiecesData.reduce((acc, p) => acc + (1 / (Number(p.tiempo) || 60)), 0) || (1/60); 
-            const piecesPerHour = Math.round(piecesPerMinute * 60);
-            const piecesPerShift = Math.round(piecesPerHour * 8); // Asumiendo un turno de 8 horas
-
             
             const markPackage = async (pkgId) => {
                 if(!entry.tejedor) return alert("Por favor selecciona un TEJEDOR");
@@ -570,55 +507,6 @@
 
             const isOrderComplete = order.progreso.every(p => p.finished);
 
-            const RenderPackageTable = ({ data, startIdx, totalPieces }) => (
-                <>
-                    <div className="border-b border-black font-bold mb-1 text-sm flex justify-between">
-                        <span>CONTROL DE TEJIDO - PARTIDA {order.partida}</span>
-                        <span>TOTAL PIEZAS: {totalPieces}</span>
-                    </div>
-                    <table className="package-table-print">
-                        <colgroup>
-                            <col style={{width: '5%'}} />
-                            <col style={{width: '15%'}} /> <col style={{width: '8%'}} />
-                            <col style={{width: '10%'}} />
-                            <col style={{width: '10%'}} />
-                            <col style={{width: '8%'}} />
-                            <col style={{width: '8%'}} />
-                            <col style={{width: '5%'}} />
-                            <col style={{width: '31%'}} /> </colgroup>
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>CÓDIGO</th> 
-                                <th>Cant</th>
-                                <th>Tejedor</th>
-                                <th>Fecha</th>
-                                <th>Def</th>
-                                <th>Agj</th>
-                                <th>OK</th>
-                                <th>OBSERVACIONES</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {data.map((p, idx) => (
-                                <tr key={p.id} className={p.empty ? 'h-full' : ''}>
-                                    <td className="text-center font-bold border-r border-black">{startIdx + idx + 1}</td>
-                                    <td className="pl-1 font-mono text-[8px] border-r border-black truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
-                                    <td className="text-center font-bold border-r border-black">{p.cantidad}</td>
-                                    {/* CLASE manual-input: Mantiene el espacio pero hace el texto invisible para escribir a mano */}
-                                    <td className="manual-input border-r border-black">{p.finished ? p.tejedor : '_'}</td>
-                                    <td className="manual-input border-r border-black">{p.finished ? p.fecha : '_'}</td>
-                                    <td className="manual-input border-r border-black">{p.finished ? p.defectos : '_'}</td>
-                                    <td className="manual-input border-r border-black">{p.finished ? p.agujas : '_'}</td>
-                                    <td className="manual-input border-r border-black">{p.finished ? 'OK' : '_'}</td>
-                                    <td className="manual-input">{p.observaciones || '_'}</td> 
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </>
-            );
-
             return (
                 <div className="bg-white min-h-screen relative">
                     <div className="no-print p-4 border-b flex justify-between bg-slate-50 sticky top-0 z-10 shadow-sm">
@@ -641,102 +529,109 @@
                     <div className="p-8 print:p-0">
                         {order.status === 'ARCHIVADO' && <div className="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-4 mb-4 font-bold text-center no-print">ESTA ORDEN ESTÁ ARCHIVADA / TERMINADA</div>}
 
-                        {/* PÁGINA 1 */}
-                        <div className="print-section-page-1 print-only">
-                            <div className="print-section-top">
-                                 <div className="flex justify-between items-start border-b-4 border-black pb-2 mb-2">
-                                    <div>
-                                        <h1 className="text-4xl font-black uppercase tracking-tighter">{order.cliente}</h1>
-                                        <div className="text-xl font-bold font-mono">PARTIDA: {order.partida}</div>
-                                        <div className="text-sm font-bold text-slate-600 mt-1">MODELO: {order.codigo}</div>
-                                    </div>
-                                    <div className="text-right">
-                                        <span className="bg-black text-white px-2 py-1 text-sm font-bold uppercase">MÁQUINA</span>
-                                        <div className="text-6xl font-black leading-none">{order.maquina}</div>
-                                    </div>
-                                 </div>
-                                
-                                 <div className="flex gap-2 flex-grow overflow-hidden">
-                                    <div className="w-7/12 flex flex-col gap-2">
-                                        <div className="border-2 border-black">
-                                            <div className="flex bg-gray-200 border-b border-black font-bold text-xs uppercase p-1">
-                                                <div className="flex-1">Descripción / Pieza</div><div className="w-20 text-center">Talla</div><div className="w-20 text-center">Total</div>
-                                            </div>
-                                            {order.subPiecesData.map((p,i)=>(
-                                                <div key={i} className="flex text-sm p-1 border-b last:border-0">
-                                                    <div className="flex-1 truncate">{p.pieza}</div>
-                                                    <div className="w-20 text-center text-xs">{p.talla}</div>
-                                                    <div className="w-20 text-center font-bold">{p.totalPedido}</div>
-                                                </div>
-                                            ))}
+                        <div className="print-section-top">
+                             <div className="flex justify-between items-start border-b-4 border-black pb-2 mb-2">
+                                <div>
+                                    <h1 className="text-4xl font-black uppercase tracking-tighter">{order.cliente}</h1>
+                                    <div className="text-xl font-bold font-mono">PARTIDA: {order.partida}</div>
+                                    <div className="text-sm font-bold text-slate-600 mt-1">MODELO: {order.codigo}</div>
+                                </div>
+                                <div className="text-right">
+                                    <span className="bg-black text-white px-2 py-1 text-sm font-bold uppercase">MÁQUINA</span>
+                                    <div className="text-6xl font-black leading-none">{order.maquina}</div>
+                                </div>
+                             </div>
+                            
+                             <div className="flex gap-2 flex-grow overflow-hidden">
+                                <div className="w-7/12 flex flex-col gap-2">
+                                    <div className="border-2 border-black">
+                                        <div className="flex bg-gray-200 border-b border-black font-bold text-xs uppercase p-1">
+                                            <div className="flex-1">Descripción / Pieza</div><div className="w-20 text-center">Talla</div><div className="w-20 text-center">Total</div>
                                         </div>
-                                        
-                                        {/* TABLA DE ENHEBRADO SIMPLIFICADA (Material y Porcentaje) - Solicitud anterior */}
-                                        <div className="border-2 border-black">
-                                            <div className="flex bg-gray-200 border-b border-black font-bold text-xs uppercase p-1">
-                                                <div className="flex-1">MATERIAL</div>
-                                                <div className="w-16 text-center">%</div>
+                                        {order.subPiecesData.map((p,i)=>(
+                                            <div key={i} className="flex text-sm p-1 border-b last:border-0">
+                                                <div className="flex-1 truncate">{p.pieza}</div>
+                                                <div className="w-20 text-center text-xs">{p.talla}</div>
+                                                <div className="w-20 text-center font-bold">{p.totalPedido}</div>
                                             </div>
-                                            {order.threading.map((t,i)=>(
-                                                <div key={i} className="flex text-sm p-1 border-b last:border-0">
-                                                    <div className="flex-1 truncate">{t.material}</div>
-                                                    <div className="w-16 text-center font-bold">{t.porcentaje}</div>
-                                                </div>
-                                            ))}
-                                            {order.threading.length === 0 && (
-                                                <div className="text-center text-xs p-2 text-slate-500">No hay datos de enhebrado.</div>
-                                            )}
-                                        </div>
-                                        
-                                        {/* NUEVA SECCIÓN DE CANTIDADES POR HORA Y TURNO */}
-                                        <div className="flex border-2 border-black font-bold text-center">
-                                            <div className="flex-1 border-r-2 border-black p-1">
-                                                <div className="text-[10px] uppercase">CANTIDAD DE PIEZAS</div>
-                                                <div className="text-[10px] uppercase">POR HORA EN GRANDE</div>
-                                                <div className="text-4xl font-black text-indigo-700">{piecesPerHour}</div>
-                                            </div>
-                                            <div className="flex-1 p-1">
-                                                <div className="text-[10px] uppercase">CANTIDAD DE TURNO</div>
-                                                <div className="text-[10px] uppercase">POR HORA EN GRANDE</div>
-                                                <div className="text-4xl font-black text-indigo-700">{piecesPerShift}</div>
-                                            </div>
-                                        </div>
-                                        
-                                        {/* SECCIÓN DE OBSERVACIONES GENERALES AMPLIADA (5 renglones) */}
-                                        <div className="border-2 border-black p-2 flex-grow">
-                                            <div className="font-bold text-xs uppercase border-b border-black mb-1">OBSERVACIONES GENERALES / NOTAS DEL TEJEDOR</div>
-                                            <div className="text-xs space-y-2">
-                                                <div className="h-5 border-b border-dashed border-gray-400"></div>
-                                                <div className="h-5 border-b border-dashed border-gray-400"></div>
-                                                <div className="h-5 border-b border-dashed border-gray-400"></div>
-                                                <div className="h-5 border-b border-dashed border-gray-400"></div>
-                                                <div className="h-5"></div>
-                                            </div>
-                                        </div>
-
+                                        ))}
                                     </div>
-                                    <div className="w-5/12 border-2 border-black flex items-center justify-center relative bg-slate-50 overflow-hidden group">
-                                         <SmartImage repoUrls={config.repoUrls} codigo={order.codigo} className="max-h-full max-w-full object-contain"/>
+                                    <div className="flex-grow border-2 border-black relative">
+                                        <div className="bg-black text-white text-xs font-bold text-center">ENHEBRADO</div>
+                                        <div className="p-1">
+                                            <table className="threading-table-print text-left">
+                                                <thead><tr className="bg-gray-200 border-b border-black"><th className="p-1 w-10">Pos</th><th className="p-1">Material</th><th className="p-1 w-10 text-center">%</th></tr></thead>
+                                                <tbody>{order.threading && order.threading.map((row, i) => (
+                                                    <tr key={i} className="border-b border-gray-300">
+                                                        <td className="pl-1 border-r border-gray-300 font-bold">{row.guia}</td>
+                                                        <td className="pl-1 border-r border-gray-300 truncate">{row.material}</td>
+                                                        <td className="text-center font-bold">{row.porcentaje}</td>
+                                                    </tr>
+                                                ))}</tbody>
+                                            </table>
+                                        </div>
                                     </div>
+                                </div>
+                                <div className="w-5/12 border-2 border-black flex items-center justify-center relative bg-slate-50 overflow-hidden group">
+                                     <SmartImage repoUrls={config.repoUrls} codigo={order.codigo} className="max-h-full max-w-full object-contain"/>
                                 </div>
                             </div>
                         </div>
 
-
-                        {/* PÁGINA 2 Y SIGUIENTES (para la tabla de tejido) */}
-                        <div className="print-section-page-2 print-only">
-                             <div className="print-content-bottom">
-                                <RenderPackageTable data={tableData} startIdx={0} totalPieces={totalPieces} />
+                        <div className="print-section-bottom print-only">
+                            <div className="flex-grow">
+                                <div className="border-b border-black font-bold mb-1 text-sm flex justify-between">
+                                    <span>CONTROL DE TEJIDO - PARTIDA {order.partida}</span>
+                                    <span>TOTAL PIEZAS: {order.totalPedido}</span>
+                                </div>
+                                <table className="package-table-print">
+                                    <colgroup>
+                                        <col style={{width: '5%'}} />
+                                        <col style={{width: '15%'}} /> <col style={{width: '8%'}} />
+                                        <col style={{width: '10%'}} />
+                                        <col style={{width: '10%'}} />
+                                        <col style={{width: '8%'}} />
+                                        <col style={{width: '8%'}} />
+                                        <col style={{width: '5%'}} />
+                                        <col style={{width: '31%'}} /> </colgroup>
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>CÓDIGO</th> 
+                                            <th>Cant</th>
+                                            <th>Tejedor</th>
+                                            <th>Fecha</th>
+                                            <th>Def</th>
+                                            <th>Agj</th>
+                                            <th>OK</th>
+                                            <th>OBSERVACIONES</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {order.progreso?.map((p, idx) => (
+                                            <tr key={p.id}>
+                                                <td className="text-center font-bold border-r border-black">{idx+1}</td>
+                                                <td className="pl-1 font-mono text-[8px] border-r border-black truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
+                                                <td className="text-center font-bold border-r border-black">{p.cantidad}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? p.tejedor : '_'}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? p.fecha : '_'}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? p.defectos : '_'}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? p.agujas : '_'}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? 'OK' : '_'}</td>
+                                                <td className="manual-input">{p.observaciones || '_'}</td> </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                              </div>
-                             
-                             {/* --- PIE DE PÁGINA --- */}
+
+                             {/* --- AQUÍ ESTÁ EL PIE DE PÁGINA CON LAS FECHAS --- */}
                              <div className="mt-auto text-center border-t border-gray-300 pt-1">
                                 <div className="text-[10px] text-gray-400 font-mono">FECHA CREACIÓN: {order.createdAt || 'N/A'}</div>
                                 <div className="text-[10px] text-gray-400 font-mono">IMPRESO: {new Date().toLocaleString('es-MX')}</div>
                              </div>
+
                         </div>
 
-                        {/* VISTA NO IMPRESA (la parte funcional) */}
                         <div className="no-print mt-4">
                             <div className="bg-slate-100 p-4 rounded border mb-6">
                                 <h3 className="font-bold text-lg mb-2 text-slate-700">Registro Digital Simplificado</h3>
@@ -803,9 +698,8 @@
                 <div className="border rounded bg-white overflow-hidden my-4">
                     <div className="bg-slate-200 p-2 text-xs font-bold flex justify-between"><span>TABLA DE ENHEBRADO</span><button onClick={addRow} className="text-indigo-600 font-bold">+ Fila</button></div>
                     <table className="w-full text-xs text-left">
-                        {/* Se eliminó la columna de GUÍA del encabezado */}
-                        <thead className="bg-slate-50"><tr><th className="p-2">MATERIAL</th><th className="p-2 w-16 text-center">%</th><th></th></tr></thead>
-                        <tbody>{data.map((row) => (<tr key={row.id}><td className="p-1"><input list="inv" className="w-full border rounded p-1" value={row.material} onChange={toUppercase(e=>updateRow(row.id,'material',e.target.value))} /></td><td className="p-1"><input className="w-full border rounded p-1 text-center" value={row.porcentaje} onChange={e=>updateRow(row.id,'porcentaje',e.target.value)} /></td><td className="p-1"><button onClick={()=>removeRow(row.id)} className="text-red-400"><Icon name="x" size={14}/></button></td></tr>))}</tbody>
+                        <thead className="bg-slate-50"><tr><th className="p-2">GUÍA</th><th className="p-2">MATERIAL</th><th className="p-2 w-16 text-center">%</th><th></th></tr></thead>
+                        <tbody>{data.map((row) => (<tr key={row.id}><td className="p-1"><input className="w-full border rounded p-1" placeholder="#" value={row.guia} onChange={toUppercase(e=>updateRow(row.id,'guia',e.target.value))} /></td><td className="p-1"><input list="inv" className="w-full border rounded p-1" value={row.material} onChange={toUppercase(e=>updateRow(row.id,'material',e.target.value))} /></td><td className="p-1"><input className="w-full border rounded p-1 text-center" value={row.porcentaje} onChange={e=>updateRow(row.id,'porcentaje',e.target.value)} /></td><td className="p-1"><button onClick={()=>removeRow(row.id)} className="text-red-400"><Icon name="x" size={14}/></button></td></tr>))}</tbody>
                     </table>
                     <datalist id="inv">{inventoryKeys.map(k=><option key={k} value={k}/>)}</datalist>
                 </div>
@@ -931,7 +825,7 @@
                                         {viewMode === 'active' ? 'HISTORIAL' : 'VER PLANTA'}
                                     </button>
 
-                                    <button onClick={()=>setShowGallery(true)} className="bg-sky-500 hover:bg-sky-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="image-search"/> GALERÍA</button>
+                                    <button onClick={()=>setShowGallery(true)} className="bg-sky-500 hover:bg-sky-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2 text-xs"><Icon name="image-search"/> GALERÍA</button>
                                     <button onClick={()=>setShowSettings(true)} className="bg-slate-300 hover:bg-slate-400 text-slate-800 p-2 rounded shadow"><Icon name="settings"/></button>
                                     
                                     {viewMode === 'active' && (
