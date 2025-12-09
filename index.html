@@ -261,7 +261,7 @@
             );
         };
 
-        // --- COMPONENTE DE IMPORTACIÓN ---
+        // --- COMPONENTE DE IMPORTACIÓN (CORREGIDO) ---
         const ImportModal = ({ onClose, onImport }) => {
             const [text, setText] = useState('');
             const [error, setError] = useState(null);
@@ -289,7 +289,15 @@
                         let pkgNum = i + 1;
                         if (!isNaN(piezas)) {
                             totalPiezas += piezas;
-                            predefinedPackages.push({ id: Date.now() + i, piezaNombre: getVal(r, 'DESCRIPCION') || 'ESTANDAR', cantidad: piezas, paqueteNum: pkgNum, paquetesDePieza: rows.length - 1, codigoUnico: codigoUnico, finished: false });
+                            predefinedPackages.push({ 
+                                id: Date.now() + i, 
+                                piezaNombre: getVal(r, 'DESCRIPCION') || 'ESTANDAR', 
+                                cantidad: piezas, 
+                                paqueteNum: pkgNum, 
+                                paquetesDePieza: rows.length - 1, 
+                                codigoUnico: codigoUnico, 
+                                finished: false 
+                            });
                         }
                     });
 
@@ -298,7 +306,25 @@
                     const lycra = getVal(firstRow, 'LYCRA');
                     if (nylon) threading.push({ id: 1, guia: '1', material: `NYLON ${nylon}`, sis: '', porcentaje: '' });
                     if (lycra) threading.push({ id: 2, guia: '2', material: `LYCRA ${lycra}`, sis: '', porcentaje: '' });
-                    onImport({ codigo: getVal(firstRow, 'MODELO'), cliente: getVal(firstRow, 'CLIENTE'), maquina: getVal(firstRow, 'MAQUINA'), partida: getVal(firstRow, 'PARTIDA'), pieces: [{ id: Date.now(), pieza: getVal(firstRow, 'DESCRIPCION') || 'ESTANDAR', programa: '', talla: getVal(firstRow, 'TALLA') || 'UNITALLA', totalPedido: totalPiezas, peso: '', tiempo: '' }], threading: threading, predefinedPackages: predefinedPackages });
+                    
+                    // AQUÍ ESTABA EL ERROR: Se cambió 'pieces' por 'subPiecesData' para que coincida con el formulario
+                    onImport({ 
+                        codigo: getVal(firstRow, 'MODELO'), 
+                        cliente: getVal(firstRow, 'CLIENTE'), 
+                        maquina: getVal(firstRow, 'MAQUINA'), 
+                        partida: getVal(firstRow, 'PARTIDA'), 
+                        subPiecesData: [{ 
+                            id: Date.now(), 
+                            pieza: getVal(firstRow, 'DESCRIPCION') || 'ESTANDAR', 
+                            programa: '', 
+                            talla: getVal(firstRow, 'TALLA') || 'UNITALLA', 
+                            totalPedido: totalPiezas, 
+                            peso: '', 
+                            tiempo: '' 
+                        }], 
+                        threading: threading, 
+                        predefinedPackages: predefinedPackages 
+                    });
                 } catch (e) { setError(e.message); }
             };
             return (
