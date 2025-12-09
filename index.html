@@ -113,13 +113,13 @@
         const { useState, useEffect, useMemo } = React;
         
         const firebaseConfig = {
-            apiKey: "AIzaSyCQTsg5pkyOOUtUz2-3D7vz5nsKV40xNWo",
-            authDomain: "maes-6ac53.firebaseapp.com",
-            projectId: "maes-6ac53",
-            storageBucket: "maes-6ac53.firebasestorage.app",
-            messagingSenderId: "298060807774",
-            appId: "1:298060807774:web:2e027a9217363cfaaf7ecf",
-            measurementId: "G-0KCFFE9TJD"
+            apiKey: "AIzaSyBqHgV4vDat1-VmZfKbiPg7nuiX-ROcexw",
+            authDomain: "cirineo-cec21.firebaseapp.com",
+            projectId: "cirineo-cec21",
+            storageBucket: "cirineo-cec21.firebasestorage.app",
+            messagingSenderId: "620210618284",
+            appId: "1:620210618284:web:482bab9bf74650fff18409",
+            measurementId: "G-B7YLM78RVW"
         };
 
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
@@ -444,7 +444,7 @@
             );
         };
 
-        // --- VISUALIZACIÓN E IMPRESIÓN ---
+        // --- VISUALIZACIÓN E IMPRESIÓN (CON EXPORTACIÓN A EXCEL) ---
         const OrderView = ({ order, config, onBack, onEdit }) => { 
             const [entry, setEntry] = useState({ tejedor: '', fecha: new Date().toISOString().split('T')[0], defectos: '', agujas: '' });
             
@@ -459,7 +459,6 @@
                 await db.collection('orders').doc(String(order.id)).update({progreso: newProgreso});
             };
 
-            // Función para alternar el estado de archivo
             const toggleArchive = async () => {
                 const isArchived = order.status === 'ARCHIVADO';
                 const msg = isArchived ? "¿Desarchivar esta orden?" : "¿Marcar orden como TERMINADA y archivarla?";
@@ -471,15 +470,74 @@
                 }
             };
 
-            const isOrderComplete = order.progreso.every(p => p.finished);
+            // --- FUNCIÓN PARA EXPORTAR A EXCEL (CSV) ---
+            const exportOrderToCSV = () => {
+                // Definimos las cabeceras compatibles con la importación
+                const headers = [
+                    "PARTIDA", 
+                    "MODELO", 
+                    "CLIENTE", 
+                    "MAQUINA", 
+                    "DESCRIPCION", 
+                    "TALLA", 
+                    "PIEZAS", 
+                    "CODIGO", 
+                    "TEJEDOR", 
+                    "FECHA",
+                    "DEFECTOS",
+                    "AGUJAS",
+                    "OBSERVACIONES"
+                ];
+
+                // Mapeamos cada paquete (fila del progreso) a una fila del Excel
+                const rows = order.progreso.map(p => {
+                    // Buscamos la talla correspondiente a la pieza
+                    const subPiece = order.subPiecesData.find(sp => sp.pieza === p.piezaNombre);
+                    const talla = subPiece ? subPiece.talla : 'UNITALLA';
+
+                    return [
+                        order.partida,           // PARTIDA
+                        order.codigo,            // MODELO
+                        order.cliente,           // CLIENTE
+                        order.maquina,           // MAQUINA
+                        p.piezaNombre,           // DESCRIPCION
+                        talla,                   // TALLA
+                        p.cantidad,              // PIEZAS
+                        p.codigoUnico || '',     // CODIGO (ID Único del paquete)
+                        p.finished ? p.tejedor : '', // TEJEDOR
+                        p.finished ? p.fecha : '',   // FECHA
+                        p.finished ? p.defectos : '', // DEFECTOS
+                        p.finished ? p.agujas : '',   // AGUJAS
+                        p.observaciones || ''    // OBSERVACIONES
+                    ].map(field => `"${String(field || '').replace(/"/g, '""')}"`).join(','); // Escapar comillas para CSV
+                });
+
+                // Unimos cabeceras y filas
+                const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n'); // \uFEFF es para que Excel reconozca acentos (BOM)
+
+                // Crear blob y descargar
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.setAttribute("download", `${order.partida}_${order.codigo}_EXPORT.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
 
             return (
                 <div className="bg-white min-h-screen relative">
                     <div className="no-print p-4 border-b flex justify-between bg-slate-50 sticky top-0 z-10 shadow-sm">
                         <button onClick={onBack} className="flex items-center gap-2 text-slate-600 font-bold"><Icon name="arrow-left"/> Volver</button>
                         <div className="flex gap-2">
+                             {/* Botón Exportar Excel */}
+                             <button onClick={exportOrderToCSV} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 shadow transition-transform active:scale-95">
+                                 <Icon name="file-spreadsheet"/> EXPORTAR EXCEL
+                             </button>
+
                              {/* Botón de Archivar */}
-                             <button onClick={toggleArchive} className={`px-3 py-1 rounded font-bold text-xs flex items-center gap-1 text-white ${order.status === 'ARCHIVADO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'}`}>
+                             <button onClick={toggleArchive} className={`px-3 py-1 rounded font-bold text-xs flex items-center gap-1 text-white ${order.status === 'ARCHIVADO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-slate-600 hover:bg-slate-700'}`}>
                                  <Icon name={order.status === 'ARCHIVADO' ? "refresh-ccw" : "archive"}/> 
                                  {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR ORDEN'}
                              </button>
