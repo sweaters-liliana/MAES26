@@ -4,51 +4,236 @@
     <meta charset="utf-8">
     <title>Sistema ByLiliana - Control de Producción</title>
     <style>
-        /* ESTILOS CSS BASE */
-        body { font-family: sans-serif; margin: 0; background-color: #f4f7f6; }
-        #root { padding: 20px; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .header h1 { font-size: 1.5em; color: #333; }
-        .header button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; background-color: #007bff; color: white; margin-left: 5px; }
-        .order-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
-        .order-card { background: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); overflow: hidden; }
-        .card-body { padding: 15px; }
-        .card-footer { display: flex; justify-content: space-between; padding: 15px; background-color: #f8f8f8; border-top: 1px solid #eee; }
-        .status-badge { padding: 5px 10px; border-radius: 4px; font-weight: bold; }
-        .status-badge.pending { background-color: #ffc107; color: #333; }
-        .status-badge.finished { background-color: #28a745; color: white; }
-        .status-badge.in-progress { background-color: #007bff; color: white; }
-        .status-badge.cancelled { background-color: #dc3545; color: white; }
-        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-        .modal-content { background: white; padding: 30px; border-radius: 8px; max-width: 550px; width: 90%; position: relative; }
-        .close-button { position: absolute; top: 10px; right: 10px; border: none; background: transparent; font-size: 1.5em; cursor: pointer; }
-        .image-preview { width: 100%; height: 200px; background-color: #f0f0f0; background-size: contain; background-repeat: no-repeat; background-position: center; margin-bottom: 15px; border-radius: 5px; }
+        /* ========================================================= */
+        /* 🎨 ESTILOS GENERALES Y PALETA DE COLORES */
+        /* ========================================================= */
+        
+        :root {
+            --color-primary: #4a148c; /* Morado Profundo (Marca) */
+            --color-accent: #ff7043;  /* Naranja Vívido (Acción) */
+            --color-success: #388e3c; /* Verde (Terminado) */
+            --color-pending: #ffb300; /* Ámbar (Pendiente) */
+            --color-progress: #1976d2; /* Azul (En Progreso) */
+            --color-danger: #d32f2f;  /* Rojo (Cancelado/Eliminar) */
+            --color-bg-light: #f8f9fa; /* Fondo General */
+            --color-card-bg: #ffffff; /* Fondo Tarjetas */
+            --color-text: #343a40; /* Texto Principal */
+            --border-radius: 8px;
+        }
 
-        /* ESTILOS DE LOGIN */
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            background-color: var(--color-bg-light); 
+            color: var(--color-text);
+        }
+        #root { 
+            padding: 20px; 
+            max-width: 1500px;
+            margin: 0 auto;
+        }
+
+        /* ========================================================= */
+        /* ⏫ HEADER Y BOTONES */
+        /* ========================================================= */
+        
+        .header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 30px; 
+            padding: 10px 0;
+            border-bottom: 3px solid var(--color-primary);
+        }
+        .header h1 { 
+            font-size: 1.8em; 
+            color: var(--color-primary); 
+            font-weight: 600;
+        }
+        .header button { 
+            padding: 10px 18px; 
+            border: none; 
+            border-radius: var(--border-radius); 
+            cursor: pointer; 
+            font-weight: bold;
+            transition: background-color 0.2s, transform 0.1s;
+            margin-left: 10px;
+        }
+        .header button:hover {
+            transform: translateY(-2px);
+        }
+        
+        /* Estilos específicos de botones */
+        .header button:not(#manage-users-btn) { background-color: var(--color-primary); color: white; }
+        .header button:not(#manage-users-btn):hover { background-color: #5e35b1; }
+        #manage-users-btn { background-color: #8E24AA !important; color: white; } /* Morado más brillante para Admin */
+        #manage-users-btn:hover { background-color: #791a92 !important; }
+        #logout-btn { background-color: var(--color-danger); }
+        #logout-btn:hover { background-color: #b71c1c; }
+
+
+        /* ========================================================= */
+        /* 📦 TARJETAS DE ÓRDENES */
+        /* ========================================================= */
+        
+        .order-list { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); 
+            gap: 25px; 
+        }
+        .order-card { 
+            background: var(--color-card-bg); 
+            border-radius: var(--border-radius); 
+            box-shadow: 0 6px 15px rgba(0,0,0,0.1); 
+            overflow: hidden; 
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .order-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+        }
+        .card-body { 
+            padding: 20px; 
+        }
+        .card-body strong {
+            font-size: 1.2em;
+            color: var(--color-accent);
+        }
+        .card-body hr {
+            border: none;
+            border-top: 1px solid #e0e0e0;
+            margin: 10px 0;
+        }
+        .card-body p {
+            margin: 5px 0;
+            font-size: 0.95em;
+        }
+        .card-footer { 
+            display: flex; 
+            justify-content: space-between; 
+            padding: 15px 20px; 
+            background-color: #f1f4f5; 
+            border-top: 1px solid #e0e0e0; 
+            font-size: 0.85em;
+        }
+        
+        /* Badges de Estado */
+        .status-badge { 
+            padding: 6px 12px; 
+            border-radius: 20px; 
+            font-weight: bold; 
+            font-size: 0.8em;
+            letter-spacing: 0.5px;
+        }
+        .status-badge.pending { background-color: var(--color-pending); color: white; }
+        .status-badge.finished { background-color: var(--color-success); color: white; }
+        .status-badge.in-progress { background-color: var(--color-progress); color: white; }
+        .status-badge.cancelled { background-color: var(--color-danger); color: white; }
+        .image-preview { 
+            width: 100%; 
+            height: 220px; 
+            background-color: #e0e0e0; 
+            background-size: cover; /* Cambiado de contain a cover para mejor estética */
+            background-repeat: no-repeat; 
+            background-position: center; 
+            margin-bottom: 15px; 
+            border-radius: 5px; 
+        }
+
+        /* ========================================================= */
+        /* 🔒 LOGIN SCREEN */
+        /* ========================================================= */
+
         #login-screen {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background-color: #3f51b5; 
-            display: flex; flex-direction: column; justify-content: center; align-items: center;
-            color: white; z-index: 1001;
+            background-color: var(--color-primary); 
+            /* Se mantiene el layout de centrado */
         }
         #login-form {
-            background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-            width: 300px; text-align: center; color: #333;
+            padding: 50px; 
+            width: 350px; 
+            /* Sombra y esquinas mejoradas */
+        }
+        #login-form h2 {
+            color: var(--color-primary);
+            margin-bottom: 25px;
         }
         #login-form input {
-            width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box;
+            padding: 12px;
+            border-radius: 5px;
+            font-size: 1em;
         }
         #login-form button {
-            width: 100%; padding: 10px; background-color: #ff5722; color: white; border: none; border-radius: 5px;
-            cursor: pointer; font-weight: bold; margin-top: 15px; transition: background-color 0.3s;
+            background-color: var(--color-accent); 
+            padding: 12px;
+            font-size: 1.1em;
         }
-        #login-form button:hover { background-color: #e64a19; }
-        #login-error { color: #dc3545; margin-top: 10px; font-weight: bold; }
-        
-        /* Estilos de la tabla de gestión de usuarios */
-        .user-table th, .user-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        .user-table th { background-color: #f2f2f2; }
+        #login-form button:hover {
+            background-color: #e6603a;
+        }
+        #login-error { 
+            color: var(--color-danger); 
+        }
 
+        /* ========================================================= */
+        /* 📐 MODALES Y FORMULARIOS */
+        /* ========================================================= */
+
+        .modal-content { 
+            background: var(--color-card-bg); 
+            padding: 40px; 
+            border-radius: var(--border-radius); 
+            max-width: 600px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        .modal-content h3 {
+            color: var(--color-primary);
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .modal-content input, .modal-content textarea, .modal-content select {
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 1em;
+        }
+        .modal-content button[type="submit"], .modal-content button:not(.close-button):not(.close-modal-btn) {
+            background-color: var(--color-accent);
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+        .modal-content button:hover {
+            background-color: #e6603a;
+        }
+        
+        #edit-order-form button[type="button"] { 
+            background-color: var(--color-danger);
+        }
+        #edit-order-form button[type="button"]:hover {
+            background-color: #b71c1c;
+        }
+        
+        /* Estilos de gestión de usuarios */
+        .user-table { margin-top: 15px; }
+        .user-table th, .user-table td { 
+            padding: 12px; 
+            font-size: 0.9em;
+        }
+        .user-table select {
+            padding: 5px;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        
     </style>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
@@ -72,8 +257,8 @@
             <div>
                 <button onclick="openModal('new-order-modal')">➕ Nueva Orden</button>
                 <button onclick="openModal('settings-modal')">⚙️ Ajustes</button>
-                <button id="manage-users-btn" onclick="openManageUsersModal()" style="display: none; background-color: #8E24AA;">👥 Gestionar Usuarios</button>
-                <button onclick="handleLogout()">🚪 Cerrar Sesión</button>
+                <button id="manage-users-btn" onclick="openManageUsersModal()" style="display: none;">👥 Gestionar Usuarios</button>
+                <button id="logout-btn" onclick="handleLogout()">🚪 Cerrar Sesión</button>
             </div>
         </div>
         <div class="order-list" id="order-list">
@@ -85,11 +270,11 @@
             <button class="close-button" onclick="closeModal('new-order-modal')">&times;</button>
             <h3>Crear Nueva Orden</h3>
             <form id="new-order-form">
-                <input type="number" id="new-order-id" placeholder="ID/Código de Orden" required><br><br>
-                <input type="text" id="new-order-client" placeholder="Cliente" required><br><br>
-                <input type="text" id="new-order-model" placeholder="Modelo/Código de Diseño" required oninput="updateImagePreview(this.value, 'new-image-preview')"><br><br>
+                <input type="number" id="new-order-id" placeholder="ID/Código de Orden" required><br>
+                <input type="text" id="new-order-client" placeholder="Cliente" required><br>
+                <input type="text" id="new-order-model" placeholder="Modelo/Código de Diseño" required oninput="updateImagePreview(this.value, 'new-image-preview')"><br>
                 <div id="new-image-preview" class="image-preview"></div>
-                <textarea id="new-order-details" placeholder="Detalles de la Orden" rows="4"></textarea><br><br>
+                <textarea id="new-order-details" placeholder="Detalles de la Orden" rows="4"></textarea><br>
                 <select id="new-order-status" required>
                     <option value="pending">Pendiente</option>
                     <option value="in-progress">En Progreso</option>
@@ -105,13 +290,13 @@
             <h3>Configuración de Repositorios de Imágenes</h3>
             <div id="current-repos">
                 <h4>Repositorios Activos:</h4>
-                <ul id="repo-list"></ul>
+                <ul id="repo-list" style="list-style-type: none; padding: 0;"></ul>
             </div>
             <hr>
             <h4>Añadir Nuevo Repositorio:</h4>
-            <input type="text" id="new-repo-url" placeholder="Ej: https://raw.githubusercontent.com/usuario/repo/" style="width: 100%; padding: 8px;"><br><br>
+            <input type="text" id="new-repo-url" placeholder="Ej: file://///NombreDeTuPC/Carpeta/" style="width: 100%; padding: 8px;"><br><br>
             <button onclick="addRepoUrl()">Añadir</button>
-            <button onclick="saveSettings()">Guardar Configuración</button>
+            <button onclick="saveSettings()" style="margin-left: 10px;">Guardar Configuración</button>
         </div>
     </div>
     
@@ -121,11 +306,11 @@
             <h3>Editar Orden</h3>
             <form id="edit-order-form">
                 <input type="hidden" id="edit-order-id-hidden">
-                <input type="number" id="edit-order-id" placeholder="ID/Código de Orden" readonly><br><br>
-                <input type="text" id="edit-order-client" placeholder="Cliente" required><br><br>
-                <input type="text" id="edit-order-model" placeholder="Modelo/Código de Diseño" required oninput="updateImagePreview(this.value, 'edit-image-preview')"><br><br>
+                <input type="number" id="edit-order-id" placeholder="ID/Código de Orden" readonly><br>
+                <input type="text" id="edit-order-client" placeholder="Cliente" required><br>
+                <input type="text" id="edit-order-model" placeholder="Modelo/Código de Diseño" required oninput="updateImagePreview(this.value, 'edit-image-preview')"><br>
                 <div id="edit-image-preview" class="image-preview"></div>
-                <textarea id="edit-order-details" placeholder="Detalles de la Orden" rows="4"></textarea><br><br>
+                <textarea id="edit-order-details" placeholder="Detalles de la Orden" rows="4"></textarea><br>
                 <select id="edit-order-status" required>
                     <option value="pending">Pendiente</option>
                     <option value="in-progress">En Progreso</option>
@@ -133,7 +318,7 @@
                     <option value="cancelled">Cancelada</option>
                 </select><br><br>
                 <button type="submit">Actualizar Orden</button>
-                <button type="button" onclick="deleteOrder()" id="delete-order-btn" style="background-color: #dc3545; margin-left: 10px;">Eliminar Orden</button>
+                <button type="button" onclick="deleteOrder()" id="delete-order-btn" style="margin-left: 10px;">Eliminar Orden</button>
             </form>
         </div>
     </div>
@@ -142,7 +327,7 @@
         <div class="modal-content" style="max-width: 700px;">
             <button class="close-button" onclick="closeModal('manage-users-modal')">&times;</button>
             <h3>Gestión de Roles de Usuarios</h3>
-            <p>Aquí puedes asignar el nivel de acceso a cada usuario. (Admin, Editor o Visor).</p>
+            <p style="font-size: 0.9em; color: #6c757d;">Aquí puedes asignar el nivel de acceso a cada usuario. (Admin, Editor o Visor).</p>
             <div style="max-height: 400px; overflow-y: auto;">
                 <table id="user-role-table" class="user-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
@@ -157,7 +342,7 @@
                         </tbody>
                 </table>
             </div>
-            <button onclick="closeModal('manage-users-modal')" style="margin-top: 20px;">Cerrar</button>
+            <button onclick="closeModal('manage-users-modal')" style="margin-top: 20px; background-color: #6c757d;">Cerrar</button>
         </div>
     </div>
 
@@ -178,7 +363,7 @@
         const ADMIN_EMAIL = 'jesus.dev@byliliana.com';
 
         let db;
-        let currentUserRole = 'viewer'; // Rol del usuario actual
+        let currentUserRole = 'viewer';
         let repoUrls = [];
         let usersCollection;
         
@@ -212,40 +397,33 @@
 
         firebase.auth().onAuthStateChanged((user) => {
             if (user) {
-                // Oculta el login y muestra la app
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('root').style.display = 'block';
-                document.getElementById('user-display').textContent = `Sistema de Producción (Sesión: ${user.email})`;
                 
-                // 1. Verificar/Asignar Rol
                 checkUserRole(user);
 
             } else {
-                // Muestra la pantalla de login
                 document.getElementById('root').style.display = 'none';
                 document.getElementById('login-screen').style.display = 'flex';
             }
         });
         
         async function checkUserRole(user) {
+            document.getElementById('user-display').textContent = `Sistema de Producción (Sesión: ${user.email})`;
             const userDocRef = usersCollection.doc(user.uid);
             const userDoc = await userDocRef.get();
             
             if (userDoc.exists) {
-                // Si el usuario ya tiene un rol
                 currentUserRole = userDoc.data().role || 'viewer';
             } else {
-                // Si es un nuevo usuario, asignarle un rol por defecto o el de administrador
                 currentUserRole = user.email === ADMIN_EMAIL ? 'admin' : 'editor';
                 
-                // Guardar el rol en Firestore
                 await userDocRef.set({ 
                     email: user.email, 
                     role: currentUserRole 
                 });
             }
             
-            // 2. Iniciar la aplicación con los permisos correctos
             startApp(currentUserRole);
         }
 
@@ -254,24 +432,25 @@
         // ----------------------------------------------------------------------
 
         function startApp(role) {
-            console.log("App iniciada. Rol:", role);
             
-            // Controla qué botones ve el usuario según su rol
-            if (role === 'admin') {
-                document.getElementById('manage-users-btn').style.display = 'inline-block';
+            // Controla visibilidad de Gestión de Usuarios
+            document.getElementById('manage-users-btn').style.display = (role === 'admin' ? 'inline-block' : 'none');
+            
+            // Ocultar botones de acción si es Visor
+            if (role === 'viewer') {
+                document.querySelector('.header button[onclick="openModal(\'new-order-modal\')"]').style.display = 'none';
+                // El botón de Ajustes se deja para que pueda ver los repos, aunque no pueda guardar
             } else {
-                document.getElementById('manage-users-btn').style.display = 'none';
+                 document.querySelector('.header button[onclick="openModal(\'new-order-modal\')"]').style.display = 'inline-block';
             }
+
 
             // ----------------------------------------------------
             // Lógica de Repositorios (Settings)
             // ----------------------------------------------------
             
-            // ... (Toda la lógica de repositorios: settingsDoc.onSnapshot, renderRepoList, addRepoUrl, saveSettings)...
-
             const settingsDoc = db.collection('settings').doc('image_repos');
 
-            // Cargar Repositorios al iniciar y en tiempo real
             settingsDoc.onSnapshot(doc => {
                 if (doc.exists) {
                     repoUrls = doc.data().urls || [];
@@ -287,17 +466,23 @@
                 const list = document.getElementById('repo-list');
                 list.innerHTML = '';
                 if (repoUrls.length === 0) {
-                    list.innerHTML = '<li>No hay repositorios configurados.</li>';
+                    list.innerHTML = '<li style="color:#6c757d;">No hay repositorios configurados.</li>';
                     return;
                 }
                 repoUrls.forEach((url, index) => {
                     const li = document.createElement('li');
                     li.textContent = url;
+                    li.style.borderBottom = '1px dotted #ccc';
+                    li.style.padding = '8px 0';
+                    li.style.wordBreak = 'break-all'; // Para URLs largas
                     
-                    if (role === 'admin') { // Solo el admin puede eliminar repos
+                    if (role === 'admin') {
                          const deleteBtn = document.createElement('button');
                          deleteBtn.textContent = 'Eliminar';
                          deleteBtn.style.marginLeft = '10px';
+                         deleteBtn.style.backgroundColor = 'var(--color-danger)';
+                         deleteBtn.style.padding = '5px 10px';
+                         deleteBtn.style.fontSize = '0.8em';
                          deleteBtn.onclick = () => removeRepoUrl(index);
                          li.appendChild(deleteBtn);
                     }
@@ -310,7 +495,9 @@
                 const input = document.getElementById('new-repo-url');
                 const url = input.value.trim();
                 if (url && !repoUrls.includes(url)) {
-                    repoUrls.push(url);
+                    // Asegurar que la URL termine con /
+                    const finalUrl = url.endsWith('/') ? url : url + '/';
+                    repoUrls.push(finalUrl);
                     input.value = '';
                     renderRepoList();
                 }
@@ -336,35 +523,42 @@
             }
 
             // ----------------------------------------------------
-            // Lógica de Órdenes (Creación, Edición y Eliminación)
+            // Lógica de Órdenes 
             // ----------------------------------------------------
             
             const ordersCollection = db.collection('orders');
             const orderListElement = document.getElementById('order-list');
             
             function renderOrderCard(order) {
-                 // ... (mismo código para renderizar la tarjeta) ...
                  const card = document.createElement('div');
                  card.className = 'order-card';
                  
-                 // Solo permite abrir modal de edición a Editores o Administradores
+                 // Permite abrir modal de edición a Editores o Administradores
                  if (role === 'admin' || role === 'editor') {
                     card.onclick = () => openEditModal(order); 
                  }
                  
                  let statusClass = order.status;
+                 let dateDisplay = new Date(order.timestamp).toLocaleDateString();
+
+                 // Si el timestamp es muy reciente (ej. hoy), mostrar la hora
+                 const today = new Date();
+                 const orderDate = new Date(order.timestamp);
+                 if (orderDate.toDateString() === today.toDateString()) {
+                     dateDisplay = 'Hoy, ' + orderDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                 }
                  
                  card.innerHTML = `
                      <div class="card-body">
                          <strong>#${order.id}</strong> - ${order.client}
                          <hr>
-                         <p>Modelo: ${order.model}</p>
-                         <p>Detalles: ${order.details}</p>
+                         <p>Modelo: <strong>${order.model}</strong></p>
+                         <p>Detalles: ${order.details.length > 50 ? order.details.substring(0, 50) + '...' : order.details}</p>
                          <div class="image-preview" id="preview-${order.id}"></div>
                      </div>
                      <div class="card-footer">
                          <span class="status-badge ${statusClass}">${statusClass.toUpperCase().replace('-', ' ')}</span>
-                         <span>Última act.: ${new Date(order.timestamp).toLocaleDateString()}</span>
+                         <span>Última act.: ${dateDisplay}</span>
                      </div>
                  `;
 
@@ -390,31 +584,43 @@
                 const element = document.getElementById(elementId);
                 const imageFile = modelCode.toUpperCase().replace(/\s/g, '') + '.jpg';
                 
-                repoUrls.forEach(baseUrl => {
-                    const fullUrl = baseUrl + imageFile;
-                    const img = new Image();
-                    if (!fullUrl.startsWith('http') && !fullUrl.startsWith('file:///')) return; 
+                element.style.backgroundImage = 'none'; // Limpiar previo
+                element.style.backgroundColor = '#e0e0e0';
+                
+                let imageLoaded = false;
 
-                    img.onload = () => {
-                        element.style.backgroundImage = `url('${fullUrl}')`;
-                        element.style.backgroundColor = 'transparent';
-                        element.onerror = null;
-                        return true;
-                    };
-                    img.onerror = () => {};
-                    img.src = fullUrl;
+                // Usar una promesa para manejar la carga secuencial de URLs
+                const loadPromises = repoUrls.map(baseUrl => {
+                    return new Promise((resolve) => {
+                        if (imageLoaded) return resolve(true);
+
+                        const fullUrl = baseUrl + imageFile;
+                        const img = new Image();
+                        
+                        img.onload = () => {
+                            if (!imageLoaded) { // Si ya se cargó una, ignorar las demás
+                                element.style.backgroundImage = `url('${fullUrl}')`;
+                                element.style.backgroundColor = 'transparent';
+                                imageLoaded = true;
+                            }
+                            resolve(true); // Resuelve la promesa
+                        };
+                        img.onerror = () => {
+                            resolve(false); // Falla, intenta el siguiente
+                        };
+                        img.src = fullUrl;
+                    });
                 });
                 
-                setTimeout(() => {
-                    if (!element.style.backgroundImage) {
-                         element.style.backgroundColor = '#f0f0f0';
+                // Ejecutar todas las promesas (intentos de carga)
+                Promise.all(loadPromises).then(() => {
+                    if (!imageLoaded) {
+                        element.style.backgroundColor = '#f0f0f0'; // Si fallan todas
                     }
-                }, 500); 
+                });
             }
 
             function updateImagePreview(modelCode, elementId) {
-                const element = document.getElementById(elementId);
-                element.style.backgroundImage = 'none'; 
                 smartLoadImage(modelCode, elementId);
             }
 
@@ -459,7 +665,6 @@
                 document.getElementById('edit-order-details').value = order.details;
                 document.getElementById('edit-order-status').value = order.status;
                 
-                // Controlar el botón de eliminar
                 document.getElementById('delete-order-btn').style.display = (role === 'admin' ? 'inline-block' : 'none');
                 
                 updateImagePreview(order.model, 'edit-image-preview');
@@ -470,7 +675,7 @@
             document.getElementById('edit-order-form').onsubmit = function(e) {
                 e.preventDefault();
                 if (role !== 'admin' && role !== 'editor') return alert('Permiso denegado.');
-                // ... (mismo código de actualización) ...
+                
                 if (!currentEditOrderId) return;
 
                 const updatedPayload = {
@@ -529,13 +734,16 @@
                 tableBody.innerHTML = '<tr><td colspan="4">Cargando usuarios...</td></tr>';
                 
                 usersCollection.get().then(snapshot => {
-                    tableBody.innerHTML = ''; // Limpiar
+                    tableBody.innerHTML = '';
                     snapshot.forEach(doc => {
                         const user = doc.data();
                         const uid = doc.id;
                         const row = document.createElement('tr');
                         
-                        const selectHtml = `
+                        // Si el usuario es el propio Jesús Vallejo (el ADMIN_EMAIL), no permitir cambiar su rol
+                        const isSelfAdmin = user.email === ADMIN_EMAIL;
+                        
+                        const selectHtml = isSelfAdmin ? user.role.toUpperCase() + ' (Fijo)' : `
                             <select onchange="updateUserRole('${uid}', this.value)">
                                 <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
                                 <option value="editor" ${user.role === 'editor' ? 'selected' : ''}>Editor</option>
@@ -546,7 +754,7 @@
                         row.innerHTML = `
                             <td>${user.email}</td>
                             <td>${uid.substring(0, 6)}...</td>
-                            <td>${user.role}</td>
+                            <td><span class="status-badge" style="background-color: ${user.role === 'admin' ? '#4a148c' : (user.role === 'editor' ? '#1976d2' : '#6c757d')}; color: white;">${user.role.toUpperCase()}</span></td>
                             <td>${selectHtml}</td>
                         `;
                         tableBody.appendChild(row);
@@ -559,7 +767,8 @@
                 
                 usersCollection.doc(uid).update({ role: newRole })
                     .then(() => {
-                        alert(`Rol del usuario ${uid.substring(0, 6)}... actualizado a ${newRole}.`);
+                        alert(`Rol del usuario actualizado a ${newRole}. Recargue la app para aplicar cambios.`);
+                        renderUserTable();
                     })
                     .catch(error => {
                         console.error("Error al actualizar rol: ", error);
@@ -568,7 +777,7 @@
             }
             
             // ----------------------------------------------------
-            // Lógica de Modales (Se mantiene)
+            // Lógica de Modales
             // ----------------------------------------------------
             
             function openModal(id) {
@@ -586,8 +795,8 @@
             window.updateImagePreview = updateImagePreview;
             window.addRepoUrl = addRepoUrl;
             window.saveSettings = saveSettings;
-            window.openManageUsersModal = openManageUsersModal; // Nueva
-            window.updateUserRole = updateUserRole; // Nueva
+            window.openManageUsersModal = openManageUsersModal;
+            window.updateUserRole = updateUserRole;
         }
 
         // Funciones globales (para login/logout)
