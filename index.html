@@ -65,7 +65,9 @@
                 inset: auto !important;
             }
             .print-section-top { height: 40vh; overflow: hidden; border-bottom: 2px dashed #000; margin-bottom: 1vh; display: flex; flex-direction: column; }
-            .print-section-bottom { height: 55vh; display: block; }
+            /* Ajustamos un poco la altura inferior para dar espacio al footer */
+            .print-section-bottom { height: 55vh; display: flex; flex-direction: column; justify-content: space-between; }
+            
             table { border-collapse: collapse; width: 100%; border: 2px solid black; table-layout: fixed; }
             th, td { border: 1px solid black; word-wrap: break-word; }
             .threading-table-print { font-size: 9pt; }
@@ -261,7 +263,7 @@
             );
         };
 
-        // --- COMPONENTE DE IMPORTACIÓN (CORREGIDO) ---
+        // --- COMPONENTE DE IMPORTACIÓN (CORREGIDO + FECHA CREACIÓN) ---
         const ImportModal = ({ onClose, onImport }) => {
             const [text, setText] = useState('');
             const [error, setError] = useState(null);
@@ -307,7 +309,7 @@
                     if (nylon) threading.push({ id: 1, guia: '1', material: `NYLON ${nylon}`, sis: '', porcentaje: '' });
                     if (lycra) threading.push({ id: 2, guia: '2', material: `LYCRA ${lycra}`, sis: '', porcentaje: '' });
                     
-                    // AQUÍ ESTABA EL ERROR: Se cambió 'pieces' por 'subPiecesData' para que coincida con el formulario
+                    // IMPORTANTE: Ahora incluimos createdAt
                     onImport({ 
                         codigo: getVal(firstRow, 'MODELO'), 
                         cliente: getVal(firstRow, 'CLIENTE'), 
@@ -323,7 +325,8 @@
                             tiempo: '' 
                         }], 
                         threading: threading, 
-                        predefinedPackages: predefinedPackages 
+                        predefinedPackages: predefinedPackages,
+                        createdAt: new Date().toLocaleString('es-MX') // FECHA DE CREACIÓN AL IMPORTAR
                     });
                 } catch (e) { setError(e.message); }
             };
@@ -377,7 +380,7 @@
             return <img src={imgSrc} onError={handleError} className={className} />;
         };
 
-        // --- FORMULARIO DE ORDEN (CREAR Y EDITAR) ---
+        // --- FORMULARIO DE ORDEN (CREAR Y EDITAR - CON FECHA CREACIÓN) ---
         const MultiOrderForm = ({ config, onCancel, initialOrder, clientHistory, inventory, isEditing }) => {
             const [header, setHeader] = useState(initialOrder ? { codigo: initialOrder.codigo, cliente: initialOrder.cliente, maquina: initialOrder.maquina, partida: initialOrder.partida || '', fechaInicio: initialOrder.fechaInicio || new Date().toISOString().split('T')[0] } : { codigo: '', cliente: '', maquina: '', partida: '', fechaInicio: new Date().toISOString().split('T')[0] });
             const [pieces, setPieces] = useState(initialOrder?.subPiecesData || [{ id: 1, pieza: 'BLUSA', programa: '', talla: 'UNITALLA', totalPedido: 100, peso: '', tiempo: '' }]);
@@ -413,6 +416,11 @@
                 }
 
                 const displayId = generateSmartID(header.partida, pieces, header.maquina);
+                // LOGICA DE FECHA DE CREACIÓN
+                const creationDate = isEditing 
+                    ? (initialOrder.createdAt || new Date().toLocaleString('es-MX')) 
+                    : (initialOrder?.createdAt || new Date().toLocaleString('es-MX'));
+
                 const orderPayload = { 
                     ...header, 
                     id: isEditing ? initialOrder.id : Date.now(), 
@@ -422,7 +430,8 @@
                     threading: threadingData, 
                     packageSize: predefinedPackages ? 'VARIO' : Number(packageSize), 
                     status: initialOrder?.status || 'EN PROCESO', 
-                    totalPedido: pieces.reduce((a,b)=>a+Number(b.totalPedido),0) 
+                    totalPedido: pieces.reduce((a,b)=>a+Number(b.totalPedido),0),
+                    createdAt: creationDate // GUARDAMOS LA FECHA
                 };
                 try { 
                     await db.collection('orders').doc(String(orderPayload.id)).set(orderPayload);
@@ -485,7 +494,6 @@
                 await db.collection('orders').doc(String(order.id)).update({progreso: newProgreso});
             };
 
-            // Función para alternar el estado de archivo
             const toggleArchive = async () => {
                 const isArchived = order.status === 'ARCHIVADO';
                 const msg = isArchived ? "¿Desarchivar esta orden?" : "¿Marcar orden como TERMINADA y archivarla?";
@@ -504,7 +512,6 @@
                     <div className="no-print p-4 border-b flex justify-between bg-slate-50 sticky top-0 z-10 shadow-sm">
                         <button onClick={onBack} className="flex items-center gap-2 text-slate-600 font-bold"><Icon name="arrow-left"/> Volver</button>
                         <div className="flex gap-2">
-                             {/* Botón de Archivar */}
                              <button onClick={toggleArchive} className={`px-3 py-1 rounded font-bold text-xs flex items-center gap-1 text-white ${order.status === 'ARCHIVADO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'}`}>
                                  <Icon name={order.status === 'ARCHIVADO' ? "refresh-ccw" : "archive"}/> 
                                  {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR ORDEN'}
@@ -572,56 +579,63 @@
                         </div>
 
                         <div className="print-section-bottom print-only">
-                             <div className="border-b border-black font-bold mb-1 text-sm flex justify-between">
-                                 <span>CONTROL DE TEJIDO - PARTIDA {order.partida}</span>
-                                <span>TOTAL PIEZAS: {order.totalPedido}</span>
+                            <div className="flex-grow">
+                                <div className="border-b border-black font-bold mb-1 text-sm flex justify-between">
+                                    <span>CONTROL DE TEJIDO - PARTIDA {order.partida}</span>
+                                    <span>TOTAL PIEZAS: {order.totalPedido}</span>
+                                </div>
+                                <table className="package-table-print">
+                                    <colgroup>
+                                        <col style={{width: '5%'}} />
+                                        <col style={{width: '15%'}} /> <col style={{width: '8%'}} />
+                                        <col style={{width: '10%'}} />
+                                        <col style={{width: '10%'}} />
+                                        <col style={{width: '8%'}} />
+                                        <col style={{width: '8%'}} />
+                                        <col style={{width: '5%'}} />
+                                        <col style={{width: '31%'}} /> </colgroup>
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>CÓDIGO</th> 
+                                            <th>Cant</th>
+                                            <th>Tejedor</th>
+                                            <th>Fecha</th>
+                                            <th>Def</th>
+                                            <th>Agj</th>
+                                            <th>OK</th>
+                                            <th>OBSERVACIONES</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {order.progreso?.map((p, idx) => (
+                                            <tr key={p.id}>
+                                                <td className="text-center font-bold border-r border-black">{idx+1}</td>
+                                                <td className="pl-1 font-mono text-[8px] border-r border-black truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
+                                                <td className="text-center font-bold border-r border-black">{p.cantidad}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? p.tejedor : '_'}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? p.fecha : '_'}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? p.defectos : '_'}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? p.agujas : '_'}</td>
+                                                <td className="manual-input border-r border-black">{p.finished ? 'OK' : '_'}</td>
+                                                <td className="manual-input">{p.observaciones || '_'}</td> </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                              </div>
-                             <table className="package-table-print">
-                                <colgroup>
-                                    <col style={{width: '5%'}} />
-                                    <col style={{width: '15%'}} /> <col style={{width: '8%'}} />
-                                    <col style={{width: '10%'}} />
-                                    <col style={{width: '10%'}} />
-                                    <col style={{width: '8%'}} />
-                                    <col style={{width: '8%'}} />
-                                    <col style={{width: '5%'}} />
-                                    <col style={{width: '31%'}} /> </colgroup>
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>CÓDIGO</th> 
-                                        <th>Cant</th>
-                                        <th>Tejedor</th>
-                                        <th>Fecha</th>
-                                        <th>Def</th>
-                                        <th>Agj</th>
-                                        <th>OK</th>
-                                        <th>OBSERVACIONES</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {order.progreso?.map((p, idx) => (
-                                        <tr key={p.id}>
-                                            <td className="text-center font-bold border-r border-black">{idx+1}</td>
-                                            <td className="pl-1 font-mono text-[8px] border-r border-black truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
-                                            <td className="text-center font-bold border-r border-black">{p.cantidad}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? p.tejedor : '_'}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? p.fecha : '_'}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? p.defectos : '_'}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? p.agujas : '_'}</td>
-                                            <td className="manual-input border-r border-black">{p.finished ? 'OK' : '_'}</td>
-                                            <td className="manual-input">{p.observaciones || '_'}</td> </tr>
-                                    ))}
-                                </tbody>
-                             </table>
+
+                             {/* --- AQUÍ ESTÁ EL PIE DE PÁGINA CON LAS FECHAS --- */}
+                             <div className="mt-auto text-center border-t border-gray-300 pt-1">
+                                <div className="text-[10px] text-gray-400 font-mono">FECHA CREACIÓN: {order.createdAt || 'N/A'}</div>
+                                <div className="text-[10px] text-gray-400 font-mono">IMPRESO: {new Date().toLocaleString('es-MX')}</div>
+                             </div>
+
                         </div>
 
                         <div className="no-print mt-4">
                             <div className="bg-slate-100 p-4 rounded border mb-6">
                                 <h3 className="font-bold text-lg mb-2 text-slate-700">Registro Digital Simplificado</h3>
                                 <div className="flex gap-4 items-end mb-4 bg-white p-3 rounded shadow-sm border">
-                                    
-                                    {/* SELECCIÓN SIMPLIFICADA DE TEJEDOR */}
                                     <div>
                                         <label className="block text-xs font-bold text-slate-500 mb-1">TEJEDOR</label>
                                         <select 
@@ -634,8 +648,6 @@
                                             <option value="ANDRÉS">ANDRÉS</option>
                                         </select>
                                     </div>
-
-                                    {/* SELECCIÓN DE FECHA CON CALENDARIO */}
                                     <div>
                                         <label className="block text-xs font-bold text-slate-500 mb-1">FECHA</label>
                                         <input 
@@ -646,7 +658,6 @@
                                         />
                                     </div>
                                 </div>
-                                
                                 <div className="max-h-80 overflow-y-auto bg-white border rounded shadow-inner">
                                     <table className="w-full text-xs text-left">
                                         <thead className="bg-slate-200 sticky top-0 shadow-sm z-0">
