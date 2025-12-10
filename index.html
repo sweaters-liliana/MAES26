@@ -3,13 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Textil Cloud - Cirineo</title>
+    <title>Sistema Textil Cloud - CALCETÍN</title>
     
-    <link id="appIcon" rel="icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/maes.png">
-    <link id="appAppleIcon" rel="apple-touch-icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/maes.png">
-    <meta name="theme-color" content="#1e293b">
-    
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link id="appIcon" rel="icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.ico">
+    <link id="appAppleIcon" rel="apple-touch-icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.ico">
+    <meta name="theme-color" content="#0e7490"> <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -20,16 +18,16 @@
 
     <script>
         const manifest = {
-            "name": "Sistema Textil Cloud",
-            "short_name": "Cirineo",
+            "name": "Cirineo Calcetín",
+            "short_name": "Calcetín",
             "start_url": ".",
             "display": "standalone",
-            "background_color": "#f1f5f9",
-            "theme_color": "#1e293b",
+            "background_color": "#ecfeff",
+            "theme_color": "#0e7490",
             "icons": [{
-                "src": "https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/maes.png",
+                "src": "https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.ico",
                 "sizes": "192x192",
-                "type": "image/png"
+                "type": "image/ico"
             }]
         };
         const stringManifest = JSON.stringify(manifest);
@@ -42,10 +40,10 @@
     </script>
 
     <style>
-        /* ESTILOS DE IMPRESIÓN - CARTA VERTICAL ESTILO COMPACTO */
+        /* ESTILOS DE IMPRESIÓN */
         @media print {
             @page { 
-                size: letter portrait; /* CARTA NORMAL */
+                size: letter portrait; 
                 margin: 1cm; 
             }
             body, html, #root { 
@@ -67,19 +65,18 @@
                 overflow: visible !important;
             }
 
-            /* --- TIPOGRAFÍA GRANDE Y BORDES GRUESOS --- */
-            h1 { font-size: 36pt !important; line-height: 0.9 !important; margin-bottom: 5px; } /* Cliente Gigante */
+            h1 { font-size: 36pt !important; line-height: 0.9 !important; margin-bottom: 5px; }
             
             table { 
                 border-collapse: collapse; 
                 width: 100%; 
-                border: 3px solid black; /* Bordes muy gruesos */
+                border: 3px solid black; 
                 table-layout: fixed; 
                 margin-bottom: 8px;
             }
             
             th { 
-                background-color: #d1d5db !important; /* Gris más visible */
+                background-color: #d1d5db !important; 
                 color: black !important;
                 font-weight: 900 !important;
                 text-transform: uppercase;
@@ -92,13 +89,12 @@
             td { 
                 border: 2px solid black !important;
                 padding: 4px !important;
-                font-size: 12pt !important; /* Letra grande y legible */
+                font-size: 12pt !important; 
                 font-weight: 700 !important;
                 color: black !important;
                 vertical-align: middle;
             }
 
-            /* Estilos específicos */
             .header-info { font-size: 14pt !important; font-weight: 800; }
             
             .machine-number-box { 
@@ -110,13 +106,12 @@
                 padding: 4px;
             }
             .machine-number-val { 
-                font-size: 60pt !important; /* Número enorme */
+                font-size: 60pt !important; 
                 font-weight: 900; 
                 line-height: 0.8; 
                 text-align: center; 
             }
 
-            /* Tabla de Paquetes Inferior */
             .package-table-print th { font-size: 10pt !important; }
             .package-table-print td { font-size: 11pt !important; height: 24px; } 
 
@@ -128,22 +123,24 @@
 
         .print-only { display: none; }
         .dashboard-grid { display: grid; grid-template-rows: 60vh 1fr; height: 100vh; overflow: hidden; }
-        .top-pane { overflow-y: auto; border-bottom: 4px solid #334155; }
-        .bottom-pane { overflow-x: auto; background: #1e293b; color: white; display: flex; padding: 10px; gap: 10px; }
-        .machine-card { min-width: 320px; background: #334155; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; height: 100%; }
+        /* CAMBIO DE COLOR DE FONDO PARA DIFERENCIAR */
+        .top-pane { overflow-y: auto; border-bottom: 4px solid #0e7490; background-color: #f0f9ff; }
+        .bottom-pane { overflow-x: auto; background: #164e63; color: white; display: flex; padding: 10px; gap: 10px; }
+        .machine-card { min-width: 320px; background: #155e75; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; height: 100%; }
         .pkg-list { overflow-y: auto; flex-grow: 1; margin-top: 10px; padding-right: 4px; }
         .pkg-list::-webkit-scrollbar { width: 6px; }
-        .pkg-list::-webkit-scrollbar-thumb { background: #64748b; border-radius: 4px; }
-        .obs-input { background: transparent; border: none; color: #cbd5e1; width: 100%; font-size: 10px; border-bottom: 1px solid #475569; }
-        .obs-input:focus { outline: none; border-bottom: 1px solid #94a3b8; color: white; }
+        .pkg-list::-webkit-scrollbar-thumb { background: #67e8f9; border-radius: 4px; }
+        .obs-input { background: transparent; border: none; color: #bae6fd; width: 100%; font-size: 10px; border-bottom: 1px solid #0891b2; }
+        .obs-input:focus { outline: none; border-bottom: 1px solid #22d3ee; color: white; }
     </style>
 </head>
-<body class="bg-slate-100 text-slate-800 font-sans">
+<body class="bg-cyan-50 text-slate-800 font-sans">
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
         
+        // --- CONFIGURACIÓN FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyBqHgV4vDat1-VmZfKbiPg7nuiX-ROcexw",
             authDomain: "cirineo-cec21.firebaseapp.com",
@@ -156,6 +153,11 @@
 
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
+
+        // *** IMPORTANTE: COLECCIÓN SEPARADA PARA CALCETÍN ***
+        const ORDERS_COLLECTION = 'orders_calcetin'; 
+        // El inventario sigue siendo compartido
+        const INVENTORY_COLLECTION = 'inventory'; 
 
         const Icon = ({ name, size = 18, className }) => <i data-lucide={name} width={size} height={size} className={className}></i>;
         const toUppercase = (handler) => (e) => { e.target.value = e.target.value.toUpperCase(); handler(e); };
@@ -183,38 +185,13 @@
                         cantidad: cantidad, 
                         paqueteNum: i, 
                         paquetesDePieza: n, 
-                        codigoUnico: codigoUnico,
+                        codigoUnico: codigoUnico, 
                         finished: false 
                     });
                     pkgCounter++;
                 }
             });
             return packages;
-        };
-
-        // --- COMPONENTE BOTÓN DE INSTALACIÓN ---
-        const InstallButton = () => {
-            const [deferredPrompt, setDeferredPrompt] = useState(null);
-            useEffect(() => {
-                const handler = (e) => {
-                    e.preventDefault();
-                    setDeferredPrompt(e);
-                };
-                window.addEventListener('beforeinstallprompt', handler);
-                return () => window.removeEventListener('beforeinstallprompt', handler);
-            }, []);
-            const handleInstall = async () => {
-                if (!deferredPrompt) return;
-                deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
-                if (outcome === 'accepted') setDeferredPrompt(null);
-            };
-            if (!deferredPrompt) return null;
-            return (
-                <button onClick={handleInstall} className="bg-yellow-500 hover:bg-yellow-600 text-black px-3 py-2 rounded font-bold shadow flex items-center gap-2 text-xs animate-pulse">
-                    <Icon name="download-cloud" size={16}/> INSTALAR APP
-                </button>
-            );
         };
 
         // --- DASHBOARD COMPONENTS ---
@@ -237,7 +214,8 @@
                 const order = orders.find(o => o.id === parentOrderId);
                 if(!order) return;
                 const newProgreso = order.progreso.map(p => p.id === pkgId ? {...p, observaciones: newVal} : p);
-                await db.collection('orders').doc(String(parentOrderId)).update({progreso: newProgreso});
+                // Usamos la colección de calcetín
+                await db.collection(ORDERS_COLLECTION).doc(String(parentOrderId)).update({progreso: newProgreso});
             };
 
             const totalMinutesLeft = pendingPackages.reduce((sum, p) => sum + p.timeTotal, 0);
@@ -246,30 +224,30 @@
             const hoursLeft = (totalMinutesLeft / 60).toFixed(1);
 
             return (
-                <div className="machine-card shadow-lg border border-slate-600">
-                    <div className="flex justify-between items-center border-b border-slate-500 pb-2 mb-2">
+                <div className="machine-card shadow-lg border border-cyan-800">
+                    <div className="flex justify-between items-center border-b border-cyan-700 pb-2 mb-2">
                         <div>
-                            <div className="text-xs text-slate-400 font-bold uppercase">Máquina</div>
-                            <div className="text-3xl font-black text-yellow-400">#{maquina}</div>
+                            <div className="text-xs text-cyan-200 font-bold uppercase">Máquina</div>
+                            <div className="text-3xl font-black text-cyan-300">#{maquina}</div>
                         </div>
                         <div className="text-right">
-                            <button onClick={()=>setIs24Hours(!is24Hours)} className="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-[10px] font-bold mb-1 border border-slate-500 block w-full">
+                            <button onClick={()=>setIs24Hours(!is24Hours)} className="bg-cyan-800 hover:bg-cyan-700 px-2 py-1 rounded text-[10px] font-bold mb-1 border border-cyan-600 block w-full">
                                 {is24Hours ? '24 HORAS' : '12 HORAS'}
                             </button>
-                            <div className="text-xs font-bold text-green-400">{daysLeft} días ({hoursLeft}h)</div>
+                            <div className="text-xs font-bold text-green-300">{daysLeft} días ({hoursLeft}h)</div>
                         </div>
                     </div>
                     <div className="pkg-list space-y-1">
-                        {pendingPackages.length === 0 && <div className="text-center text-slate-500 text-xs py-4">Máquina Libre</div>}
+                        {pendingPackages.length === 0 && <div className="text-center text-cyan-300/50 text-xs py-4">Máquina Libre</div>}
                         {pendingPackages.map((p, i) => (
-                            <div key={i} className="bg-slate-800 p-2 rounded flex gap-2 items-center text-xs border border-slate-700">
+                            <div key={i} className="bg-cyan-900/50 p-2 rounded flex gap-2 items-center text-xs border border-cyan-700">
                                 <div className="font-black text-white text-lg w-10 text-right shrink-0">{p.cantidad}</div>
                                 <div className="w-24 shrink-0 overflow-hidden">
-                                    <div className="font-bold text-slate-300 truncate text-[10px]" title={p.piezaNombre}>{p.piezaNombre}</div>
-                                    <div className="text-[9px] text-yellow-500 font-black truncate">{p.partida}</div>
+                                    <div className="font-bold text-cyan-100 truncate text-[10px]" title={p.piezaNombre}>{p.piezaNombre}</div>
+                                    <div className="text-[9px] text-yellow-400 font-black truncate">{p.partida}</div>
                                 </div>
-                                <div className="flex-grow pl-2 border-l border-slate-600">
-                                    <input className="obs-input placeholder-slate-600" placeholder="Observaciones..." defaultValue={p.observaciones || ''} onBlur={(e) => updateObs(p.id, p.parentOrderId, e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter') e.target.blur(); }}/>
+                                <div className="flex-grow pl-2 border-l border-cyan-700">
+                                    <input className="obs-input placeholder-cyan-700" placeholder="Observaciones..." defaultValue={p.observaciones || ''} onBlur={(e) => updateObs(p.id, p.parentOrderId, e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter') e.target.blur(); }}/>
                                 </div>
                             </div>
                         ))}
@@ -288,7 +266,7 @@
             return (
                 <div className="bottom-pane shadow-inner">
                     {machineGroups.map(g => <MachineCard key={g.id} maquina={g.id} orders={g.orders} />)}
-                    {machineGroups.length === 0 && <div className="text-slate-500 w-full flex items-center justify-center font-bold">No hay producción activa</div>}
+                    {machineGroups.length === 0 && <div className="text-cyan-200/50 w-full flex items-center justify-center font-bold">No hay producción activa en Calcetines</div>}
                 </div>
             );
         };
@@ -334,6 +312,7 @@
                     });
 
                     const threading = [];
+                    // Adaptado para nombres comunes en calcetín si fuera necesario, pero mantenemos compatibilidad
                     const nylon = getVal(firstRow, 'NYLON');
                     const lycra = getVal(firstRow, 'LYCRA');
                     if (nylon) threading.push({ id: 1, guia: '1', material: `NYLON ${nylon}`, sis: '', porcentaje: '' });
@@ -346,7 +325,7 @@
                         partida: getVal(firstRow, 'PARTIDA'), 
                         subPiecesData: [{ 
                             id: Date.now(), 
-                            pieza: getVal(firstRow, 'DESCRIPCION') || 'ESTANDAR', 
+                            pieza: getVal(firstRow, 'DESCRIPCION') || 'CALCETIN', 
                             programa: '', 
                             talla: getVal(firstRow, 'TALLA') || 'UNITALLA', 
                             totalPedido: totalPiezas, 
@@ -363,16 +342,16 @@
                 <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
                     <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-2xl relative">
                         <div className="flex justify-between items-center mb-4 border-b pb-2">
-                            <h3 className="font-bold text-xl text-green-700 flex items-center gap-2"><Icon name="file-spreadsheet"/> Importar Excel</h3>
+                            <h3 className="font-bold text-xl text-cyan-700 flex items-center gap-2"><Icon name="file-spreadsheet"/> Importar Excel (Calcetín)</h3>
                             <button onClick={onClose} className="bg-red-500 hover:bg-red-600 text-white rounded-md p-2 shadow-lg flex items-center gap-1 font-bold text-xs transition-transform hover:scale-105">
                                 <Icon name="x" size={18}/> CERRAR
                             </button>
                         </div>
                         <p className="text-xs text-slate-500 mb-2">Copia y pega las celdas desde Excel.</p>
-                        <textarea value={text} onChange={(e) => { setText(e.target.value); setError(null); }} className="w-full h-64 p-3 border-2 border-slate-300 rounded font-mono text-xs focus:border-green-500 focus:outline-none" placeholder="Pegar datos..."></textarea>
+                        <textarea value={text} onChange={(e) => { setText(e.target.value); setError(null); }} className="w-full h-64 p-3 border-2 border-slate-300 rounded font-mono text-xs focus:border-cyan-500 focus:outline-none" placeholder="Pegar datos..."></textarea>
                         {error && <div className="mt-2 text-red-600 text-xs font-bold bg-red-50 p-2 rounded border border-red-200">Error: {error}</div>}
                         <div className="flex justify-end gap-2 mt-4">
-                            <button onClick={handleProcess} className="px-6 py-2 bg-green-600 text-white font-bold rounded shadow hover:bg-green-700 flex items-center gap-2"><Icon name="check-circle" size={18}/> Procesar</button>
+                            <button onClick={handleProcess} className="px-6 py-2 bg-cyan-600 text-white font-bold rounded shadow hover:bg-cyan-700 flex items-center gap-2"><Icon name="check-circle" size={18}/> Procesar</button>
                         </div>
                     </div>
                 </div>
@@ -412,14 +391,16 @@
         // --- FORMULARIO DE ORDEN (CREAR Y EDITAR) ---
         const MultiOrderForm = ({ config, onCancel, initialOrder, clientHistory, inventory, isEditing }) => {
             const [header, setHeader] = useState(initialOrder ? { codigo: initialOrder.codigo, cliente: initialOrder.cliente, maquina: initialOrder.maquina, partida: initialOrder.partida || '', fechaInicio: initialOrder.fechaInicio || new Date().toISOString().split('T')[0] } : { codigo: '', cliente: '', maquina: '', partida: '', fechaInicio: new Date().toISOString().split('T')[0] });
-            const [pieces, setPieces] = useState(initialOrder?.subPiecesData || [{ id: 1, pieza: 'BLUSA', programa: '', talla: 'UNITALLA', totalPedido: 100, peso: '', tiempo: '' }]);
+            const [pieces, setPieces] = useState(initialOrder?.subPiecesData || [{ id: 1, pieza: 'CALCETIN', programa: '', talla: 'UNITALLA', totalPedido: 100, peso: '30', tiempo: '' }]);
             const [threadingData, setThreadingData] = useState(initialOrder?.threading || []);
             const predefinedPackages = initialOrder?.predefinedPackages || (initialOrder && initialOrder.packageSize === 'VARIO' ? initialOrder.progreso : null);
             const [packageSize, setPackageSize] = useState(initialOrder?.packageSize && initialOrder.packageSize !== 'VARIO' ? initialOrder.packageSize : 50);
+            
             const addPiece = () => setPieces([...pieces, { id: Date.now(), pieza: '', talla: 'UNITALLA', totalPedido: '', peso: '', tiempo: '' }]);
             const updatePiece = (id, f, v) => setPieces(pieces.map(p => p.id === id ? { ...p, [f]: v } : p));
             const removePiece = (id) => pieces.length > 1 && setPieces(pieces.filter(p => p.id !== id));
-            const inventoryKeys = inventory ? Object.keys(inventory) : [];
+            
+            const totalOrderWeight = pieces.reduce((sum, p) => sum + ((Number(p.totalPedido) || 0) * (Number(p.peso) || 0)), 0);
 
             const handleSubmit = async () => {
                 if(!header.codigo || !header.cliente || !header.maquina || !header.partida) return alert("Faltan datos.");
@@ -444,6 +425,41 @@
                     }
                 }
 
+                // =======================================================
+                // LOGICA INVENTARIO (COMPARTIDA)
+                // =======================================================
+                if (!isEditing && inventory && Array.isArray(inventory)) {
+                    const totalKg = totalOrderWeight / 1000; 
+                    let updatedInventoryItems = [...inventory]; 
+                    let inventoryChanged = false;
+
+                    threadingData.forEach(row => {
+                        const pct = parseFloat(row.porcentaje) || 0;
+                        if (pct > 0 && row.material) {
+                            const consumedKg = totalKg * (pct / 100);
+                            const itemIndex = updatedInventoryItems.findIndex(i => i.material === row.material);
+                            if (itemIndex > -1) {
+                                const currentStock = parseFloat(updatedInventoryItems[itemIndex].stock) || 0;
+                                const newStock = Math.max(0, currentStock - consumedKg);
+                                updatedInventoryItems[itemIndex] = { ...updatedInventoryItems[itemIndex], stock: newStock.toFixed(2) };
+                                inventoryChanged = true;
+                            }
+                        }
+                    });
+
+                    if (inventoryChanged) {
+                        try {
+                            // AQUÍ SE USA LA COLECCIÓN DE INVENTARIO COMPARTIDA 'inventory'
+                            await db.collection(INVENTORY_COLLECTION).doc('main').update({ items: updatedInventoryItems });
+                            console.log("Inventario actualizado con éxito.");
+                        } catch (err) {
+                            console.error("Error actualizando inventario:", err);
+                            alert("Advertencia: La orden se guardará, pero hubo un error descontando el inventario.");
+                        }
+                    }
+                }
+                // =======================================================
+
                 const displayId = generateSmartID(header.partida, pieces, header.maquina);
                 const creationDate = isEditing 
                     ? (initialOrder.createdAt || new Date().toLocaleString('es-MX')) 
@@ -453,7 +469,7 @@
                     ...header, 
                     id: isEditing ? initialOrder.id : Date.now(), 
                     displayId, 
-                    subPiecesData: pieces.map(p => ({...p, totalPedido: Number(p.totalPedido)})), 
+                    subPiecesData: pieces.map(p => ({...p, totalPedido: Number(p.totalPedido), peso: Number(p.peso)})), 
                     progreso: finalPackages, 
                     threading: threadingData, 
                     packageSize: predefinedPackages ? 'VARIO' : Number(packageSize), 
@@ -462,8 +478,9 @@
                     createdAt: creationDate
                 };
                 try { 
-                    await db.collection('orders').doc(String(orderPayload.id)).set(orderPayload);
-                    alert(`Orden ${isEditing ? 'Actualizada' : 'Guardada'}`);
+                    // AQUÍ SE USA LA COLECCIÓN DE CALCETIN 'orders_calcetin'
+                    await db.collection(ORDERS_COLLECTION).doc(String(orderPayload.id)).set(orderPayload);
+                    alert(`Orden Calcetín ${isEditing ? 'Actualizada' : 'Guardada y Material Descontado'}`);
                     onCancel(); 
                 } catch(e) { 
                     console.error(e);
@@ -473,35 +490,43 @@
             return (
                 <div className="bg-white p-6 rounded shadow-xl max-w-4xl mx-auto my-4 overflow-y-auto h-[90vh]">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
-                        <h2 className="font-bold text-xl flex items-center gap-2">
-                             <Icon name={isEditing ? "file-edit" : "file-plus"}/> {isEditing ? 'Editar Orden' : 'Nueva Orden'}
+                        <h2 className="font-bold text-xl flex items-center gap-2 text-cyan-800">
+                             <Icon name={isEditing ? "file-edit" : "file-plus"}/> {isEditing ? 'Editar Orden' : 'Nueva Orden Calcetín'}
                         </h2>
                         <button onClick={onCancel} className="text-red-500 font-bold">Cancelar</button>
                     </div>
                     <div className="grid grid-cols-12 gap-4 mb-4">
-                        <div className="col-span-3 bg-yellow-50 p-2 rounded border border-yellow-200"><label className="text-xs font-bold text-yellow-900">PARTIDA</label><input value={header.partida} onChange={toUppercase(e=>setHeader({...header, partida:e.target.value}))} className="w-full text-lg font-black p-1 bg-white border rounded uppercase" placeholder="Ej: 24NOV451" disabled={isEditing}/></div>
+                        <div className="col-span-3 bg-yellow-50 p-2 rounded border border-yellow-200"><label className="text-xs font-bold text-yellow-900">PARTIDA</label><input value={header.partida} onChange={toUppercase(e=>setHeader({...header, partida:e.target.value}))} className="w-full text-lg font-black p-1 bg-white border rounded uppercase" placeholder="Ej: 24NOV-C01" disabled={isEditing}/></div>
                         <div className="col-span-3"><label className="text-xs font-bold">MODELO (FOTO)</label><input value={header.codigo} onChange={toUppercase(e=>setHeader({...header, codigo:e.target.value}))} className="w-full border p-2 rounded font-bold uppercase"/></div>
                         <div className="col-span-4"><label className="text-xs font-bold">CLIENTE</label><input list="clients" value={header.cliente} onChange={toUppercase(e=>setHeader({...header, cliente:e.target.value}))} className="w-full border p-2 rounded font-bold"/><datalist id="clients">{clientHistory.map(c=><option key={c} value={c}/>)}</datalist></div>
-                        <div className="col-span-2"><label className="text-xs font-bold bg-slate-200 px-1">MÁQUINA</label><input value={header.maquina} onChange={toUppercase(e=>setHeader({...header, maquina:e.target.value}))} className="w-full border-2 border-slate-400 p-2 rounded font-black text-center"/></div>
+                        <div className="col-span-2"><label className="text-xs font-bold bg-cyan-100 px-1">MÁQUINA</label><input value={header.maquina} onChange={toUppercase(e=>setHeader({...header, maquina:e.target.value}))} className="w-full border-2 border-cyan-400 p-2 rounded font-black text-center"/></div>
                     </div>
                     <div className="mb-4 bg-slate-50 p-3 rounded">
                         <h3 className="font-bold text-sm mb-2 flex items-center gap-2"><Icon name="layers"/> Piezas / Detalles</h3>
                         {pieces.map((p, i) => (
                             <div key={p.id} className="grid grid-cols-12 gap-2 mb-2 items-end border-b pb-2">
-                                <div className="col-span-4"><label className="text-[10px] font-bold">Nombre/Desc</label><input value={p.pieza} onChange={toUppercase(e=>updatePiece(p.id,'pieza',e.target.value))} className="w-full border p-1 rounded font-bold text-sm"/></div>
+                                <div className="col-span-3"><label className="text-[10px] font-bold">Tipo/Desc</label><input value={p.pieza} onChange={toUppercase(e=>updatePiece(p.id,'pieza',e.target.value))} className="w-full border p-1 rounded font-bold text-sm"/></div>
                                 <div className="col-span-2"><label className="text-[10px] font-bold">Talla</label><input value={p.talla} onChange={toUppercase(e=>updatePiece(p.id,'talla',e.target.value))} className="w-full border p-1 rounded text-xs"/></div>
-                                <div className="col-span-2"><label className="text-[10px] font-bold">Cant. Total</label><input type="number" value={p.totalPedido} onChange={e=>updatePiece(p.id,'totalPedido',e.target.value)} className="w-full border p-1 font-bold text-indigo-700" disabled={!!predefinedPackages}/></div>
+                                <div className="col-span-2"><label className="text-[10px] font-bold">Cant. Total</label><input type="number" value={p.totalPedido} onChange={e=>updatePiece(p.id,'totalPedido',e.target.value)} className="w-full border p-1 font-bold text-cyan-700" disabled={!!predefinedPackages}/></div>
+                                <div className="col-span-2 bg-cyan-50 px-1 rounded"><label className="text-[10px] font-bold text-cyan-800">Peso (g)</label><input type="number" value={p.peso} onChange={e=>updatePiece(p.id,'peso',e.target.value)} className="w-full border p-1 text-center font-bold" placeholder="Gramos"/></div>
                                 <div className="col-span-2"><label className="text-[10px] font-bold">Minutos/Pza</label><input type="number" value={p.tiempo} onChange={e=>updatePiece(p.id,'tiempo',e.target.value)} className="w-full border p-1 bg-yellow-50" placeholder="Calc. Tiempo"/></div>
                                 <div className="col-span-1 text-center"><button onClick={()=>removePiece(p.id)} className="text-red-500" disabled={!!predefinedPackages}><Icon name="x"/></button></div>
                             </div>
                         ))}
-                        {!predefinedPackages && <button onClick={addPiece} className="text-xs font-bold text-indigo-600">+ Agregar Pieza</button>}
+                        {!predefinedPackages && <button onClick={addPiece} className="text-xs font-bold text-cyan-600">+ Agregar Variante</button>}
                         {predefinedPackages && <div className="text-xs text-green-600 font-bold mt-2"><Icon name="check"/> Paquetes cargados desde Excel ({predefinedPackages.length} filas)</div>}
                     </div>
-                    <ThreadingEditor data={threadingData} onChange={setThreadingData} inventoryKeys={inventoryKeys} />
+
+                    <ThreadingEditor 
+                        data={threadingData} 
+                        onChange={setThreadingData} 
+                        inventoryItems={inventory} 
+                        totalWeight={totalOrderWeight} 
+                    />
+
                     <div className="flex gap-4 mt-4">
                         {!predefinedPackages && <div className="w-32"><label className="text-xs font-bold">Pzs/Paquete</label><input type="number" value={packageSize} onChange={e=>setPackageSize(e.target.value)} className="border p-2 rounded w-full"/></div>}
-                        <button onClick={handleSubmit} className="flex-1 bg-slate-900 text-white font-bold rounded shadow hover:bg-slate-800 py-3">{isEditing ? 'GUARDAR CAMBIOS' : 'CREAR ORDEN'}</button>
+                        <button onClick={handleSubmit} className="flex-1 bg-cyan-900 text-white font-bold rounded shadow hover:bg-cyan-800 py-3">{isEditing ? 'GUARDAR CAMBIOS' : 'CREAR ORDEN Y DESCONTAR INVENTARIO'}</button>
                     </div>
                 </div>
             );
@@ -514,42 +539,41 @@
             const markPackage = async (pkgId) => {
                 if(!entry.tejedor) return alert("Por favor selecciona un TEJEDOR");
                 const newProgreso = order.progreso.map(p => p.id === pkgId ? {...p, finished: true, tejedor: entry.tejedor, fecha: entry.fecha, defectos: entry.defectos, agujas: entry.agujas} : p);
-                await db.collection('orders').doc(String(order.id)).update({progreso: newProgreso});
+                // Usamos la colección de calcetín
+                await db.collection(ORDERS_COLLECTION).doc(String(order.id)).update({progreso: newProgreso});
             };
 
             const unmarkPackage = async (pkgId) => {
                 const newProgreso = order.progreso.map(p => p.id === pkgId ? {...p, finished: false, tejedor: '', fecha: '', defectos: '', agujas: ''} : p);
-                await db.collection('orders').doc(String(order.id)).update({progreso: newProgreso});
+                await db.collection(ORDERS_COLLECTION).doc(String(order.id)).update({progreso: newProgreso});
             };
 
             const toggleArchive = async () => {
                 const isArchived = order.status === 'ARCHIVADO';
                 const msg = isArchived ? "¿Desarchivar esta orden?" : "¿Marcar orden como TERMINADA y archivarla?";
                 if(window.confirm(msg)){
-                    await db.collection('orders').doc(String(order.id)).update({
+                    await db.collection(ORDERS_COLLECTION).doc(String(order.id)).update({
                         status: isArchived ? 'EN PROCESO' : 'ARCHIVADO'
                     });
                     onBack();
                 }
             };
             
-            // --- CÁLCULOS DE PRODUCCIÓN ---
             const minutosPorPrenda = order.subPiecesData.reduce((acc, curr) => acc + (Number(curr.tiempo) || 0), 0);
             const piezasPorHora = minutosPorPrenda > 0 ? (60 / minutosPorPrenda).toFixed(0) : 0;
             const piezasPorTurno = minutosPorPrenda > 0 ? ((60 / minutosPorPrenda) * 12).toFixed(0) : 0;
 
-
             return (
                 <div className="bg-white min-h-screen relative">
-                    <div className="no-print p-4 border-b flex justify-between bg-slate-50 sticky top-0 z-10 shadow-sm">
-                        <button onClick={onBack} className="flex items-center gap-2 text-slate-600 font-bold"><Icon name="arrow-left"/> Volver</button>
+                    <div className="no-print p-4 border-b flex justify-between bg-cyan-50 sticky top-0 z-10 shadow-sm">
+                        <button onClick={onBack} className="flex items-center gap-2 text-cyan-800 font-bold"><Icon name="arrow-left"/> Volver</button>
                         <div className="flex gap-2">
                              <button onClick={toggleArchive} className={`px-3 py-1 rounded font-bold text-xs flex items-center gap-1 text-white ${order.status === 'ARCHIVADO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'}`}>
                                  <Icon name={order.status === 'ARCHIVADO' ? "refresh-ccw" : "archive"}/> 
-                                 {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR ORDEN'}
+                                 {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR'}
                              </button>
 
-                             <button onClick={() => onEdit(order)} className="bg-indigo-600 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-indigo-700">
+                             <button onClick={() => onEdit(order)} className="bg-cyan-600 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-cyan-700">
                                  <Icon name="file-edit"/> EDITAR
                              </button>
                              <button onClick={() => window.print()} className="bg-slate-900 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-slate-700">
@@ -559,11 +583,9 @@
                     </div>
                     
                     <div className="p-8 print:p-0">
-                        {order.status === 'ARCHIVADO' && <div className="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-4 mb-4 font-bold text-center no-print">ESTA ORDEN ESTÁ ARCHIVADA / TERMINADA</div>}
+                        {order.status === 'ARCHIVADO' && <div className="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-4 mb-4 font-bold text-center no-print">ORDEN ARCHIVADA</div>}
 
                         <div className="print-visible-wrapper">
-                             
-                             {/* --- ENCABEZADO --- */}
                              <div className="flex justify-between items-start mb-4 border-b-4 border-black pb-2">
                                 <div className="w-8/12">
                                     <h1 className="font-black uppercase tracking-tighter">{order.cliente}</h1>
@@ -578,15 +600,11 @@
                                 </div>
                              </div>
                             
-                             {/* --- CUERPO (Grid 2 Columnas) --- */}
                              <div className="flex gap-4">
-                                {/* Columna Izquierda: Datos */}
                                 <div className="w-7/12 flex flex-col gap-2">
-                                    
-                                    {/* Tabla Piezas */}
                                     <table className="mb-0">
                                         <thead>
-                                            <tr><th className="text-left">PIEZA</th><th className="w-20">TALLA</th><th className="w-20">TOTAL</th></tr>
+                                            <tr><th className="text-left">DETALLE</th><th className="w-20">TALLA</th><th className="w-20">TOTAL</th></tr>
                                         </thead>
                                         <tbody>
                                             {order.subPiecesData.map((p,i)=>(
@@ -599,7 +617,6 @@
                                         </tbody>
                                     </table>
                                     
-                                    {/* Tabla Enhebrado */}
                                     <table className="mb-0">
                                         <thead>
                                             <tr>
@@ -618,7 +635,6 @@
                                         </tbody>
                                     </table>
 
-                                    {/* Cajas de Producción */}
                                     <div className="flex gap-2 mt-1">
                                         <div className="w-1/2 border-2 border-black flex flex-col justify-center items-center p-2">
                                             <span className="text-sm font-bold uppercase w-full text-center border-b-2 border-black mb-1">PZS/HR</span>
@@ -631,17 +647,14 @@
                                     </div>
                                 </div>
 
-                                {/* Columna Derecha: Imagen */}
                                 <div className="w-5/12 border-2 border-black flex items-center justify-center relative bg-white overflow-hidden p-2 h-auto">
                                      <SmartImage repoUrls={config.repoUrls} codigo={order.codigo} className="max-h-64 w-full object-contain"/>
                                 </div>
                             </div>
                         
-
-                            {/* --- TABLA INFERIOR (LISTA DE PAQUETES) --- */}
                             <div className="print-section-bottom print-only mt-4">
                                 <div className="border-b-4 border-black font-bold mb-1 text-sm flex justify-between items-end">
-                                    <span>CONTROL DE TEJIDO</span>
+                                    <span>CONTROL DE CALCETÍN</span>
                                     <span>{new Date().toLocaleDateString('es-MX')}</span>
                                 </div>
                                 <table className="package-table-print">
@@ -684,21 +697,20 @@
                              </div>
                         </div>
 
-                        {/* --- VISTA NORMAL DE ESCRITORIO --- */}
                         <div className="no-print mt-4">
                             <div className="bg-slate-100 p-4 rounded border mb-6">
-                                <h3 className="font-bold text-lg mb-2 text-slate-700">Registro Digital Simplificado</h3>
+                                <h3 className="font-bold text-lg mb-2 text-slate-700">Registro Digital - Calcetín</h3>
                                 <div className="flex gap-4 items-end mb-4 bg-white p-3 rounded shadow-sm border">
                                     <div>
                                         <label className="block text-xs font-bold text-slate-500 mb-1">TEJEDOR</label>
                                         <select 
                                             value={entry.tejedor} 
                                             onChange={e=>setEntry({...entry, tejedor: e.target.value})} 
-                                            className="border-2 border-slate-300 p-2 rounded w-40 font-bold text-indigo-700 focus:border-indigo-500 outline-none"
+                                            className="border-2 border-slate-300 p-2 rounded w-40 font-bold text-cyan-700 focus:border-cyan-500 outline-none"
                                         >
                                             <option value="">Seleccionar...</option>
-                                            <option value="BALTA">BALTA</option>
-                                            <option value="ANDRÉS">ANDRÉS</option>
+                                            <option value="OPERADOR 1">OPERADOR 1</option>
+                                            <option value="OPERADOR 2">OPERADOR 2</option>
                                         </select>
                                     </div>
                                     <div>
@@ -728,7 +740,7 @@
                                                     <td className="p-3 font-bold">{p.cantidad}</td>
                                                     <td className="p-3">{p.finished ? <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-full text-[10px]">LISTO ({p.tejedor})</span> : <span className="text-slate-400 font-medium">PENDIENTE</span>}</td>
                                                     <td className="p-3">{!p.finished 
-                                                        ? <button onClick={()=>markPackage(p.id)} disabled={!entry.tejedor} className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded font-bold hover:bg-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed transition">Registrar</button>
+                                                        ? <button onClick={()=>markPackage(p.id)} disabled={!entry.tejedor} className="bg-cyan-100 text-cyan-700 px-3 py-1 rounded font-bold hover:bg-cyan-200 disabled:opacity-50 disabled:cursor-not-allowed transition">Registrar</button>
                                                         : <button onClick={()=>unmarkPackage(p.id)} className="bg-red-100 text-red-700 px-3 py-1 rounded font-bold hover:bg-red-200 transition">Deshacer</button>}
                                                     </td>
                                                 </tr>
@@ -743,18 +755,74 @@
             );
         };
 
-        const ThreadingEditor = ({ data, onChange, inventoryKeys }) => {
-            const addRow = () => onChange([...data, { id: Date.now(), guia: '', material: '', sis: '', porcentaje: '' }]);
+        const ThreadingEditor = ({ data, onChange, inventoryItems, totalWeight }) => {
+            const addRow = () => onChange([...data, { id: Date.now(), guia: '', material: '', sis: '', porcentaje: '0' }]);
             const updateRow = (id, field, val) => onChange(data.map(r => r.id === id ? { ...r, [field]: val } : r));
             const removeRow = (id) => onChange(data.filter(r => r.id !== id));
+            
+            const invList = Array.isArray(inventoryItems) ? inventoryItems : [];
+
             return (
-                <div className="border rounded bg-white overflow-hidden my-4">
-                    <div className="bg-slate-200 p-2 text-xs font-bold flex justify-between"><span>TABLA DE ENHEBRADO</span><button onClick={addRow} className="text-indigo-600 font-bold">+ Fila</button></div>
+                <div className="border rounded bg-white overflow-hidden my-4 shadow-sm">
+                    <div className="bg-slate-200 p-2 text-xs font-bold flex justify-between items-center">
+                        <span>TABLA DE ENHEBRADO Y CONSUMO</span>
+                        <div className="text-[10px] text-slate-500 font-normal">Peso Total Orden: <b>{(totalWeight/1000).toFixed(2)} Kg</b></div>
+                        <button onClick={addRow} className="text-cyan-600 font-bold bg-white px-2 py-1 rounded border shadow-sm">+ Hilo</button>
+                    </div>
                     <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-50"><tr><th className="p-2">GUÍA</th><th className="p-2">MATERIAL</th><th className="p-2 w-16 text-center">%</th><th></th></tr></thead>
-                        <tbody>{data.map((row) => (<tr key={row.id}><td className="p-1"><input className="w-full border rounded p-1" placeholder="#" value={row.guia} onChange={toUppercase(e=>updateRow(row.id,'guia',e.target.value))} /></td><td className="p-1"><input list="inv" className="w-full border rounded p-1" value={row.material} onChange={toUppercase(e=>updateRow(row.id,'material',e.target.value))} /></td><td className="p-1"><input className="w-full border rounded p-1 text-center" value={row.porcentaje} onChange={e=>updateRow(row.id,'porcentaje',e.target.value)} /></td><td className="p-1"><button onClick={()=>removeRow(row.id)} className="text-red-400"><Icon name="x" size={14}/></button></td></tr>))}</tbody>
+                        <thead className="bg-slate-50 border-b">
+                            <tr>
+                                <th className="p-2 w-16">GUÍA</th>
+                                <th className="p-2">MATERIAL (INVENTARIO)</th>
+                                <th className="p-2 w-16 text-center">%</th>
+                                <th className="p-2 w-24 text-center">Requerido</th>
+                                <th className="p-2 w-24 text-center">Stock</th>
+                                <th className="w-8"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.map((row) => {
+                                const pct = parseFloat(row.porcentaje) || 0;
+                                const requiredKg = (totalWeight * (pct / 100)) / 1000; 
+                                const stockItem = invList.find(i => i.material === row.material);
+                                const stockAvailable = stockItem ? parseFloat(stockItem.stock) : 0;
+                                const isInsufficient = row.material && (requiredKg > stockAvailable);
+
+                                return (
+                                    <tr key={row.id} className={`border-b ${isInsufficient ? 'bg-red-50' : ''}`}>
+                                        <td className="p-1">
+                                            <input className="w-full border rounded p-1 text-center" placeholder="#" value={row.guia} onChange={toUppercase(e=>updateRow(row.id,'guia',e.target.value))} />
+                                        </td>
+                                        <td className="p-1 relative">
+                                            <input list="inv" className={`w-full border rounded p-1 font-bold ${isInsufficient ? 'text-red-600 border-red-300' : 'text-slate-700'}`} value={row.material} onChange={toUppercase(e=>updateRow(row.id,'material',e.target.value))} placeholder="Buscar hilo..."/>
+                                            {isInsufficient && <div className="text-[9px] text-red-600 font-black absolute right-2 top-2">⚠ FALTAN {(requiredKg - stockAvailable).toFixed(2)} Kg</div>}
+                                        </td>
+                                        <td className="p-1">
+                                            <input type="number" className="w-full border rounded p-1 text-center" value={row.porcentaje} onChange={e=>updateRow(row.id,'porcentaje',e.target.value)} />
+                                        </td>
+                                        <td className="p-1 text-center text-slate-500">
+                                            {requiredKg > 0 ? requiredKg.toFixed(2) + ' Kg' : '-'}
+                                        </td>
+                                        <td className="p-1 text-center font-bold">
+                                            {stockItem ? (
+                                                <span className={stockAvailable < requiredKg ? "text-red-600" : "text-green-600"}>
+                                                    {stockAvailable.toFixed(2)} Kg
+                                                </span>
+                                            ) : <span className="text-slate-300">-</span>}
+                                        </td>
+                                        <td className="p-1 text-center">
+                                            <button onClick={()=>removeRow(row.id)} className="text-red-400 hover:text-red-600"><Icon name="x" size={14}/></button>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
                     </table>
-                    <datalist id="inv">{inventoryKeys.map(k=><option key={k} value={k}/>)}</datalist>
+                    <datalist id="inv">
+                        {invList.map((item, idx) => (
+                            <option key={idx} value={item.material}>Stock: {item.stock}Kg | {item.color}</option>
+                        ))}
+                    </datalist>
                 </div>
             );
         };
@@ -780,7 +848,7 @@
                 <div className="fixed inset-0 bg-black/80 z-[60] flex flex-col items-center justify-center p-4">
                     <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-4xl h-full flex flex-col">
                         <div className="flex justify-between items-center mb-4 border-b pb-2 shrink-0">
-                            <h3 className="font-bold text-xl text-indigo-700 flex items-center gap-2"><Icon name="images"/> Galería de Modelos</h3>
+                            <h3 className="font-bold text-xl text-cyan-700 flex items-center gap-2"><Icon name="images"/> Galería de Modelos</h3>
                             <button onClick={onClose} className="bg-red-500 hover:bg-red-600 text-white rounded-md p-2 shadow-lg flex items-center gap-1 font-bold text-xs transition-transform hover:scale-105">
                                 <Icon name="x" size={18}/> CERRAR
                             </button>
@@ -800,7 +868,6 @@
                                     </div>
                                 </div>
                             ))}
-                            {!config.repoUrls && <div className="text-center text-slate-500 col-span-full">Configura las URLs de los repositorios en Ajustes.</div>}
                         </div>
                     </div>
                 </div>
@@ -811,7 +878,7 @@
             const [view, setView] = useState('dashboard');
             const [orders, setOrders] = useState([]);
             const [config, setConfig] = useState({});
-            const [inventory, setInventory] = useState({});
+            const [inventory, setInventory] = useState([]); 
             const [selectedOrder, setSelectedOrder] = useState(null);
             const [formProps, setFormProps] = useState({ initialOrder: null, isEditing: false }); 
             const [showSettings, setShowSettings] = useState(false);
@@ -820,9 +887,15 @@
             const [viewMode, setViewMode] = useState('active'); 
 
             useEffect(() => {
-                const u1 = db.collection('orders').onSnapshot(s => setOrders(s.docs.map(d=>d.data())));
+                // *** ESCUCHA LA COLECCIÓN DE CALCETIN ***
+                const u1 = db.collection(ORDERS_COLLECTION).onSnapshot(s => setOrders(s.docs.map(d=>d.data())));
                 const u2 = db.collection('settings').doc('config').onSnapshot(d => setConfig(d.data() || {}));
-                const u3 = db.collection('inventory').doc('main').onSnapshot(d => setInventory(d.data() || {}));
+                // *** ESCUCHA EL INVENTARIO COMPARTIDO ***
+                const u3 = db.collection(INVENTORY_COLLECTION).doc('main').onSnapshot(d => {
+                     const data = d.data();
+                     setInventory(data && data.items ? data.items : []);
+                });
+
                 setTimeout(()=>lucide.createIcons(), 500);
                 return () => { u1(); u2(); u3(); };
             }, []);
@@ -851,7 +924,7 @@
             };
 
             return (
-                <div className="h-screen bg-slate-100 overflow-hidden">
+                <div className="h-screen bg-cyan-50 overflow-hidden">
                     {view === 'create' && <div className="absolute inset-0 z-50 bg-black/50 flex items-center justify-center"><MultiOrderForm config={config} onCancel={()=>setView('dashboard')} initialOrder={formProps.initialOrder} clientHistory={allClients} inventory={inventory} isEditing={formProps.isEditing}/></div>}
                     
                     {view === 'detail' && selectedOrder && <div className="absolute inset-0 z-40 bg-white overflow-y-auto print-visible-wrapper"><OrderView order={orders.find(o=>o.id===selectedOrder.id) || selectedOrder} config={config} onBack={()=>setView('dashboard')} onEdit={handleEditOrder}/></div>}
@@ -861,15 +934,15 @@
                     {showGallery && <ImageGallery config={config} onClose={()=>setShowGallery(false)} orders={orders} />}
 
                     <div className="dashboard-grid">
-                        <div className="top-pane bg-slate-100 p-4">
+                        <div className="top-pane p-4">
                             <div className="flex justify-between items-center mb-4">
-                                <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
+                                <h1 className="text-2xl font-black text-cyan-900 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
-                                    <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v2.4 LETTER</span>
+                                    <span>{viewMode === 'active' ? 'ÁREA CALCETÍN' : 'HISTORIAL CALCETÍN'}</span>
+                                    <span className="text-xs bg-cyan-200 text-cyan-800 px-2 py-1 rounded ml-2">v2.6 SEPARADO</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
-                                    <InstallButton />
+                                    {/* Botón de instalación omitido en variante o puedes mantenerlo si lo deseas */}
                                     
                                     <button onClick={()=>setViewMode(viewMode === 'active' ? 'history' : 'active')} className={`px-4 py-2 rounded font-bold shadow flex items-center gap-2 text-xs transition ${viewMode === 'active' ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-slate-700 text-white'}`}>
                                         <Icon name={viewMode === 'active' ? 'history' : 'activity'}/> 
@@ -881,7 +954,7 @@
                                     
                                     {viewMode === 'active' && (
                                         <>
-                                            <button onClick={()=>{setFormProps({initialOrder:null, isEditing: false}); setView('create')}} className="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="plus"/> MANUAL</button>
+                                            <button onClick={()=>{setFormProps({initialOrder:null, isEditing: false}); setView('create')}} className="bg-cyan-700 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2 hover:bg-cyan-800"><Icon name="plus"/> MANUAL</button>
                                             <button onClick={()=>setShowImport(true)} className="bg-green-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2"><Icon name="file-spreadsheet"/> IMPORTAR</button>
                                         </>
                                     )}
@@ -892,12 +965,12 @@
                                 {displayedOrders.sort((a,b)=>b.id-a.id).map(o => {
                                     const pct = Math.round((o.progreso.filter(p=>p.finished).length / o.progreso.length)*100);
                                     return (
-                                        <div key={o.id} onClick={()=>{setSelectedOrder(o); setView('detail')}} className={`p-3 rounded shadow border-l-4 cursor-pointer hover:shadow-lg transition ${o.status === 'ARCHIVADO' ? 'bg-slate-200 border-slate-500 opacity-75' : 'bg-white border-indigo-500'}`}>
+                                        <div key={o.id} onClick={()=>{setSelectedOrder(o); setView('detail')}} className={`p-3 rounded shadow border-l-4 cursor-pointer hover:shadow-lg transition ${o.status === 'ARCHIVADO' ? 'bg-slate-200 border-slate-500 opacity-75' : 'bg-white border-cyan-500'}`}>
                                             <div className="flex justify-between items-start">
                                                 <div className="font-bold text-lg">{o.codigo}</div>
-                                                <div className="bg-slate-200 text-slate-700 text-xs px-2 py-1 rounded font-bold">MQ-{o.maquina}</div>
+                                                <div className="bg-cyan-100 text-cyan-800 text-xs px-2 py-1 rounded font-bold">MQ-{o.maquina}</div>
                                             </div>
-                                            <div className="text-xs font-bold text-indigo-800 mt-1">PARTIDA: {o.partida}</div>
+                                            <div className="text-xs font-bold text-cyan-800 mt-1">PARTIDA: {o.partida}</div>
                                             <div className="text-[10px] text-slate-400">Total: {o.totalPedido} pzs</div>
                                             <div className="mt-2 w-full bg-slate-100 h-2 rounded overflow-hidden">
                                                 <div className={`${o.status === 'ARCHIVADO' ? 'bg-slate-500' : 'bg-green-500'} h-full`} style={{width:`${pct}%`}}></div>
@@ -906,7 +979,7 @@
                                         </div>
                                     );
                                 })}
-                                {displayedOrders.length === 0 && <div className="col-span-4 text-center text-slate-400 py-10 font-bold">No hay órdenes en esta vista.</div>}
+                                {displayedOrders.length === 0 && <div className="col-span-4 text-center text-slate-400 py-10 font-bold">No hay órdenes de Calcetín activas.</div>}
                             </div>
                         </div>
                         
