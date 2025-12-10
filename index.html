@@ -42,12 +42,11 @@
     </script>
 
     <style>
-        /* ESTILOS DE IMPRESIÓN - MEDIA CARTA VERTICAL AJUSTADA */
+        /* ESTILOS DE IMPRESIÓN - CARTA VERTICAL ESTILO COMPACTO */
         @media print {
             @page { 
-                /* Media Carta Vertical: 140mm ancho x 216mm alto */
-                size: 140mm 216mm; 
-                margin: 0.8cm; /* Margen ligero para que no se corte al imprimir */
+                size: letter portrait; /* CARTA NORMAL */
+                margin: 1cm; 
             }
             body, html, #root { 
                 background: white;
@@ -68,61 +67,63 @@
                 overflow: visible !important;
             }
 
-            /* --- TIPOGRAFÍA Y BORDES --- */
-            /* Letras grandes y legibles, bordes negros sólidos */
-            h1 { font-size: 26pt !important; line-height: 0.9 !important; margin-bottom: 5px; } /* Cliente */
+            /* --- TIPOGRAFÍA GRANDE Y BORDES GRUESOS --- */
+            h1 { font-size: 36pt !important; line-height: 0.9 !important; margin-bottom: 5px; } /* Cliente Gigante */
             
             table { 
                 border-collapse: collapse; 
                 width: 100%; 
-                border: 2px solid black; /* Bordes gruesos estilo captura */
+                border: 3px solid black; /* Bordes muy gruesos */
                 table-layout: fixed; 
-                margin-bottom: 5px;
+                margin-bottom: 8px;
             }
             
             th { 
-                background-color: #e5e7eb !important; /* Gris claro */
+                background-color: #d1d5db !important; /* Gris más visible */
                 color: black !important;
                 font-weight: 900 !important;
                 text-transform: uppercase;
-                font-size: 9pt !important; 
-                padding: 2px 4px !important;
-                border: 1px solid black !important;
+                font-size: 11pt !important; 
+                padding: 4px !important;
+                border: 2px solid black !important;
                 text-align: center;
             }
             
             td { 
-                border: 1px solid black !important;
-                padding: 2px 4px !important;
-                font-size: 10pt !important; /* Letra de buen tamaño */
-                font-weight: 600 !important;
+                border: 2px solid black !important;
+                padding: 4px !important;
+                font-size: 12pt !important; /* Letra grande y legible */
+                font-weight: 700 !important;
                 color: black !important;
                 vertical-align: middle;
             }
 
-            /* Ajustes específicos para que quepa la información */
-            .header-info { font-size: 12pt !important; font-weight: 800; }
+            /* Estilos específicos */
+            .header-info { font-size: 14pt !important; font-weight: 800; }
+            
             .machine-number-box { 
                 background: black; 
                 color: white; 
-                font-size: 10pt; 
+                font-size: 14pt; 
                 font-weight: bold; 
                 text-align: center; 
-                padding: 2px;
+                padding: 4px;
             }
             .machine-number-val { 
-                font-size: 42pt !important; 
+                font-size: 60pt !important; /* Número enorme */
                 font-weight: 900; 
                 line-height: 0.8; 
                 text-align: center; 
             }
 
             /* Tabla de Paquetes Inferior */
-            .package-table-print th { font-size: 8pt !important; }
-            .package-table-print td { font-size: 9pt !important; height: 16px; } /* Filas compactas pero legibles */
+            .package-table-print th { font-size: 10pt !important; }
+            .package-table-print td { font-size: 11pt !important; height: 24px; } 
 
-            .manual-input { color: transparent !important; } /* Espacio para escribir a mano */
+            .manual-input { color: transparent !important; }
             .print-only { display: block !important; }
+            
+            ::-webkit-scrollbar { display: none; }
         }
 
         .print-only { display: none; }
@@ -563,12 +564,12 @@
                         <div className="print-visible-wrapper">
                              
                              {/* --- ENCABEZADO --- */}
-                             <div className="flex justify-between items-start mb-2 border-b-4 border-black pb-2">
+                             <div className="flex justify-between items-start mb-4 border-b-4 border-black pb-2">
                                 <div className="w-8/12">
                                     <h1 className="font-black uppercase tracking-tighter">{order.cliente}</h1>
-                                    <div className="flex gap-2 items-baseline header-info">
+                                    <div className="flex gap-6 items-baseline header-info">
                                         <div className="uppercase">PARTIDA: {order.partida}</div>
-                                        <div className="text-slate-600 uppercase ml-4">MOD: {order.codigo}</div>
+                                        <div className="text-slate-700 uppercase">MOD: {order.codigo}</div>
                                     </div>
                                 </div>
                                 <div className="w-3/12 text-right">
@@ -578,14 +579,14 @@
                              </div>
                             
                              {/* --- CUERPO (Grid 2 Columnas) --- */}
-                             <div className="flex gap-2">
+                             <div className="flex gap-4">
                                 {/* Columna Izquierda: Datos */}
-                                <div className="w-7/12 flex flex-col gap-1">
+                                <div className="w-7/12 flex flex-col gap-2">
                                     
                                     {/* Tabla Piezas */}
                                     <table className="mb-0">
                                         <thead>
-                                            <tr><th className="text-left">PIEZA</th><th className="w-16">TALLA</th><th className="w-16">TOTAL</th></tr>
+                                            <tr><th className="text-left">PIEZA</th><th className="w-20">TALLA</th><th className="w-20">TOTAL</th></tr>
                                         </thead>
                                         <tbody>
                                             {order.subPiecesData.map((p,i)=>(
@@ -602,9 +603,9 @@
                                     <table className="mb-0">
                                         <thead>
                                             <tr>
-                                                <th colSpan="3" className="bg-black text-white py-1 text-xs">ENHEBRADO</th>
+                                                <th colSpan="3" className="bg-black text-white py-1 text-sm">ENHEBRADO</th>
                                             </tr>
-                                            <tr><th className="w-8">#</th><th className="text-left">Material</th><th className="w-10">%</th></tr>
+                                            <tr><th className="w-12">#</th><th className="text-left">Material</th><th className="w-16">%</th></tr>
                                         </thead>
                                         <tbody>
                                             {order.threading && order.threading.map((row, i) => (
@@ -618,28 +619,28 @@
                                     </table>
 
                                     {/* Cajas de Producción */}
-                                    <div className="flex gap-1 mt-1">
-                                        <div className="w-1/2 border-2 border-black flex flex-col justify-center items-center p-1">
-                                            <span className="text-[8pt] font-bold uppercase w-full text-center border-b border-black mb-1">PZS/HR</span>
-                                            <span className="text-xl font-black">{piezasPorHora}</span>
+                                    <div className="flex gap-2 mt-1">
+                                        <div className="w-1/2 border-2 border-black flex flex-col justify-center items-center p-2">
+                                            <span className="text-sm font-bold uppercase w-full text-center border-b-2 border-black mb-1">PZS/HR</span>
+                                            <span className="text-3xl font-black">{piezasPorHora}</span>
                                         </div>
-                                        <div className="w-1/2 border-2 border-black flex flex-col justify-center items-center p-1">
-                                            <span className="text-[8pt] font-bold uppercase w-full text-center border-b border-black mb-1">PZS/12H</span>
-                                            <span className="text-xl font-black">{piezasPorTurno}</span>
+                                        <div className="w-1/2 border-2 border-black flex flex-col justify-center items-center p-2">
+                                            <span className="text-sm font-bold uppercase w-full text-center border-b-2 border-black mb-1">PZS/12H</span>
+                                            <span className="text-3xl font-black">{piezasPorTurno}</span>
                                         </div>
                                     </div>
                                 </div>
 
                                 {/* Columna Derecha: Imagen */}
-                                <div className="w-5/12 border-2 border-black flex items-center justify-center relative bg-white overflow-hidden p-1 h-auto">
-                                     <SmartImage repoUrls={config.repoUrls} codigo={order.codigo} className="max-h-48 w-full object-contain"/>
+                                <div className="w-5/12 border-2 border-black flex items-center justify-center relative bg-white overflow-hidden p-2 h-auto">
+                                     <SmartImage repoUrls={config.repoUrls} codigo={order.codigo} className="max-h-64 w-full object-contain"/>
                                 </div>
                             </div>
                         
 
                             {/* --- TABLA INFERIOR (LISTA DE PAQUETES) --- */}
-                            <div className="print-section-bottom print-only mt-2">
-                                <div className="border-b-2 border-black font-bold mb-1 text-xs flex justify-between items-end">
+                            <div className="print-section-bottom print-only mt-4">
+                                <div className="border-b-4 border-black font-bold mb-1 text-sm flex justify-between items-end">
                                     <span>CONTROL DE TEJIDO</span>
                                     <span>{new Date().toLocaleDateString('es-MX')}</span>
                                 </div>
@@ -865,7 +866,7 @@
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
                                     <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v2.3 PRINT</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v2.4 LETTER</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
