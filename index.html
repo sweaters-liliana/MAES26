@@ -42,12 +42,11 @@
     </script>
 
     <style>
-        /* ESTILOS DE IMPRESIÓN - MEDIA CARTA VERTICAL */
+        /* ESTILOS DE IMPRESIÓN - CARTA VERTICAL ESTILO COMPACTO */
         @media print {
             @page { 
-                /* Tamaño Media Carta Vertical (aprox 14cm x 21.6cm) */
-                size: 140mm 216mm; 
-                margin: 5mm; 
+                size: letter portrait; /* CARTA NORMAL */
+                margin: 1cm; 
             }
             body, html, #root { 
                 background: white;
@@ -56,72 +55,74 @@
                 height: 100%;
                 margin: 0;
                 padding: 0;
+                font-family: sans-serif;
             }
             .no-print, .dashboard-grid { display: none !important; }
             
             .print-visible-wrapper {
-                position: static !important;
-                display: flex !important;
-                flex-direction: column;
+                display: block !important;
                 width: 100% !important;
-                height: 100% !important;
-                overflow: hidden !important;
+                height: auto !important;
                 background: white !important;
+                overflow: visible !important;
             }
 
-            /* Sección Superior Compacta */
-            .print-section-top { 
-                height: auto; 
-                flex-shrink: 0;
-                border-bottom: 2px dashed #000; 
-                margin-bottom: 5px; 
-                padding-bottom: 5px;
-                display: flex; 
-                flex-direction: column; 
-            }
-
-            /* Sección Inferior (Tabla) llena el resto */
-            .print-section-bottom { 
-                flex-grow: 1;
-                display: flex; 
-                flex-direction: column; 
-                overflow: hidden;
+            /* --- TIPOGRAFÍA GRANDE Y BORDES GRUESOS --- */
+            h1 { font-size: 36pt !important; line-height: 0.9 !important; margin-bottom: 5px; } /* Cliente Gigante */
+            
+            table { 
+                border-collapse: collapse; 
+                width: 100%; 
+                border: 3px solid black; /* Bordes muy gruesos */
+                table-layout: fixed; 
+                margin-bottom: 8px;
             }
             
-            /* Ajustes de Fuentes para Ancho Angosto */
-            h1 { font-size: 18pt !important; line-height: 1 !important; } /* Cliente */
-            .print-header-data { font-size: 9pt !important; }
-            .print-machine-num { font-size: 24pt !important; line-height: 0.8 !important; }
-            
-            table { border-collapse: collapse; width: 100%; border: 1px solid black; table-layout: fixed; }
-            th, td { border: 1px solid black; word-wrap: break-word; }
-
-            /* Tabla de Enhebrado */
-            .threading-table-print { font-size: 6pt !important; }
-            .threading-table-print th, .threading-table-print td { padding: 0px 2px !important; }
-
-            /* Tabla de Producción (Control de Tejido) */
-            .package-table-print { font-size: 6pt !important; width: 100%; border: 1px solid black !important; }
-            .package-table-print th { 
-                background-color: #e5e7eb !important;
-                font-weight: 800; 
-                text-transform: uppercase; 
-                font-size: 5pt !important; /* Letra muy pequeña para caber */
-                padding: 1px;
-                border: 1px solid black !important;
-            }
-            .package-table-print td { 
-                padding: 0px 1px !important;
-                height: 12px !important; /* Fila muy compacta */
-                vertical-align: middle; 
-                border: 1px solid black !important;
-                font-size: 6pt !important;
+            th { 
+                background-color: #d1d5db !important; /* Gris más visible */
+                color: black !important;
+                font-weight: 900 !important;
+                text-transform: uppercase;
+                font-size: 11pt !important; 
+                padding: 4px !important;
+                border: 2px solid black !important;
+                text-align: center;
             }
             
-            .manual-input { color: transparent; }
+            td { 
+                border: 2px solid black !important;
+                padding: 4px !important;
+                font-size: 12pt !important; /* Letra grande y legible */
+                font-weight: 700 !important;
+                color: black !important;
+                vertical-align: middle;
+            }
+
+            /* Estilos específicos */
+            .header-info { font-size: 14pt !important; font-weight: 800; }
+            
+            .machine-number-box { 
+                background: black; 
+                color: white; 
+                font-size: 14pt; 
+                font-weight: bold; 
+                text-align: center; 
+                padding: 4px;
+            }
+            .machine-number-val { 
+                font-size: 60pt !important; /* Número enorme */
+                font-weight: 900; 
+                line-height: 0.8; 
+                text-align: center; 
+            }
+
+            /* Tabla de Paquetes Inferior */
+            .package-table-print th { font-size: 10pt !important; }
+            .package-table-print td { font-size: 11pt !important; height: 24px; } 
+
+            .manual-input { color: transparent !important; }
             .print-only { display: block !important; }
             
-            /* Ocultar scrollbars en impresión */
             ::-webkit-scrollbar { display: none; }
         }
 
@@ -404,7 +405,7 @@
                     setAttempt({ ...attempt, extension: 'fail' });
                 }
             };
-            if (attempt.extension === 'fail' || !imgSrc) return <div className={`bg-slate-100 flex flex-col items-center justify-center text-slate-300 ${className}`}><Icon name="image-off" size={32} className="mb-2"/><span className="text-[8px] text-center px-2">No img</span></div>;
+            if (attempt.extension === 'fail' || !imgSrc) return <div className={`bg-slate-100 flex flex-col items-center justify-center text-slate-300 ${className}`}><Icon name="image-off" size={32} className="mb-2"/><span className="text-[10px] text-center px-2">Sin img</span></div>;
             return <img src={imgSrc} onError={handleError} className={className} />;
         };
 
@@ -560,127 +561,130 @@
                     <div className="p-8 print:p-0">
                         {order.status === 'ARCHIVADO' && <div className="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-4 mb-4 font-bold text-center no-print">ESTA ORDEN ESTÁ ARCHIVADA / TERMINADA</div>}
 
-                        <div className="print-section-top">
-                             <div className="flex justify-between items-start border-b-2 border-black pb-1 mb-1">
-                                <div className="w-9/12">
-                                    <h1 className="text-4xl font-black uppercase tracking-tighter truncate">{order.cliente}</h1>
-                                    <div className="flex gap-4 items-baseline">
-                                        <div className="print-header-data text-xl font-bold font-mono">PARTIDA: {order.partida}</div>
-                                        <div className="print-header-data text-sm font-bold text-slate-600 uppercase">MOD: {order.codigo}</div>
+                        <div className="print-visible-wrapper">
+                             
+                             {/* --- ENCABEZADO --- */}
+                             <div className="flex justify-between items-start mb-4 border-b-4 border-black pb-2">
+                                <div className="w-8/12">
+                                    <h1 className="font-black uppercase tracking-tighter">{order.cliente}</h1>
+                                    <div className="flex gap-6 items-baseline header-info">
+                                        <div className="uppercase">PARTIDA: {order.partida}</div>
+                                        <div className="text-slate-700 uppercase">MOD: {order.codigo}</div>
                                     </div>
                                 </div>
-                                <div className="text-right w-3/12">
-                                    <span className="bg-black text-white px-1 text-[8px] font-bold uppercase block text-center">MÁQUINA</span>
-                                    <div className="print-machine-num text-6xl font-black leading-none text-center">{order.maquina}</div>
+                                <div className="w-3/12 text-right">
+                                    <div className="machine-number-box">MÁQUINA</div>
+                                    <div className="machine-number-val">{order.maquina}</div>
                                 </div>
                              </div>
                             
-                             <div className="flex gap-1 flex-grow overflow-hidden">
-                                <div className="w-8/12 flex flex-col gap-1">
-                                    <div className="border border-black">
-                                        <div className="flex bg-gray-200 border-b border-black font-bold text-[8px] uppercase p-0.5">
-                                            <div className="flex-1">Pieza</div><div className="w-10 text-center">Talla</div><div className="w-10 text-center">Total</div>
-                                        </div>
-                                        {order.subPiecesData.map((p,i)=>(
-                                            <div key={i} className="flex text-[8px] p-0.5 border-b last:border-0 border-gray-300">
-                                                <div className="flex-1 truncate font-bold">{p.pieza}</div>
-                                                <div className="w-10 text-center">{p.talla}</div>
-                                                <div className="w-10 text-center font-bold">{p.totalPedido}</div>
-                                            </div>
-                                        ))}
-                                    </div>
+                             {/* --- CUERPO (Grid 2 Columnas) --- */}
+                             <div className="flex gap-4">
+                                {/* Columna Izquierda: Datos */}
+                                <div className="w-7/12 flex flex-col gap-2">
                                     
-                                    {/* TABLA DE ENHEBRADO COMPACTA */}
-                                    <div className="border border-black relative flex-grow">
-                                        <div className="bg-black text-white text-[8px] font-bold text-center">ENHEBRADO</div>
-                                        <div className="p-0.5">
-                                            <table className="threading-table-print text-left">
-                                                <thead><tr className="bg-gray-200 border-b border-black"><th className="w-6 text-center">#</th><th>Material</th><th className="w-6 text-center">%</th></tr></thead>
-                                                <tbody>{order.threading && order.threading.map((row, i) => (
-                                                    <tr key={i} className="border-b border-gray-300">
-                                                        <td className="border-r border-gray-300 font-bold text-center">{row.guia}</td>
-                                                        <td className="border-r border-gray-300 truncate px-1">{row.material}</td>
-                                                        <td className="text-center font-bold">{row.porcentaje}</td>
-                                                    </tr>
-                                                ))}</tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-
-                                    {/* RECUADROS DE PRODUCCIÓN */}
-                                    <div className="flex gap-1">
-                                        <div className="w-1/2 border border-black flex flex-col justify-center items-center bg-white">
-                                            <span className="text-[6px] font-bold uppercase bg-slate-100 w-full text-center border-b border-black">PZS/HR</span>
-                                            <span className="text-sm font-black">{piezasPorHora}</span>
-                                        </div>
-                                        <div className="w-1/2 border border-black flex flex-col justify-center items-center bg-white">
-                                            <span className="text-[6px] font-bold uppercase bg-slate-100 w-full text-center border-b border-black">PZS/12H</span>
-                                            <span className="text-sm font-black">{piezasPorTurno}</span>
-                                        </div>
-                                    </div>
-
-                                </div>
-                                <div className="w-4/12 border border-black flex items-center justify-center relative bg-slate-50 overflow-hidden">
-                                     <SmartImage repoUrls={config.repoUrls} codigo={order.codigo} className="max-h-24 max-w-full object-contain p-1"/>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="print-section-bottom print-only">
-                            <div className="flex-grow flex flex-col">
-                                <div className="border-b border-black font-bold mb-0.5 text-[8px] flex justify-between items-end">
-                                    <span>CONTROL DE TEJIDO - PARTIDA {order.partida}</span>
-                                    <span>TOTAL: {order.totalPedido}</span>
-                                </div>
-                                <div className="relative flex-grow">
-                                    <table className="package-table-print">
-                                        <colgroup>
-                                            <col style={{width: '6%'}} />
-                                            <col style={{width: '24%'}} /> 
-                                            <col style={{width: '10%'}} />
-                                            <col style={{width: '12%'}} />
-                                            <col style={{width: '12%'}} />
-                                            <col style={{width: '8%'}} />
-                                            <col style={{width: '8%'}} />
-                                            <col style={{width: '20%'}} /> 
-                                        </colgroup>
+                                    {/* Tabla Piezas */}
+                                    <table className="mb-0">
                                         <thead>
-                                            <tr>
-                                                <th>#</th>
-                                                <th>CÓDIGO</th> 
-                                                <th>Cnt</th>
-                                                <th>Tej</th>
-                                                <th>Fec</th>
-                                                <th>Def</th>
-                                                <th>Agj</th>
-                                                <th>OBS</th>
-                                            </tr>
+                                            <tr><th className="text-left">PIEZA</th><th className="w-20">TALLA</th><th className="w-20">TOTAL</th></tr>
                                         </thead>
                                         <tbody>
-                                            {order.progreso?.map((p, idx) => (
-                                                <tr key={p.id}>
-                                                    <td className="text-center font-bold border-r border-black">{idx+1}</td>
-                                                    <td className="pl-1 font-mono text-[6px] border-r border-black truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
-                                                    <td className="text-center font-bold border-r border-black">{p.cantidad}</td>
-                                                    <td className="manual-input border-r border-black">{p.finished ? p.tejedor : '_'}</td>
-                                                    <td className="manual-input border-r border-black">{p.finished ? p.fecha : '_'}</td>
-                                                    <td className="manual-input border-r border-black">{p.finished ? p.defectos : '_'}</td>
-                                                    <td className="manual-input border-r border-black">{p.finished ? p.agujas : '_'}</td>
-                                                    <td className="manual-input">{p.observaciones || '_'}</td> </tr>
+                                            {order.subPiecesData.map((p,i)=>(
+                                                <tr key={i}>
+                                                    <td className="truncate">{p.pieza}</td>
+                                                    <td className="text-center">{p.talla}</td>
+                                                    <td className="text-center font-black">{p.totalPedido}</td>
+                                                </tr>
                                             ))}
                                         </tbody>
                                     </table>
+                                    
+                                    {/* Tabla Enhebrado */}
+                                    <table className="mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th colSpan="3" className="bg-black text-white py-1 text-sm">ENHEBRADO</th>
+                                            </tr>
+                                            <tr><th className="w-12">#</th><th className="text-left">Material</th><th className="w-16">%</th></tr>
+                                        </thead>
+                                        <tbody>
+                                            {order.threading && order.threading.map((row, i) => (
+                                                <tr key={i}>
+                                                    <td className="text-center font-bold">{row.guia}</td>
+                                                    <td className="truncate">{row.material}</td>
+                                                    <td className="text-center font-bold">{row.porcentaje}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+
+                                    {/* Cajas de Producción */}
+                                    <div className="flex gap-2 mt-1">
+                                        <div className="w-1/2 border-2 border-black flex flex-col justify-center items-center p-2">
+                                            <span className="text-sm font-bold uppercase w-full text-center border-b-2 border-black mb-1">PZS/HR</span>
+                                            <span className="text-3xl font-black">{piezasPorHora}</span>
+                                        </div>
+                                        <div className="w-1/2 border-2 border-black flex flex-col justify-center items-center p-2">
+                                            <span className="text-sm font-bold uppercase w-full text-center border-b-2 border-black mb-1">PZS/12H</span>
+                                            <span className="text-3xl font-black">{piezasPorTurno}</span>
+                                        </div>
+                                    </div>
                                 </div>
-                             </div>
-                             
-                             <div className="mt-1 text-center border-t border-gray-400 pt-0.5">
-                                <div className="text-[6px] text-gray-500 font-mono flex justify-between px-2">
-                                    <span>CREADO: {order.createdAt || 'N/A'}</span>
-                                    <span>IMPRESO: {new Date().toLocaleDateString('es-MX')}</span>
+
+                                {/* Columna Derecha: Imagen */}
+                                <div className="w-5/12 border-2 border-black flex items-center justify-center relative bg-white overflow-hidden p-2 h-auto">
+                                     <SmartImage repoUrls={config.repoUrls} codigo={order.codigo} className="max-h-64 w-full object-contain"/>
                                 </div>
+                            </div>
+                        
+
+                            {/* --- TABLA INFERIOR (LISTA DE PAQUETES) --- */}
+                            <div className="print-section-bottom print-only mt-4">
+                                <div className="border-b-4 border-black font-bold mb-1 text-sm flex justify-between items-end">
+                                    <span>CONTROL DE TEJIDO</span>
+                                    <span>{new Date().toLocaleDateString('es-MX')}</span>
+                                </div>
+                                <table className="package-table-print">
+                                    <colgroup>
+                                        <col style={{width: '6%'}} />
+                                        <col style={{width: '24%'}} /> 
+                                        <col style={{width: '10%'}} />
+                                        <col style={{width: '12%'}} />
+                                        <col style={{width: '12%'}} />
+                                        <col style={{width: '8%'}} />
+                                        <col style={{width: '8%'}} />
+                                        <col style={{width: '20%'}} /> 
+                                    </colgroup>
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>CÓDIGO</th> 
+                                            <th>Cant</th>
+                                            <th>Tej</th>
+                                            <th>Fec</th>
+                                            <th>Def</th>
+                                            <th>Agj</th>
+                                            <th>OBS</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {order.progreso?.map((p, idx) => (
+                                            <tr key={p.id}>
+                                                <td className="text-center font-bold">{idx+1}</td>
+                                                <td className="pl-1 font-mono truncate" title={p.codigoUnico || p.piezaNombre}>{p.codigoUnico || p.piezaNombre}</td>
+                                                <td className="text-center font-bold">{p.cantidad}</td>
+                                                <td className="manual-input">{p.finished ? p.tejedor : '_'}</td>
+                                                <td className="manual-input">{p.finished ? p.fecha : '_'}</td>
+                                                <td className="manual-input">{p.finished ? p.defectos : '_'}</td>
+                                                <td className="manual-input">{p.finished ? p.agujas : '_'}</td>
+                                                <td className="manual-input">{p.observaciones || '_'}</td> </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                              </div>
                         </div>
 
+                        {/* --- VISTA NORMAL DE ESCRITORIO --- */}
                         <div className="no-print mt-4">
                             <div className="bg-slate-100 p-4 rounded border mb-6">
                                 <h3 className="font-bold text-lg mb-2 text-slate-700">Registro Digital Simplificado</h3>
@@ -862,7 +866,7 @@
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
                                     <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v2.2 PRINT</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v2.4 LETTER</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
