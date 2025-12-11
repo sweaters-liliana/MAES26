@@ -426,27 +426,57 @@
                 }
 
                 // =======================================================
-                // LOGICA INVENTARIO (COMPARTIDA)
+                // LÓGICA DE INVENTARIO CORREGIDA - CALCETÍN
                 // =======================================================
-                if (!isEditing && inventory && Array.isArray(inventory)) {
-                    const totalKg = totalOrderWeight / 1000; 
+                if (inventory && Array.isArray(inventory)) {
                     let updatedInventoryItems = [...inventory]; 
                     let inventoryChanged = false;
+
+                    // 1. SI EDITAMOS: REEMBOLSAR EL CONSUMO ANTERIOR AL STOCK
+                    if (isEditing && initialOrder) {
+                        const oldTotalWeight = initialOrder.subPiecesData.reduce((sum, p) => sum + ((Number(p.totalPedido)||0) * (Number(p.peso)||0)), 0);
+                        const oldTotalKg = oldTotalWeight / 1000;
+
+                        initialOrder.threading.forEach(row => {
+                            const pct = parseFloat(row.porcentaje) || 0;
+                            if (pct > 0 && row.material) {
+                                const consumedKg = oldTotalKg * (pct / 100);
+                                const itemIndex = updatedInventoryItems.findIndex(i => i.material === row.material);
+                                if (itemIndex > -1) {
+                                    const currentStock = parseFloat(updatedInventoryItems[itemIndex].stock) || 0;
+                                    // Devolución (+)
+                                    updatedInventoryItems[itemIndex] = {
+                                        ...updatedInventoryItems[itemIndex],
+                                        stock: (currentStock + consumedKg).toFixed(2)
+                                    };
+                                    inventoryChanged = true;
+                                }
+                            }
+                        });
+                    }
+
+                    // 2. APLICAR EL NUEVO CONSUMO AL STOCK
+                    const newTotalKg = totalOrderWeight / 1000;
 
                     threadingData.forEach(row => {
                         const pct = parseFloat(row.porcentaje) || 0;
                         if (pct > 0 && row.material) {
-                            const consumedKg = totalKg * (pct / 100);
+                            const consumedKg = newTotalKg * (pct / 100);
                             const itemIndex = updatedInventoryItems.findIndex(i => i.material === row.material);
                             if (itemIndex > -1) {
                                 const currentStock = parseFloat(updatedInventoryItems[itemIndex].stock) || 0;
+                                // Descuento (-)
                                 const newStock = Math.max(0, currentStock - consumedKg);
-                                updatedInventoryItems[itemIndex] = { ...updatedInventoryItems[itemIndex], stock: newStock.toFixed(2) };
+                                updatedInventoryItems[itemIndex] = {
+                                    ...updatedInventoryItems[itemIndex],
+                                    stock: newStock.toFixed(2)
+                                };
                                 inventoryChanged = true;
                             }
                         }
                     });
 
+                    // 3. GUARDAR
                     if (inventoryChanged) {
                         try {
                             // AQUÍ SE USA LA COLECCIÓN DE INVENTARIO COMPARTIDA 'inventory'
