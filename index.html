@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Textil Cloud - Cirineo v3.1</title>
+    <title>Sistema Textil Cloud - Cirineo v3.3</title>
     
     <link id="appIcon" rel="icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.ico">
     <link id="appAppleIcon" rel="apple-touch-icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.ico">
@@ -166,6 +166,7 @@
             return `${partida}-${piecePrefixes}-M${maquina}`;
         };
 
+        // --- FUNCIÓN MODIFICADA: CODIGOS UNICOS SIN CONTADOR ---
         const generatePackages = (pieces, packageSize, partida) => {
             let packages = [];
             let pkgCounter = 1;
@@ -173,11 +174,11 @@
                 const total = Number(p.totalPedido) || 0;
                 const size = Number(packageSize) || total;
                 const n = Math.ceil(total / size);
-                const piecePrefix = p.pieza.substring(0, 3).toUpperCase();
+                const codigoUnico = p.pieza.toUpperCase(); 
 
                 for (let i = 1; i <= n; i++) {
                     const cantidad = (i === n) ? (total % size || size) : size;
-                    const codigoUnico = `${piecePrefix}_${i}_DE_${n}`; 
+                    
                     packages.push({ 
                         id: Date.now() + Math.random() + pkgCounter, 
                         piezaNombre: p.pieza, 
@@ -226,10 +227,9 @@
             }, [onScan]);
         };
 
-        // --- COMPONENTE PAPELETA INDIVIDUAL (4x6) - REDISEÑADO ---
+        // --- COMPONENTE PAPELETA INDIVIDUAL (4x6) ---
         const PackageTicket = ({ order, pkg }) => {
             const canvasRef = useRef(null);
-            // Buscar la información de la pieza correspondiente para obtener Talla, etc.
             const pieceInfo = order.subPiecesData?.find(p => p.pieza === pkg.piezaNombre) || {};
             
             useEffect(() => {
@@ -253,7 +253,6 @@
             return (
                 <div className="ticket-container">
                     <div className="ticket-content">
-                        {/* FILA 1: Encabezados Principales */}
                         <div className="ticket-row" style={{flex: '0 0 auto'}}>
                             <div className="ticket-col" style={{flex: 2}}>
                                 <span className="ticket-label">MODELO</span>
@@ -272,16 +271,12 @@
                                 <span className="ticket-value large truncate">{order.cliente}</span>
                             </div>
                         </div>
-
-                        {/* FILA 2: Descripción */}
                         <div className="ticket-row" style={{flex: '0 0 auto', padding: '4px'}}>
                             <div className="ticket-col border-r-0">
                                 <span className="ticket-label">DESCRIPCION</span>
                                 <span className="ticket-value text-lg leading-tight">{pkg.piezaNombre}</span>
                             </div>
                         </div>
-
-                        {/* FILA 3: Números Grandes (Costura, Piezas, Máquina) */}
                         <div className="ticket-row" style={{flex: '1 1 auto'}}>
                             <div className="ticket-col text-center" style={{flex: 1}}>
                                 <span className="ticket-label">NUMERO DE COSTURA</span>
@@ -297,8 +292,6 @@
                                 <span className="ticket-value enormous">{order.maquina}</span>
                             </div>
                         </div>
-
-                        {/* FILA 4: Detalles Inferiores (Talla, Materiales, Fechas) */}
                         <div className="ticket-row" style={{flex: '0 0 auto', fontSize: '9pt'}}>
                              <div className="ticket-col" style={{flex: 1}}>
                                 <span className="ticket-label">TALLA</span>
@@ -323,8 +316,6 @@
                                 </div>
                             </div>
                         </div>
-
-                        {/* FILA 5: Código de Barras */}
                         <div className="ticket-row no-border-bottom flex-col items-center justify-center pt-2" style={{flex: '0 0 auto'}}>
                             <canvas ref={canvasRef} className="max-w-full"></canvas>
                             <div className="text-[9px] font-mono text-center w-full leading-none mt-1">
@@ -339,7 +330,7 @@
             );
         };
 
-        // --- DASHBOARD COMPONENTS (Sin cambios mayores) ---
+        // --- DASHBOARD COMPONENTS ---
         const InstallButton = () => {
              const [deferredPrompt, setDeferredPrompt] = useState(null);
             useEffect(() => {
@@ -436,7 +427,7 @@
             );
         };
 
-        // --- COMPONENTE DE IMPORTACIÓN (Igual) ---
+        // --- COMPONENTE DE IMPORTACIÓN ---
         const ImportModal = ({ onClose, onImport }) => {
              const [text, setText] = useState('');
             const [error, setError] = useState(null);
@@ -697,7 +688,6 @@
         const OrderView = ({ order, config, onBack, onEdit }) => { 
             const [entry, setEntry] = useState({ tejedor: '', fecha: new Date().toISOString().split('T')[0], defectos: '', agujas: '' });
             
-            // Función para imprimir papeletas
             const handlePrintTickets = () => {
                 document.body.classList.add('print-mode-ticket');
                 window.print();
@@ -741,7 +731,6 @@
                                  {order.status === 'ARCHIVADO' ? 'DESARCHIVAR' : 'ARCHIVAR ORDEN'}
                              </button>
 
-                             {/* BOTÓN NUEVO: IMPRIMIR PAPELETAS */}
                              <button onClick={handlePrintTickets} className="bg-purple-600 text-white px-3 py-1 rounded font-bold text-xs flex items-center gap-1 hover:bg-purple-700">
                                  <Icon name="tags"/> PAPELETAS (4x6)
                              </button>
@@ -758,14 +747,11 @@
                     <div className="p-8 print:p-0">
                         {order.status === 'ARCHIVADO' && <div className="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-4 mb-4 font-bold text-center no-print">ESTA ORDEN ESTÁ ARCHIVADA / TERMINADA</div>}
 
-                        {/* --- PAPELETAS (Solo visibles en modo impresión ticket) --- */}
                         {order.progreso?.map((p) => (
                             <PackageTicket key={p.id} order={order} pkg={p} />
                         ))}
 
                         <div className="print-visible-wrapper">
-                             
-                             {/* --- ENCABEZADO CARTA NORMAL --- */}
                              <div className="flex justify-between items-start mb-4 border-b-4 border-black pb-2">
                                 <div className="w-8/12">
                                     <h1 className="font-black uppercase tracking-tighter">{order.cliente}</h1>
@@ -877,7 +863,6 @@
                              </div>
                         </div>
 
-                        {/* --- VISTA NORMAL DE ESCRITORIO --- */}
                         <div className="no-print mt-4">
                             <div className="bg-slate-100 p-4 rounded border mb-6">
                                 <div className="flex justify-between items-center mb-2">
@@ -1072,8 +1057,7 @@
             const [showImport, setShowImport] = useState(false);
             const [showGallery, setShowGallery] = useState(false);
             const [viewMode, setViewMode] = useState('active'); 
-            const [lastScanned, setLastScanned] = useState(null); // Notificación de escáner
-
+            
             useEffect(() => {
                 const u1 = db.collection('orders').onSnapshot(s => setOrders(s.docs.map(d=>d.data())));
                 const u2 = db.collection('settings').doc('config').onSnapshot(d => setConfig(d.data() || {}));
@@ -1089,7 +1073,6 @@
 
             // --- LÓGICA DE ESCANEO CENTRALIZADA ---
             const handleGlobalScan = async (scannedCode) => {
-                // Formato esperado: "ORDERID-PKGID" (Ej: 170999283-170999284)
                 if (!scannedCode.includes('-')) return;
                 
                 const [orderId, pkgIdString] = scannedCode.split('-');
@@ -1104,18 +1087,13 @@
                             alert(`El paquete ${targetPkg.codigoUnico} ya estaba marcado como terminado.`);
                             return;
                         }
-
-                        // Actualizar en Firebase
                         const newProgreso = targetOrder.progreso.map(p => 
                             p.id === pkgId 
                                 ? { ...p, finished: true, tejedor: 'ESCÁNER', fecha: new Date().toISOString().split('T')[0], defectos: '', agujas: '' } 
                                 : p
                         );
-                        
                         try {
                             await db.collection('orders').doc(String(targetOrder.id)).update({ progreso: newProgreso });
-                            setLastScanned(`Paquete marcado: ${targetPkg.codigoUnico}`);
-                            setTimeout(() => setLastScanned(null), 3000); // Ocultar notificación
                         } catch(e) {
                             console.error(e);
                             alert("Error al actualizar paquete escaneado");
@@ -1124,15 +1102,31 @@
                 }
             };
 
-            // Activar hook
             useBarcodeScanner(handleGlobalScan);
 
-            const displayedOrders = useMemo(() => {
-                if(viewMode === 'active') {
-                    return orders.filter(o => o.status !== 'ARCHIVADO');
-                } else {
-                    return orders.filter(o => o.status === 'ARCHIVADO');
-                }
+            // --- NUEVA LÓGICA DE AGRUPACIÓN POR PARTIDA ---
+            const displayedGroups = useMemo(() => {
+                const filtered = viewMode === 'active' 
+                    ? orders.filter(o => o.status !== 'ARCHIVADO') 
+                    : orders.filter(o => o.status === 'ARCHIVADO');
+
+                const groups = {};
+                
+                filtered.forEach(o => {
+                    const key = o.partida || 'SIN_PARTIDA';
+                    if (!groups[key]) {
+                        groups[key] = {
+                            partida: key,
+                            cliente: o.cliente,
+                            codigo: o.codigo,
+                            orders: []
+                        };
+                    }
+                    groups[key].orders.push(o);
+                });
+
+                // Convertir a array y ordenar (puedes ajustar el criterio de ordenamiento)
+                return Object.values(groups).sort((a,b) => b.partida.localeCompare(a.partida));
             }, [orders, viewMode]);
 
             const allClients = [...new Set(orders.map(o => o.cliente))].sort();
@@ -1151,17 +1145,6 @@
 
             return (
                 <div className="h-screen bg-slate-100 overflow-hidden relative">
-                    {/* NOTIFICACIÓN FLOTANTE DE ESCÁNER */}
-                    {lastScanned && (
-                        <div className="fixed top-20 right-4 z-[100] bg-green-500 text-white px-6 py-4 rounded shadow-2xl animate-bounce font-bold flex items-center gap-2">
-                            <Icon name="check-circle" size={32}/>
-                            <div>
-                                <div className="text-xs uppercase opacity-75">Escáner Correcto</div>
-                                <div className="text-lg">{lastScanned}</div>
-                            </div>
-                        </div>
-                    )}
-
                     {view === 'create' && <div className="absolute inset-0 z-50 bg-black/50 flex items-center justify-center"><MultiOrderForm config={config} onCancel={()=>setView('dashboard')} initialOrder={formProps.initialOrder} clientHistory={allClients} inventory={inventory} isEditing={formProps.isEditing}/></div>}
                     
                     {view === 'detail' && selectedOrder && <div className="absolute inset-0 z-40 bg-white overflow-y-auto print-visible-wrapper"><OrderView order={orders.find(o=>o.id===selectedOrder.id) || selectedOrder} config={config} onBack={()=>setView('dashboard')} onEdit={handleEditOrder}/></div>}
@@ -1176,7 +1159,7 @@
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
                                     <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.1 PAPELETAS REDISEÑADAS</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.3 AGRUPADO</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
@@ -1198,29 +1181,66 @@
                                 </div>
                             </div>
                             
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                {displayedOrders.sort((a,b)=>b.id-a.id).map(o => {
-                                    const pct = Math.round((o.progreso.filter(p=>p.finished).length / o.progreso.length)*100);
-                                    return (
-                                        <div key={o.id} onClick={()=>{setSelectedOrder(o); setView('detail')}} className={`p-3 rounded shadow border-l-4 cursor-pointer hover:shadow-lg transition ${o.status === 'ARCHIVADO' ? 'bg-slate-200 border-slate-500 opacity-75' : 'bg-white border-indigo-500'}`}>
-                                            <div className="flex justify-between items-start">
-                                                <div className="font-bold text-lg">{o.codigo}</div>
-                                                <div className="bg-slate-200 text-slate-700 text-xs px-2 py-1 rounded font-bold">MQ-{o.maquina}</div>
+                            {/* --- CONTENEDOR DE TARJETAS AGRUPADAS --- */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-4">
+                                {displayedGroups.map(group => (
+                                    <div key={group.partida} className="bg-white rounded-lg shadow-md border-t-4 border-indigo-600 overflow-hidden flex flex-col">
+                                        {/* CABECERA DE LA PARTIDA */}
+                                        <div className="bg-slate-50 p-3 border-b flex justify-between items-start">
+                                            <div>
+                                                <div className="text-xs font-bold text-slate-400 uppercase tracking-wide">PARTIDA</div>
+                                                <div className="text-xl font-black text-slate-800">{group.partida}</div>
+                                                <div className="text-sm font-bold text-indigo-700 mt-1">{group.codigo}</div>
                                             </div>
-                                            <div className="text-xs font-bold text-indigo-800 mt-1">PARTIDA: {o.partida}</div>
-                                            <div className="text-[10px] text-slate-400">Total: {o.totalPedido} pzs</div>
-                                            <div className="mt-2 w-full bg-slate-100 h-2 rounded overflow-hidden">
-                                                <div className={`${o.status === 'ARCHIVADO' ? 'bg-slate-500' : 'bg-green-500'} h-full`} style={{width:`${pct}%`}}></div>
+                                            <div className="text-right">
+                                                 <div className="text-[10px] font-bold bg-slate-200 px-2 py-1 rounded text-slate-600 truncate max-w-[100px]">{group.cliente}</div>
                                             </div>
-                                            {o.status === 'ARCHIVADO' && <div className="text-center text-[10px] font-bold text-slate-500 mt-1">ARCHIVADO</div>}
                                         </div>
-                                    );
-                                })}
-                                {displayedOrders.length === 0 && <div className="col-span-4 text-center text-slate-400 py-10 font-bold">No hay órdenes en esta vista.</div>}
+
+                                        {/* LISTA DE MÁQUINAS / PIEZAS */}
+                                        <div className="flex-grow p-2 space-y-2 bg-slate-100/50">
+                                            {group.orders.map(o => {
+                                                const pct = Math.round((o.progreso.filter(p=>p.finished).length / o.progreso.length)*100);
+                                                // Unimos los nombres de las piezas si hay varias
+                                                const piezasStr = o.subPiecesData.map(sp => sp.pieza).join(' + ');
+
+                                                return (
+                                                    <div 
+                                                        key={o.id} 
+                                                        onClick={()=>{setSelectedOrder(o); setView('detail')}} 
+                                                        className="bg-white p-2 rounded border border-slate-200 hover:border-indigo-400 hover:shadow-md cursor-pointer transition-all flex items-center gap-3"
+                                                    >
+                                                        {/* Columna Máquina */}
+                                                        <div className="flex flex-col items-center justify-center bg-slate-800 text-white w-12 h-12 rounded shrink-0">
+                                                            <span className="text-[9px] font-bold opacity-70">MQ</span>
+                                                            <span className="text-lg font-black leading-none">{o.maquina}</span>
+                                                        </div>
+
+                                                        {/* Columna Detalles */}
+                                                        <div className="flex-grow overflow-hidden">
+                                                            <div className="font-bold text-sm text-slate-700 truncate" title={piezasStr}>{piezasStr}</div>
+                                                            <div className="flex justify-between items-end mt-1">
+                                                                <div className="text-[10px] text-slate-400 font-bold">{o.totalPedido} Pzs</div>
+                                                                <div className="text-[10px] font-bold text-green-600">{pct}%</div>
+                                                            </div>
+                                                            <div className="w-full bg-slate-200 h-1.5 rounded-full mt-1 overflow-hidden">
+                                                                <div className={`h-full ${o.status === 'ARCHIVADO' ? 'bg-slate-400' : 'bg-green-500'}`} style={{width:`${pct}%`}}></div>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        {/* Icono Flecha */}
+                                                        <Icon name="chevron-right" size={16} className="text-slate-300 shrink-0"/>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                                {displayedGroups.length === 0 && <div className="col-span-full text-center text-slate-400 py-10 font-bold">No hay órdenes en esta vista.</div>}
                             </div>
                         </div>
                         
-                        {viewMode === 'active' && <DashboardBottom activeOrders={displayedOrders} />}
+                        {viewMode === 'active' && <DashboardBottom activeOrders={orders.filter(o => o.status !== 'ARCHIVADO')} />}
                         {viewMode === 'history' && <div className="bg-slate-800 text-white flex items-center justify-center p-10 font-bold text-xl opacity-50">MODO HISTORIAL - SOLO LECTURA</div>}
                         
                     </div>
