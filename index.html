@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Textil Cloud - Cirineo v3.7.1 (Fix)</title>
+    <title>Sistema Textil Cloud - Cirineo v3.7 (Inventario Corregido)</title>
     
     <link id="appIcon" rel="icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.ico">
     <meta name="theme-color" content="#1e293b">
@@ -113,25 +113,20 @@
             }, [onScan]);
         };
 
-        // --- COMPONENTE: EDITOR DE BORRADOR CON INVENTARIO ---
+        // --- COMPONENTE: EDITOR DE BORRADOR CON INVENTARIO (Corregido para Array Main) ---
         const DraftEditor = ({ draft, onSave, onCancel }) => {
             const [localDraft, setLocalDraft] = useState(draft);
             const [inventory, setInventory] = useState([]);
             const [suggestions, setSuggestions] = useState({ index: null, items: [] });
 
+            // Cargar inventario desde doc 'main' (Array de items)
             useEffect(() => {
-                const unsubscribe = db.collection('inventory').onSnapshot(snap => {
-                    let loadedItems = [];
-                    snap.docs.forEach(doc => {
-                        if(doc.id !== 'main') loadedItems.push({ id: doc.id, ...doc.data() });
-                    });
-                    if(loadedItems.length === 0) {
-                        const mainDoc = snap.docs.find(d => d.id === 'main');
-                        if(mainDoc && mainDoc.data().items) {
-                            loadedItems = mainDoc.data().items;
-                        }
+                const unsubscribe = db.collection('inventory').doc('main').onSnapshot(doc => {
+                    if (doc.exists && doc.data().items) {
+                        setInventory(doc.data().items);
+                    } else {
+                        setInventory([]);
                     }
-                    setInventory(loadedItems);
                 });
                 return () => unsubscribe();
             }, []);
@@ -165,7 +160,7 @@
 
             const selectSuggestion = (idx, item) => {
                 const newThreads = [...localDraft.threading];
-                const stockVal = item.stockActual || item.stock || 0;
+                const stockVal = item.stock || '0';
                 newThreads[idx] = { 
                     ...newThreads[idx], 
                     material: `${item.material} - ${item.color}`,
@@ -251,7 +246,7 @@
                                                                     <span className="text-slate-500 ml-1">- {item.color}</span>
                                                                 </div>
                                                                 <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded text-[10px] font-bold">
-                                                                    Stock: {item.stockActual || item.stock}kg
+                                                                    Stock: {item.stock || 0}kg
                                                                 </span>
                                                             </div>
                                                         ))}
@@ -330,7 +325,8 @@
                 partidaCodigo: '',
                 totalPrendas: 0
             });
-            // CAMBIO: Ahora inicia vacío para que tú llenes los datos
+            
+            // CORRECCIÓN: Iniciar con un solo componente vacío
             const [components, setComponents] = useState([
                 { descripcion: '', sufijo: '', maquina: '', multiplicador: 1, piezasPorPaquete: 0 }
             ]);
@@ -356,10 +352,12 @@
                 if (!form.partidaCodigo || !form.cliente || !form.modelo) return alert("Faltan datos generales");
                 
                 const ordersByMachine = {};
+                let hasValidComponent = false;
 
                 components.forEach(comp => {
                     // Validar si la línea está vacía para no generar basura
                     if(!comp.descripcion || !comp.maquina) return;
+                    hasValidComponent = true;
 
                     const maquinaKey = String(comp.maquina);
                     if (!ordersByMachine[maquinaKey]) {
@@ -411,21 +409,25 @@
                     }
                 });
 
-                const generated = Object.values(ordersByMachine);
-                if(generated.length === 0) return alert("Agrega al menos un componente válido (con nombre y máquina)");
+                if(!hasValidComponent) return alert("Agrega al menos un componente válido (con nombre y máquina)");
                 
-                setDrafts(generated);
+                setDrafts(Object.values(ordersByMachine));
                 setStep('staging');
             };
 
             const handleSaveOne = async (finalDraft) => {
-                const batch = db.batch();
-                
+                // LÓGICA ESPECIAL: Leer inventario completo (doc main), actualizar en memoria y guardar.
                 try {
+                    // 1. Obtener inventario actual para asegurar consistencia
+                    const invDoc = await db.collection('inventory').doc('main').get();
+                    let currentItems = invDoc.exists && invDoc.data().items ? invDoc.data().items : [];
+                    
+                    const batch = db.batch();
                     const newId = String(Date.now() + Math.random());
                     const orderRef = db.collection('orders').doc(newId);
                     const displayId = generateSmartID(finalDraft.partida, finalDraft.subPiecesData, finalDraft.maquina);
 
+                    // 2. Guardar Orden
                     batch.set(orderRef, {
                         ...finalDraft,
                         id: Number(newId),
@@ -435,31 +437,39 @@
                         totalPedido: finalDraft.subPiecesData.reduce((a,b)=>a+Number(b.totalPedido),0)
                     });
 
+                    // 3. Calcular descuentos y actualizar el array de items en memoria
                     const totalGramos = finalDraft.subPiecesData.reduce((acc, p) => acc + (Number(p.peso || 0) * Number(p.totalPedido || 0)), 0);
                     
-                    for (const hilo of (finalDraft.threading || [])) {
+                    (finalDraft.threading || []).forEach(hilo => {
                         if (hilo.materialId) {
                             const cantADescontar = Number(((totalGramos * (Number(hilo.porcentaje) / 100)) / 1000).toFixed(2));
-                            const matRef = db.collection('inventory').doc(hilo.materialId);
                             
-                            batch.update(matRef, {
-                                stock: firebase.firestore.FieldValue.increment(-cantADescontar),
-                                stockActual: firebase.firestore.FieldValue.increment(-cantADescontar)
-                            });
-
-                            const moveRef = db.collection('inventory_movements').doc();
-                            batch.set(moveRef, {
-                                materialId: hilo.materialId,
-                                type: 'SALIDA_ORDEN',
-                                quantityKg: cantADescontar,
-                                orderId: displayId,
-                                model: finalDraft.codigo,
-                                partida: finalDraft.partida,
-                                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                                note: `Consumo automático al crear orden ${displayId}`
-                            });
+                            // Buscar el item en el array
+                            const itemIndex = currentItems.findIndex(i => i.id === hilo.materialId);
+                            if(itemIndex !== -1) {
+                                // Restar stock
+                                const oldStock = parseFloat(currentItems[itemIndex].stock || 0);
+                                currentItems[itemIndex].stock = (oldStock - cantADescontar).toFixed(2);
+                                
+                                // Registrar movimiento (esto sí es una colección aparte)
+                                const moveRef = db.collection('inventory_movements').doc();
+                                batch.set(moveRef, {
+                                    materialId: hilo.materialId,
+                                    type: 'SALIDA_ORDEN',
+                                    quantityKg: cantADescontar,
+                                    orderId: displayId,
+                                    model: finalDraft.codigo,
+                                    partida: finalDraft.partida,
+                                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                                    note: `Consumo automático al crear orden ${displayId}`
+                                });
+                            }
                         }
-                    }
+                    });
+
+                    // 4. Guardar el array de items actualizado en el doc 'main'
+                    const mainInvRef = db.collection('inventory').doc('main');
+                    batch.set(mainInvRef, { items: currentItems });
 
                     await batch.commit();
 
@@ -473,8 +483,8 @@
                         onProcess();
                     }
                 } catch (e) {
-                    console.error("Error batch save:", e);
-                    alert("Error al guardar. Verifica conexión o datos.");
+                    console.error("Error save:", e);
+                    alert("Error al guardar. Verifica conexión.");
                 }
             };
 
@@ -1247,7 +1257,7 @@
 
             return (
                 <div className="h-screen bg-slate-100 overflow-hidden relative">
-                    {/* MODAL GENERADOR (Ahora con Inventario) */}
+                    {/* AQUÍ ESTÁ EL NUEVO MODAL GENERADOR CON STAGING */}
                     {showGenerator && <OrderGeneratorModal onClose={()=>setShowGenerator(false)} onProcess={handleGeneratorSuccess} />}
                     
                     {view === 'detail' && selectedOrder && <div className="absolute inset-0 z-40 bg-white overflow-y-auto print-visible-wrapper"><OrderView order={orders.find(o=>o.id===selectedOrder.id) || selectedOrder} config={config} onBack={()=>setView('dashboard')} onEdit={()=>{}}/></div>}
@@ -1261,7 +1271,7 @@
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
                                     <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.7.1 INVENTARIO FIX</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.7.1 STAGING</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
