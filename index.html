@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Textil Cloud - Cirineo v3.6 (Staging)</title>
+    <title>Sistema Textil Cloud - Cirineo v3.7 (Inventario Integrado)</title>
     
     <link id="appIcon" rel="icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.ico">
     <meta name="theme-color" content="#1e293b">
@@ -113,29 +113,95 @@
             }, [onScan]);
         };
 
-        // --- SUB-COMPONENTE: EDITOR DE BORRADOR (La pieza clave del cambio) ---
+        // --- COMPONENTE ACTUALIZADO: EDITOR DE BORRADOR CON INVENTARIO ---
         const DraftEditor = ({ draft, onSave, onCancel }) => {
             const [localDraft, setLocalDraft] = useState(draft);
+            const [inventory, setInventory] = useState([]);
+            const [suggestions, setSuggestions] = useState({ index: null, items: [] });
+
+            // 1. CARGAR INVENTARIO AL ABRIR
+            useEffect(() => {
+                // Asumiendo que tu inventario se guarda como documentos individuales en la colección 'inventory'
+                // O si usas el sistema 'main' con items array, ajustaremos la lectura:
+                const unsubscribe = db.collection('inventory').onSnapshot(snap => {
+                    // Adaptador para leer si es colección de docs o un doc 'main'
+                    let loadedItems = [];
+                    // Intento leer docs individuales (Método Robust)
+                    snap.docs.forEach(doc => {
+                        if(doc.id !== 'main') loadedItems.push({ id: doc.id, ...doc.data() });
+                    });
+                    
+                    // Si no hay docs y existe 'main', lee del array (Método Legacy/SingleDoc)
+                    if(loadedItems.length === 0) {
+                        const mainDoc = snap.docs.find(d => d.id === 'main');
+                        if(mainDoc && mainDoc.data().items) {
+                            loadedItems = mainDoc.data().items;
+                        }
+                    }
+                    
+                    setInventory(loadedItems);
+                });
+                return () => unsubscribe();
+            }, []);
             
-            // Añadir fila de hilo
+            // 2. AÑADIR/QUITAR HILOS
             const addThread = () => {
-                const newThreads = [...(localDraft.threading || []), { guia: (localDraft.threading?.length || 0) + 1, material: '', porcentaje: '' }];
+                const newThreads = [...(localDraft.threading || []), { guia: (localDraft.threading?.length || 0) + 1, material: '', porcentaje: '', materialId: null }];
                 setLocalDraft({ ...localDraft, threading: newThreads });
             };
             
-            // Actualizar hilo
+            const removeThread = (idx) => {
+                setLocalDraft({ ...localDraft, threading: localDraft.threading.filter((_, i) => i !== idx) });
+            };
+
             const updateThread = (idx, field, val) => {
                 const newThreads = [...localDraft.threading];
                 newThreads[idx] = { ...newThreads[idx], [field]: val };
                 setLocalDraft({ ...localDraft, threading: newThreads });
             };
 
-            // Eliminar hilo
-            const removeThread = (idx) => {
-                setLocalDraft({ ...localDraft, threading: localDraft.threading.filter((_, i) => i !== idx) });
+            // 3. LÓGICA DE SUGERENCIAS DE MATERIAL
+            const handleMaterialInput = (idx, val) => {
+                updateThread(idx, 'material', val);
+                if (val.length > 1) {
+                    const filtered = inventory.filter(i => 
+                        `${i.material} ${i.color}`.toLowerCase().includes(val.toLowerCase())
+                    );
+                    setSuggestions({ index: idx, items: filtered });
+                } else {
+                    setSuggestions({ index: null, items: [] });
+                }
             };
 
-            // Actualizar datos de pieza (peso/tiempo)
+            const selectSuggestion = (idx, item) => {
+                const newThreads = [...localDraft.threading];
+                // Intentamos leer stockActual o stock (compatibilidad)
+                const stockVal = item.stockActual || item.stock || 0;
+                
+                newThreads[idx] = { 
+                    ...newThreads[idx], 
+                    material: `${item.material} - ${item.color} (${stockVal}kg)`,
+                    materialId: item.id, // ID CRÍTICO PARA EL DESCUENTO
+                    stockDisponible: stockVal
+                };
+                setLocalDraft({ ...localDraft, threading: newThreads });
+                setSuggestions({ index: null, items: [] });
+            };
+
+            // 4. CÁLCULO DE CONSUMO AUTOMÁTICO
+            const calculateConsumption = (hilo) => {
+                if (!hilo.materialId || !hilo.porcentaje) return 0;
+                
+                // Suma total de gramos de todas las piezas (peso * cantidad)
+                const totalGramos = localDraft.subPiecesData.reduce((acc, p) => {
+                    return acc + (Number(p.peso || 0) * Number(p.totalPedido || 0));
+                }, 0);
+                
+                // Fórmula: (TotalGramos * (%Hilo / 100)) / 1000 = Kg
+                return ((totalGramos * (Number(hilo.porcentaje) / 100)) / 1000).toFixed(2);
+            };
+
+            // Actualizar datos de pieza
             const updatePiece = (idx, field, val) => {
                 const newPieces = [...localDraft.subPiecesData];
                 newPieces[idx] = { ...newPieces[idx], [field]: val };
@@ -165,32 +231,71 @@
                             </div>
                         </div>
 
-                        {/* ENHEBRADO (THREADING) - LO QUE FALTABA */}
+                        {/* --- ENHEBRADO E INVENTARIO (SECCIÓN ACTUALIZADA) --- */}
                         <div>
                             <div className="flex justify-between items-center mb-2">
-                                <h3 className="font-bold text-sm text-slate-700">Enhebrado / Materiales</h3>
+                                <h3 className="font-bold text-sm text-slate-700">Enhebrado e Inventario</h3>
                                 <button onClick={addThread} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold hover:bg-blue-200">+ Hilo</button>
                             </div>
                             <table className="w-full text-xs border">
                                 <thead className="bg-slate-200">
                                     <tr>
                                         <th className="p-1 w-10">Guía</th>
-                                        <th className="p-1">Material</th>
+                                        <th className="p-1">Material (Autocompletar)</th>
                                         <th className="p-1 w-16">%</th>
+                                        <th className="p-1 w-24">Consumo Est.</th>
                                         <th className="p-1 w-8"></th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {(localDraft.threading || []).map((h, i) => (
-                                        <tr key={i}>
+                                        <tr key={i} className="relative">
                                             <td><input value={h.guia} onChange={e=>updateThread(i,'guia',e.target.value)} className="w-full text-center border-none bg-transparent"/></td>
-                                            <td><input value={h.material} onChange={e=>updateThread(i,'material',e.target.value)} placeholder="Ej: Poliester 30/1" className="w-full border p-1"/></td>
-                                            <td><input value={h.porcentaje} onChange={e=>updateThread(i,'porcentaje',e.target.value)} className="w-full text-center border p-1"/></td>
+                                            <td className="p-1">
+                                                <input 
+                                                    value={h.material} 
+                                                    onChange={e => handleMaterialInput(i, e.target.value)}
+                                                    placeholder="Escribe para buscar..."
+                                                    className="w-full border p-1 rounded focus:border-indigo-500 outline-none"
+                                                />
+                                                {/* MENÚ FLOTANTE DE SUGERENCIAS */}
+                                                {suggestions.index === i && suggestions.items.length > 0 && (
+                                                    <div className="absolute z-50 bg-white border shadow-lg w-full max-w-md max-h-40 overflow-y-auto left-0 mt-1 rounded">
+                                                        {suggestions.items.map(item => (
+                                                            <div 
+                                                                key={item.id}
+                                                                onClick={() => selectSuggestion(i, item)}
+                                                                className="p-2 hover:bg-indigo-50 cursor-pointer border-b flex justify-between items-center"
+                                                            >
+                                                                <div>
+                                                                    <span className="font-bold text-slate-700">{item.material}</span>
+                                                                    <span className="text-slate-500 ml-1">- {item.color}</span>
+                                                                </div>
+                                                                <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded text-[10px] font-bold">
+                                                                    Stock: {item.stockActual || item.stock}kg
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td>
+                                                <input 
+                                                    value={h.porcentaje} 
+                                                    onChange={e=>updateThread(i,'porcentaje',e.target.value)} 
+                                                    className="w-full text-center border p-1"
+                                                    placeholder="%"
+                                                />
+                                            </td>
+                                            {/* CÁLCULO EN TIEMPO REAL */}
+                                            <td className="text-center font-bold text-red-600 bg-red-50">
+                                                {calculateConsumption(h)} Kg
+                                            </td>
                                             <td className="text-center"><button onClick={()=>removeThread(i)} className="text-red-500 font-bold">x</button></td>
                                         </tr>
                                     ))}
                                     {(!localDraft.threading || localDraft.threading.length === 0) && (
-                                        <tr><td colSpan="4" className="text-center p-2 text-gray-400 italic">No hay hilos asignados aún.</td></tr>
+                                        <tr><td colSpan="5" className="text-center p-2 text-gray-400 italic">No hay hilos asignados aún.</td></tr>
                                     )}
                                 </tbody>
                             </table>
@@ -271,7 +376,7 @@
                 setComponents(newComps);
             };
 
-            // GENERAR BORRADORES (SIN GUARDAR EN BD AÚN)
+            // GENERAR BORRADORES
             const handleGenerateDrafts = () => {
                 if (!form.partidaCodigo || !form.cliente || !form.modelo) return alert("Faltan datos generales");
                 
@@ -289,9 +394,9 @@
                             predefinedPackages: [],
                             createdAt: new Date().toLocaleString('es-MX'),
                             threading: [
-                                { guia: 1, material: '', porcentaje: '' },
-                                { guia: 2, material: '', porcentaje: '' }
-                            ] // Prellenar slots para hilos
+                                { guia: 1, material: '', porcentaje: '', materialId: null },
+                                { guia: 2, material: '', porcentaje: '', materialId: null }
+                            ]
                         };
                     }
                     
@@ -329,16 +434,20 @@
                 });
 
                 setDrafts(Object.values(ordersByMachine));
-                setStep('staging'); // Pasar a la vista de lista de borradores
+                setStep('staging');
             };
 
+            // --- FUNCIÓN DE GUARDADO ACTUALIZADA (DESCUENTA INVENTARIO) ---
             const handleSaveOne = async (finalDraft) => {
+                const batch = db.batch(); // Transacción atómica
+                
                 try {
                     const newId = String(Date.now() + Math.random());
                     const orderRef = db.collection('orders').doc(newId);
                     const displayId = generateSmartID(finalDraft.partida, finalDraft.subPiecesData, finalDraft.maquina);
 
-                    await orderRef.set({
+                    // 1. Guardar la Orden
+                    batch.set(orderRef, {
                         ...finalDraft,
                         id: Number(newId),
                         displayId: displayId,
@@ -347,19 +456,59 @@
                         totalPedido: finalDraft.subPiecesData.reduce((a,b)=>a+Number(b.totalPedido),0)
                     });
 
-                    // Eliminar este borrador de la lista
+                    // 2. Procesar Descuentos de Inventario
+                    const totalGramos = finalDraft.subPiecesData.reduce((acc, p) => acc + (Number(p.peso || 0) * Number(p.totalPedido || 0)), 0);
+                    
+                    // Recorremos los hilos configurados
+                    for (const hilo of (finalDraft.threading || [])) {
+                        if (hilo.materialId) {
+                            const cantADescontar = Number(((totalGramos * (Number(hilo.porcentaje) / 100)) / 1000).toFixed(2));
+                            
+                            // Referencia al documento del material
+                            // NOTA: Asumimos estructura de documentos individuales.
+                            const matRef = db.collection('inventory').doc(hilo.materialId);
+                            
+                            // Restar del stock (usamos 'stockActual' o 'stock' según tu DB, aquí usamos increment negativo)
+                            // Si usas 'stock' como string en tu DB, Firebase necesita que sea number para increment. 
+                            // Asumimos que la migración a Numbers se hizo o se maneja.
+                            batch.update(matRef, {
+                                stock: firebase.firestore.FieldValue.increment(-cantADescontar),
+                                // Fallback por si el campo se llama stockActual
+                                stockActual: firebase.firestore.FieldValue.increment(-cantADescontar)
+                            });
+
+                            // Crear registro en bitácora
+                            const moveRef = db.collection('inventory_movements').doc();
+                            batch.set(moveRef, {
+                                materialId: hilo.materialId,
+                                type: 'SALIDA_ORDEN',
+                                quantityKg: cantADescontar, // Usamos quantityKg para coincidir con tu app de inventario
+                                orderId: displayId,
+                                model: finalDraft.codigo,
+                                partida: finalDraft.partida,
+                                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                                note: `Consumo automático al crear orden ${displayId}`
+                            });
+                        }
+                    }
+
+                    // Ejecutar todo junto
+                    await batch.commit();
+
+                    // Limpiar UI
                     const remaining = drafts.filter((_, i) => i !== currentDraftIndex);
                     setDrafts(remaining);
                     setStep('staging');
                     setCurrentDraftIndex(null);
 
                     if (remaining.length === 0) {
-                        alert("¡Todas las órdenes han sido creadas!");
+                        alert("¡Todas las órdenes creadas e inventario descontado!");
                         onProcess();
                     }
                 } catch (e) {
-                    console.error(e);
-                    alert("Error al guardar la orden.");
+                    console.error("Error batch save:", e);
+                    // Si falla el batch porque el documento no existe (ej. estructura de array 'main'), avisar
+                    alert("Error al guardar. Verifica que los materiales seleccionados existan en la base de datos.");
                 }
             };
 
@@ -415,7 +564,7 @@
                                             onClick={() => { setCurrentDraftIndex(idx); setStep('editing'); }}
                                             className="w-full mt-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded flex items-center justify-center gap-2"
                                         >
-                                            <Icon name="edit"/> REVISAR Y CREAR
+                                            <Icon name="edit"/> REVISAR, PESOS E INVENTARIO
                                         </button>
                                     </div>
                                 ))}
@@ -1138,7 +1287,7 @@
 
             return (
                 <div className="h-screen bg-slate-100 overflow-hidden relative">
-                    {/* AQUÍ ESTÁ EL NUEVO MODAL GENERADOR CON STAGING */}
+                    {/* MODAL GENERADOR (Ahora con Inventario) */}
                     {showGenerator && <OrderGeneratorModal onClose={()=>setShowGenerator(false)} onProcess={handleGeneratorSuccess} />}
                     
                     {view === 'detail' && selectedOrder && <div className="absolute inset-0 z-40 bg-white overflow-y-auto print-visible-wrapper"><OrderView order={orders.find(o=>o.id===selectedOrder.id) || selectedOrder} config={config} onBack={()=>setView('dashboard')} onEdit={()=>{}}/></div>}
@@ -1152,7 +1301,7 @@
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
                                     <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.6 STAGING</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.7 INVENTARIO</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
@@ -1204,7 +1353,7 @@
                                                                 <div className="text-[10px] font-bold text-green-600">{pct}%</div>
                                                             </div>
                                                             <div className="w-full bg-slate-200 h-1.5 rounded-full mt-1 overflow-hidden">
-                                                                <div className={`h-full ${o.status === 'ARCHIVADO' ? 'bg-slate-400' : 'bg-green-500'}`} style={{width:`${pct}%`}}></div>
+                                                                <div className={`h-full ${o.status === 'ARCHIVADO' ? 'bg-slate-400' : 'bg-green-50'}`} style={{width:`${pct}%`}}></div>
                                                             </div>
                                                         </div>
                                                         <Icon name="chevron-right" size={16} className="text-slate-300 shrink-0"/>
