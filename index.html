@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Textil Cloud - Cirineo v3.5 (Integrado)</title>
+    <title>Sistema Textil Cloud - Cirineo v3.6 (Staging)</title>
     
     <link id="appIcon" rel="icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.ico">
     <meta name="theme-color" content="#1e293b">
@@ -86,14 +86,12 @@
         const db = firebase.firestore();
 
         const Icon = ({ name, size = 18, className }) => <i data-lucide={name} width={size} height={size} className={className}></i>;
-        const toUppercase = (handler) => (e) => { e.target.value = e.target.value.toUpperCase(); handler(e); };
         
         const generateSmartID = (partida, pieces, maquina) => {
             const piecePrefixes = pieces.map(p => p.pieza.substring(0, 2).toUpperCase()).join('/');
             return `${partida}-${piecePrefixes}-M${maquina}`;
         };
 
-        // --- HOOK ESCÁNER ---
         const useBarcodeScanner = (onScan) => {
             useEffect(() => {
                 let buffer = '';
@@ -115,13 +113,135 @@
             }, [onScan]);
         };
 
-        // =================================================================================
-        // N U E V O   C O M P O N E N T E :   G E N E R A D O R   I N T E G R A D O
-        // =================================================================================
-        // Esta es la lógica traducida de Vue a React, integrada directamente en la app.
-        
+        // --- SUB-COMPONENTE: EDITOR DE BORRADOR (La pieza clave del cambio) ---
+        const DraftEditor = ({ draft, onSave, onCancel }) => {
+            const [localDraft, setLocalDraft] = useState(draft);
+            
+            // Añadir fila de hilo
+            const addThread = () => {
+                const newThreads = [...(localDraft.threading || []), { guia: (localDraft.threading?.length || 0) + 1, material: '', porcentaje: '' }];
+                setLocalDraft({ ...localDraft, threading: newThreads });
+            };
+            
+            // Actualizar hilo
+            const updateThread = (idx, field, val) => {
+                const newThreads = [...localDraft.threading];
+                newThreads[idx] = { ...newThreads[idx], [field]: val };
+                setLocalDraft({ ...localDraft, threading: newThreads });
+            };
+
+            // Eliminar hilo
+            const removeThread = (idx) => {
+                setLocalDraft({ ...localDraft, threading: localDraft.threading.filter((_, i) => i !== idx) });
+            };
+
+            // Actualizar datos de pieza (peso/tiempo)
+            const updatePiece = (idx, field, val) => {
+                const newPieces = [...localDraft.subPiecesData];
+                newPieces[idx] = { ...newPieces[idx], [field]: val };
+                setLocalDraft({ ...localDraft, subPiecesData: newPieces });
+            };
+
+            return (
+                <div className="flex flex-col h-full">
+                    <div className="bg-indigo-600 p-4 text-white flex justify-between items-center shrink-0">
+                        <h2 className="font-bold text-lg"><Icon name="edit-3" className="inline mr-2"/> Editando Orden Máquina {localDraft.maquina}</h2>
+                    </div>
+                    
+                    <div className="p-6 overflow-y-auto flex-grow space-y-6">
+                        {/* DATOS PRINCIPALES */}
+                        <div className="grid grid-cols-3 gap-4 bg-slate-50 p-4 rounded border">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500">Máquina</label>
+                                <input type="number" value={localDraft.maquina} onChange={e=>setLocalDraft({...localDraft, maquina: e.target.value})} className="w-full border p-1 rounded font-black text-xl"/>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500">Cliente</label>
+                                <input value={localDraft.cliente} disabled className="w-full border p-1 rounded bg-gray-200 text-gray-500"/>
+                            </div>
+                             <div>
+                                <label className="block text-xs font-bold text-gray-500">Partida</label>
+                                <input value={localDraft.partida} disabled className="w-full border p-1 rounded bg-gray-200 text-gray-500"/>
+                            </div>
+                        </div>
+
+                        {/* ENHEBRADO (THREADING) - LO QUE FALTABA */}
+                        <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="font-bold text-sm text-slate-700">Enhebrado / Materiales</h3>
+                                <button onClick={addThread} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold hover:bg-blue-200">+ Hilo</button>
+                            </div>
+                            <table className="w-full text-xs border">
+                                <thead className="bg-slate-200">
+                                    <tr>
+                                        <th className="p-1 w-10">Guía</th>
+                                        <th className="p-1">Material</th>
+                                        <th className="p-1 w-16">%</th>
+                                        <th className="p-1 w-8"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(localDraft.threading || []).map((h, i) => (
+                                        <tr key={i}>
+                                            <td><input value={h.guia} onChange={e=>updateThread(i,'guia',e.target.value)} className="w-full text-center border-none bg-transparent"/></td>
+                                            <td><input value={h.material} onChange={e=>updateThread(i,'material',e.target.value)} placeholder="Ej: Poliester 30/1" className="w-full border p-1"/></td>
+                                            <td><input value={h.porcentaje} onChange={e=>updateThread(i,'porcentaje',e.target.value)} className="w-full text-center border p-1"/></td>
+                                            <td className="text-center"><button onClick={()=>removeThread(i)} className="text-red-500 font-bold">x</button></td>
+                                        </tr>
+                                    ))}
+                                    {(!localDraft.threading || localDraft.threading.length === 0) && (
+                                        <tr><td colSpan="4" className="text-center p-2 text-gray-400 italic">No hay hilos asignados aún.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* DETALLE DE PIEZAS */}
+                        <div>
+                            <h3 className="font-bold text-sm text-slate-700 mb-2">Detalles Técnicos (Piezas)</h3>
+                            {localDraft.subPiecesData.map((p, idx) => (
+                                <div key={idx} className="bg-white border rounded p-3 mb-2 shadow-sm">
+                                    <div className="font-bold text-indigo-700 mb-2 border-b pb-1">{p.pieza}</div>
+                                    <div className="grid grid-cols-4 gap-2">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-400">Talla</label>
+                                            <input value={p.talla} onChange={e=>updatePiece(idx,'talla',e.target.value)} className="w-full border p-1 rounded text-xs font-bold"/>
+                                        </div>
+                                         <div>
+                                            <label className="text-[10px] font-bold text-gray-400">Peso (g)</label>
+                                            <input value={p.peso} onChange={e=>updatePiece(idx,'peso',e.target.value)} className="w-full border p-1 rounded text-xs"/>
+                                        </div>
+                                         <div>
+                                            <label className="text-[10px] font-bold text-gray-400">Tiempo (min)</label>
+                                            <input value={p.tiempo} onChange={e=>updatePiece(idx,'tiempo',e.target.value)} className="w-full border p-1 rounded text-xs"/>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-400">Cant.</label>
+                                            <input value={p.totalPedido} disabled className="w-full border p-1 rounded text-xs bg-gray-100 text-center"/>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="p-4 bg-gray-100 border-t flex justify-end gap-3">
+                        <button onClick={onCancel} className="px-4 py-2 rounded text-slate-600 font-bold hover:bg-slate-200">Cancelar Edición</button>
+                        <button onClick={() => onSave(localDraft)} className="px-6 py-2 rounded bg-green-600 text-white font-bold hover:bg-green-700 shadow flex items-center gap-2">
+                            <Icon name="check-circle"/> CONFIRMAR Y CREAR
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- COMPONENTE PRINCIPAL DEL GENERADOR ---
         const OrderGeneratorModal = ({ onClose, onProcess }) => {
-            // Estado inicial igual al de Vue
+            const [step, setStep] = useState('input'); // 'input', 'staging', 'editing'
+            const [drafts, setDrafts] = useState([]);
+            const [currentDraftIndex, setCurrentDraftIndex] = useState(null);
+
+            // Estado Formulario
             const [form, setForm] = useState({
                 modelo: 'M029',
                 cliente: 'MAES',
@@ -129,13 +249,11 @@
                 partidaCodigo: '',
                 totalPrendas: 250
             });
-
             const [components, setComponents] = useState([
                 { descripcion: 'BLUSA DOBLE', sufijo: 'BL', maquina: 30, multiplicador: 1, piezasPorPaquete: 25 },
                 { descripcion: 'MANGA LARGA', sufijo: 'ML', maquina: 1, multiplicador: 2, piezasPorPaquete: 50 }
             ]);
 
-            // Lógica automática de partida (idéntica al Vue)
             useEffect(() => {
                 if (!form.fecha) return;
                 const fechaObj = new Date(form.fecha + 'T00:00:00');
@@ -145,7 +263,6 @@
                 setForm(prev => ({ ...prev, partidaCodigo: `${mes}${year}_01` }));
             }, [form.fecha]);
 
-            // Handlers
             const addComponent = () => setComponents([...components, { descripcion: '', sufijo: '', maquina: '', multiplicador: 1, piezasPorPaquete: 0 }]);
             const removeComponent = (idx) => setComponents(components.filter((_, i) => i !== idx));
             const updateComponent = (idx, field, val) => {
@@ -154,34 +271,10 @@
                 setComponents(newComps);
             };
 
-            // Vista previa (Lógica trasladada de Vue Computed)
-            const previewRows = useMemo(() => {
-                let rows = [];
-                if (!form.totalPrendas) return [];
-                const comp = components[0];
-                if (!comp) return [];
-                const totalPiezasComp = form.totalPrendas * comp.multiplicador;
-                const numPaquetes = comp.piezasPorPaquete > 0 ? Math.ceil(totalPiezasComp / comp.piezasPorPaquete) : 0;
-
-                for (let i = 1; i <= Math.min(3, numPaquetes); i++) {
-                    rows.push({
-                        modelo: form.modelo,
-                        partida: form.partidaCodigo,
-                        cliente: form.cliente,
-                        descripcion: comp.descripcion,
-                        costura: `${i}_${numPaquetes}`,
-                        codigo: `${form.partidaCodigo}${comp.sufijo}_${i}_${numPaquetes}`,
-                        maquina: comp.maquina
-                    });
-                }
-                return rows;
-            }, [form, components]);
-
-            // --- LÓGICA DE GUARDADO DIRECTO A BD ---
-            const handleGenerateAndSave = async () => {
+            // GENERAR BORRADORES (SIN GUARDAR EN BD AÚN)
+            const handleGenerateDrafts = () => {
                 if (!form.partidaCodigo || !form.cliente || !form.modelo) return alert("Faltan datos generales");
-
-                // Agrupamos por máquina para crear órdenes separadas automáticamente
+                
                 const ordersByMachine = {};
 
                 components.forEach(comp => {
@@ -193,14 +286,17 @@
                             maquina: maquinaKey,
                             partida: form.partidaCodigo.toUpperCase(),
                             subPiecesData: [],
-                            predefinedPackages: [], // Aquí guardaremos los paquetes generados
-                            createdAt: new Date().toLocaleString('es-MX')
+                            predefinedPackages: [],
+                            createdAt: new Date().toLocaleString('es-MX'),
+                            threading: [
+                                { guia: 1, material: '', porcentaje: '' },
+                                { guia: 2, material: '', porcentaje: '' }
+                            ] // Prellenar slots para hilos
                         };
                     }
                     
                     const totalPiezasComp = form.totalPrendas * comp.multiplicador;
                     
-                    // Agregar a piezas
                     ordersByMachine[maquinaKey].subPiecesData.push({
                         id: Date.now() + Math.random(),
                         pieza: comp.descripcion.toUpperCase(),
@@ -210,7 +306,6 @@
                         tiempo: ''
                     });
 
-                    // Generar Paquetes (Lógica del Generador)
                     const numPaquetes = comp.piezasPorPaquete > 0 ? Math.ceil(totalPiezasComp / comp.piezasPorPaquete) : 0;
                     for (let i = 1; i <= numPaquetes; i++) {
                         const cantidad = (i === numPaquetes && totalPiezasComp % comp.piezasPorPaquete !== 0) 
@@ -223,7 +318,7 @@
                             cantidad: cantidad,
                             paqueteNum: i,
                             paquetesDePieza: numPaquetes,
-                            codigoUnico: `${form.partidaCodigo}${comp.sufijo}_${i}_${numPaquetes}`, // CÓDIGO GENERADO
+                            codigoUnico: `${form.partidaCodigo}${comp.sufijo}_${i}_${numPaquetes}`,
                             finished: false,
                             tejedor: '',
                             fecha: '',
@@ -233,50 +328,134 @@
                     }
                 });
 
-                // Guardar en Firestore
+                setDrafts(Object.values(ordersByMachine));
+                setStep('staging'); // Pasar a la vista de lista de borradores
+            };
+
+            const handleSaveOne = async (finalDraft) => {
                 try {
-                    const batch = db.batch();
-                    const createdDocs = [];
+                    const newId = String(Date.now() + Math.random());
+                    const orderRef = db.collection('orders').doc(newId);
+                    const displayId = generateSmartID(finalDraft.partida, finalDraft.subPiecesData, finalDraft.maquina);
 
-                    Object.values(ordersByMachine).forEach(orderData => {
-                        const newId = String(Date.now() + Math.random());
-                        const orderRef = db.collection('orders').doc(newId);
-                        
-                        const displayId = generateSmartID(orderData.partida, orderData.subPiecesData, orderData.maquina);
-
-                        batch.set(orderRef, {
-                            ...orderData,
-                            id: Number(newId),
-                            displayId: displayId,
-                            progreso: orderData.predefinedPackages, // Los paquetes van directos a progreso
-                            threading: [], // Vacío por defecto
-                            packageSize: 'VARIO',
-                            status: 'EN PROCESO',
-                            totalPedido: orderData.subPiecesData.reduce((a,b)=>a+Number(b.totalPedido),0)
-                        });
-                        createdDocs.push(orderData.maquina);
+                    await orderRef.set({
+                        ...finalDraft,
+                        id: Number(newId),
+                        displayId: displayId,
+                        progreso: finalDraft.predefinedPackages,
+                        status: 'EN PROCESO',
+                        totalPedido: finalDraft.subPiecesData.reduce((a,b)=>a+Number(b.totalPedido),0)
                     });
 
-                    await batch.commit();
-                    alert(`¡Éxito! Se crearon ${createdDocs.length} órdenes para las máquinas: ${createdDocs.join(', ')}.`);
-                    onProcess(); // Cerrar modal y refrescar
+                    // Eliminar este borrador de la lista
+                    const remaining = drafts.filter((_, i) => i !== currentDraftIndex);
+                    setDrafts(remaining);
+                    setStep('staging');
+                    setCurrentDraftIndex(null);
+
+                    if (remaining.length === 0) {
+                        alert("¡Todas las órdenes han sido creadas!");
+                        onProcess();
+                    }
                 } catch (e) {
                     console.error(e);
-                    alert("Error al guardar en la base de datos.");
+                    alert("Error al guardar la orden.");
                 }
             };
+
+            // VISTAS DEL MODAL
+            if (step === 'editing' && currentDraftIndex !== null) {
+                return (
+                    <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
+                        <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl h-[90vh] overflow-hidden relative">
+                            <DraftEditor 
+                                draft={drafts[currentDraftIndex]} 
+                                onSave={handleSaveOne} 
+                                onCancel={() => setStep('staging')} 
+                            />
+                        </div>
+                    </div>
+                );
+            }
+
+            if (step === 'staging') {
+                return (
+                    <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
+                        <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl h-[80vh] overflow-hidden flex flex-col">
+                            <div className="bg-orange-600 p-4 text-white flex justify-between items-center shrink-0">
+                                <div>
+                                    <h1 className="text-xl font-bold flex items-center gap-2"><Icon name="layers"/> Órdenes Preparadas</h1>
+                                    <p className="text-orange-200 text-xs">Revisa y completa los datos de cada máquina antes de crear.</p>
+                                </div>
+                                <button onClick={() => setStep('input')} className="text-white bg-orange-700 hover:bg-orange-800 px-3 py-1 rounded text-xs font-bold">Volver al Generador</button>
+                            </div>
+                            
+                            <div className="p-6 overflow-y-auto bg-slate-100 flex-grow grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {drafts.length === 0 && (
+                                    <div className="col-span-full flex flex-col items-center justify-center text-gray-400 py-10">
+                                        <Icon name="check-circle" size={48} className="mb-2"/>
+                                        <p>Todas las órdenes han sido procesadas.</p>
+                                        <button onClick={onClose} className="mt-4 text-blue-600 font-bold hover:underline">Cerrar</button>
+                                    </div>
+                                )}
+                                {drafts.map((draft, idx) => (
+                                    <div key={idx} className="bg-white rounded shadow border-l-4 border-indigo-500 p-4 flex flex-col justify-between">
+                                        <div>
+                                            <div className="flex justify-between items-start mb-2">
+                                                <h3 className="font-black text-xl text-slate-700">MÁQUINA {draft.maquina}</h3>
+                                                <span className="bg-yellow-100 text-yellow-800 text-[10px] font-bold px-2 py-1 rounded">BORRADOR</span>
+                                            </div>
+                                            <div className="text-sm text-gray-600 mb-2">
+                                                <p><strong>Cliente:</strong> {draft.cliente}</p>
+                                                <p><strong>Piezas:</strong> {draft.subPiecesData.map(p=>p.pieza).join(', ')}</p>
+                                                <p><strong>Total Paquetes:</strong> {draft.predefinedPackages.length}</p>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => { setCurrentDraftIndex(idx); setStep('editing'); }}
+                                            className="w-full mt-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded flex items-center justify-center gap-2"
+                                        >
+                                            <Icon name="edit"/> REVISAR Y CREAR
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // VISTA INICIAL (GENERADOR)
+            const previewRows = (() => {
+                let rows = [];
+                if (!form.totalPrendas) return [];
+                const comp = components[0];
+                if (!comp) return [];
+                const totalPiezasComp = form.totalPrendas * comp.multiplicador;
+                const numPaquetes = comp.piezasPorPaquete > 0 ? Math.ceil(totalPiezasComp / comp.piezasPorPaquete) : 0;
+                for (let i = 1; i <= Math.min(3, numPaquetes); i++) {
+                    rows.push({
+                        modelo: form.modelo,
+                        partida: form.partidaCodigo,
+                        cliente: form.cliente,
+                        descripcion: comp.descripcion,
+                        costura: `${i}_${numPaquetes}`,
+                        codigo: `${form.partidaCodigo}${comp.sufijo}_${i}_${numPaquetes}`,
+                        maquina: comp.maquina
+                    });
+                }
+                return rows;
+            })();
 
             return (
                 <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-2xl w-full max-w-5xl h-[90vh] overflow-y-auto flex flex-col">
-                        
-                        {/* HEADER AZUL TIPO GENERADOR */}
                         <div className="bg-blue-800 p-4 text-white flex justify-between items-center shrink-0">
                             <div>
                                 <h1 className="text-xl font-bold flex items-center gap-2">
-                                    <i className="fas fa-magic"></i> Generador Automático de Órdenes
+                                    <i className="fas fa-magic"></i> Generador Automático (Paso 1)
                                 </h1>
-                                <p className="text-blue-200 text-xs">Calcula paquetes y guarda directo en Cirineo</p>
+                                <p className="text-blue-200 text-xs">Define la estructura. Luego podrás editar detalles por máquina.</p>
                             </div>
                             <button onClick={onClose} className="text-white hover:text-red-300 font-bold"><Icon name="x"/></button>
                         </div>
@@ -348,48 +527,36 @@
                                                     <input type="number" value={comp.piezasPorPaquete} onChange={e => updateComponent(idx, 'piezasPorPaquete', Number(e.target.value))} className="w-full p-1 border rounded text-xs bg-blue-50 text-center"/>
                                                 </div>
                                             </div>
-                                            <div className="mt-1 text-[10px] text-blue-600 font-mono bg-blue-50 p-1 rounded">
-                                                Total: {form.totalPrendas * comp.multiplicador} pzs | 
-                                                Paquetes: {comp.piezasPorPaquete > 0 ? Math.ceil((form.totalPrendas * comp.multiplicador) / comp.piezasPorPaquete) : 0}
-                                            </div>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         </div>
 
-                        {/* FOOTER / VISTA PREVIA */}
+                        {/* FOOTER */}
                         <div className="bg-gray-800 text-white p-4 shrink-0 mt-auto">
                             <div className="flex justify-between items-center mb-2">
-                                <h2 className="text-sm font-semibold">Vista Previa (Ejemplo)</h2>
-                                <button onClick={handleGenerateAndSave} className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded font-bold shadow-lg transform hover:scale-105 transition flex items-center gap-2">
-                                    <Icon name="save"/> PROCESAR Y GUARDAR
+                                <h2 className="text-sm font-semibold">Previsualización (Lógica)</h2>
+                                <button onClick={handleGenerateDrafts} className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded font-bold shadow-lg transform hover:scale-105 transition flex items-center gap-2">
+                                    <Icon name="arrow-right"/> SIGUIENTE: REVISAR ÓRDENES
                                 </button>
                             </div>
                             <div className="overflow-x-auto bg-gray-900 rounded p-2 font-mono text-[10px] text-gray-300">
                                 <table className="w-full text-left">
                                     <thead className="text-gray-500 border-b border-gray-700">
-                                        <tr>
-                                            <th>MODELO</th><th>PARTIDA</th><th>CLIENTE</th><th>DESCRIPCIÓN</th><th>COSTURA</th><th>CÓDIGO</th><th>MQ</th>
-                                        </tr>
+                                        <tr><th>MODELO</th><th>PARTIDA</th><th>CLIENTE</th><th>DESCRIPCIÓN</th><th>COSTURA</th><th>CÓDIGO</th><th>MQ</th></tr>
                                     </thead>
                                     <tbody>
                                         {previewRows.map((row, i) => (
                                             <tr key={i} className="border-b border-gray-800">
-                                                <td>{row.modelo}</td>
-                                                <td>{row.partida}</td>
-                                                <td>{row.cliente}</td>
-                                                <td>{row.descripcion}</td>
-                                                <td className="text-yellow-400">{row.costura}</td>
-                                                <td className="text-green-400">{row.codigo}</td>
-                                                <td>{row.maquina}</td>
+                                                <td>{row.modelo}</td><td>{row.partida}</td><td>{row.cliente}</td><td>{row.descripcion}</td>
+                                                <td className="text-yellow-400">{row.costura}</td><td className="text-green-400">{row.codigo}</td><td>{row.maquina}</td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
                             </div>
                         </div>
-
                     </div>
                 </div>
             );
@@ -914,7 +1081,7 @@
             const [config, setConfig] = useState({});
             const [selectedOrder, setSelectedOrder] = useState(null);
             const [showSettings, setShowSettings] = useState(false);
-            const [showGenerator, setShowGenerator] = useState(false); // NUEVO ESTADO PARA EL GENERADOR
+            const [showGenerator, setShowGenerator] = useState(false); 
             const [showGallery, setShowGallery] = useState(false);
             const [viewMode, setViewMode] = useState('active'); 
             
@@ -971,7 +1138,7 @@
 
             return (
                 <div className="h-screen bg-slate-100 overflow-hidden relative">
-                    {/* AQUÍ ESTÁ EL NUEVO MODAL GENERADOR */}
+                    {/* AQUÍ ESTÁ EL NUEVO MODAL GENERADOR CON STAGING */}
                     {showGenerator && <OrderGeneratorModal onClose={()=>setShowGenerator(false)} onProcess={handleGeneratorSuccess} />}
                     
                     {view === 'detail' && selectedOrder && <div className="absolute inset-0 z-40 bg-white overflow-y-auto print-visible-wrapper"><OrderView order={orders.find(o=>o.id===selectedOrder.id) || selectedOrder} config={config} onBack={()=>setView('dashboard')} onEdit={()=>{}}/></div>}
@@ -985,7 +1152,7 @@
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
                                     <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.5 INTEGRADO</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.6 STAGING</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
@@ -998,7 +1165,7 @@
                                     <button onClick={()=>setShowGallery(true)} className="bg-sky-500 hover:bg-sky-600 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2 text-xs"><Icon name="image-search"/> GALERÍA</button>
                                     <button onClick={()=>setShowSettings(true)} className="bg-slate-300 hover:bg-slate-400 text-slate-800 p-2 rounded shadow"><Icon name="settings"/></button>
                                     
-                                    {/* BOTÓN PRINCIPAL CAMBIADO */}
+                                    {/* BOTÓN PRINCIPAL GENERADOR */}
                                     {viewMode === 'active' && (
                                         <button onClick={()=>setShowGenerator(true)} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2 animate-bounce">
                                             <Icon name="wand-2"/> GENERAR ORDEN AUTOMÁTICA
