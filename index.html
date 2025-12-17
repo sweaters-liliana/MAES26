@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Textil Cloud - Cirineo v3.7 (Inventario Integrado)</title>
+    <title>Sistema Textil Cloud - Cirineo v3.7.1 (Fix)</title>
     
     <link id="appIcon" rel="icon" href="https://raw.githubusercontent.com/jesusvn1993mplvt3-ai/CIRINEO/refs/heads/main/icon.ico">
     <meta name="theme-color" content="#1e293b">
@@ -113,38 +113,29 @@
             }, [onScan]);
         };
 
-        // --- COMPONENTE ACTUALIZADO: EDITOR DE BORRADOR CON INVENTARIO ---
+        // --- COMPONENTE: EDITOR DE BORRADOR CON INVENTARIO ---
         const DraftEditor = ({ draft, onSave, onCancel }) => {
             const [localDraft, setLocalDraft] = useState(draft);
             const [inventory, setInventory] = useState([]);
             const [suggestions, setSuggestions] = useState({ index: null, items: [] });
 
-            // 1. CARGAR INVENTARIO AL ABRIR
             useEffect(() => {
-                // Asumiendo que tu inventario se guarda como documentos individuales en la colección 'inventory'
-                // O si usas el sistema 'main' con items array, ajustaremos la lectura:
                 const unsubscribe = db.collection('inventory').onSnapshot(snap => {
-                    // Adaptador para leer si es colección de docs o un doc 'main'
                     let loadedItems = [];
-                    // Intento leer docs individuales (Método Robust)
                     snap.docs.forEach(doc => {
                         if(doc.id !== 'main') loadedItems.push({ id: doc.id, ...doc.data() });
                     });
-                    
-                    // Si no hay docs y existe 'main', lee del array (Método Legacy/SingleDoc)
                     if(loadedItems.length === 0) {
                         const mainDoc = snap.docs.find(d => d.id === 'main');
                         if(mainDoc && mainDoc.data().items) {
                             loadedItems = mainDoc.data().items;
                         }
                     }
-                    
                     setInventory(loadedItems);
                 });
                 return () => unsubscribe();
             }, []);
             
-            // 2. AÑADIR/QUITAR HILOS
             const addThread = () => {
                 const newThreads = [...(localDraft.threading || []), { guia: (localDraft.threading?.length || 0) + 1, material: '', porcentaje: '', materialId: null }];
                 setLocalDraft({ ...localDraft, threading: newThreads });
@@ -160,7 +151,6 @@
                 setLocalDraft({ ...localDraft, threading: newThreads });
             };
 
-            // 3. LÓGICA DE SUGERENCIAS DE MATERIAL
             const handleMaterialInput = (idx, val) => {
                 updateThread(idx, 'material', val);
                 if (val.length > 1) {
@@ -175,33 +165,25 @@
 
             const selectSuggestion = (idx, item) => {
                 const newThreads = [...localDraft.threading];
-                // Intentamos leer stockActual o stock (compatibilidad)
                 const stockVal = item.stockActual || item.stock || 0;
-                
                 newThreads[idx] = { 
                     ...newThreads[idx], 
-                    material: `${item.material} - ${item.color} (${stockVal}kg)`,
-                    materialId: item.id, // ID CRÍTICO PARA EL DESCUENTO
+                    material: `${item.material} - ${item.color}`,
+                    materialId: item.id, 
                     stockDisponible: stockVal
                 };
                 setLocalDraft({ ...localDraft, threading: newThreads });
                 setSuggestions({ index: null, items: [] });
             };
 
-            // 4. CÁLCULO DE CONSUMO AUTOMÁTICO
             const calculateConsumption = (hilo) => {
                 if (!hilo.materialId || !hilo.porcentaje) return 0;
-                
-                // Suma total de gramos de todas las piezas (peso * cantidad)
                 const totalGramos = localDraft.subPiecesData.reduce((acc, p) => {
                     return acc + (Number(p.peso || 0) * Number(p.totalPedido || 0));
                 }, 0);
-                
-                // Fórmula: (TotalGramos * (%Hilo / 100)) / 1000 = Kg
                 return ((totalGramos * (Number(hilo.porcentaje) / 100)) / 1000).toFixed(2);
             };
 
-            // Actualizar datos de pieza
             const updatePiece = (idx, field, val) => {
                 const newPieces = [...localDraft.subPiecesData];
                 newPieces[idx] = { ...newPieces[idx], [field]: val };
@@ -215,7 +197,6 @@
                     </div>
                     
                     <div className="p-6 overflow-y-auto flex-grow space-y-6">
-                        {/* DATOS PRINCIPALES */}
                         <div className="grid grid-cols-3 gap-4 bg-slate-50 p-4 rounded border">
                             <div>
                                 <label className="block text-xs font-bold text-gray-500">Máquina</label>
@@ -231,7 +212,6 @@
                             </div>
                         </div>
 
-                        {/* --- ENHEBRADO E INVENTARIO (SECCIÓN ACTUALIZADA) --- */}
                         <div>
                             <div className="flex justify-between items-center mb-2">
                                 <h3 className="font-bold text-sm text-slate-700">Enhebrado e Inventario</h3>
@@ -258,7 +238,6 @@
                                                     placeholder="Escribe para buscar..."
                                                     className="w-full border p-1 rounded focus:border-indigo-500 outline-none"
                                                 />
-                                                {/* MENÚ FLOTANTE DE SUGERENCIAS */}
                                                 {suggestions.index === i && suggestions.items.length > 0 && (
                                                     <div className="absolute z-50 bg-white border shadow-lg w-full max-w-md max-h-40 overflow-y-auto left-0 mt-1 rounded">
                                                         {suggestions.items.map(item => (
@@ -287,7 +266,6 @@
                                                     placeholder="%"
                                                 />
                                             </td>
-                                            {/* CÁLCULO EN TIEMPO REAL */}
                                             <td className="text-center font-bold text-red-600 bg-red-50">
                                                 {calculateConsumption(h)} Kg
                                             </td>
@@ -301,7 +279,6 @@
                             </table>
                         </div>
 
-                        {/* DETALLE DE PIEZAS */}
                         <div>
                             <h3 className="font-bold text-sm text-slate-700 mb-2">Detalles Técnicos (Piezas)</h3>
                             {localDraft.subPiecesData.map((p, idx) => (
@@ -342,21 +319,20 @@
 
         // --- COMPONENTE PRINCIPAL DEL GENERADOR ---
         const OrderGeneratorModal = ({ onClose, onProcess }) => {
-            const [step, setStep] = useState('input'); // 'input', 'staging', 'editing'
+            const [step, setStep] = useState('input');
             const [drafts, setDrafts] = useState([]);
             const [currentDraftIndex, setCurrentDraftIndex] = useState(null);
 
-            // Estado Formulario
             const [form, setForm] = useState({
-                modelo: 'M029',
-                cliente: 'MAES',
+                modelo: '',
+                cliente: '',
                 fecha: new Date().toISOString().split('T')[0],
                 partidaCodigo: '',
-                totalPrendas: 250
+                totalPrendas: 0
             });
+            // CAMBIO: Ahora inicia vacío para que tú llenes los datos
             const [components, setComponents] = useState([
-                { descripcion: 'BLUSA DOBLE', sufijo: 'BL', maquina: 30, multiplicador: 1, piezasPorPaquete: 25 },
-                { descripcion: 'MANGA LARGA', sufijo: 'ML', maquina: 1, multiplicador: 2, piezasPorPaquete: 50 }
+                { descripcion: '', sufijo: '', maquina: '', multiplicador: 1, piezasPorPaquete: 0 }
             ]);
 
             useEffect(() => {
@@ -376,14 +352,16 @@
                 setComponents(newComps);
             };
 
-            // GENERAR BORRADORES
             const handleGenerateDrafts = () => {
                 if (!form.partidaCodigo || !form.cliente || !form.modelo) return alert("Faltan datos generales");
                 
                 const ordersByMachine = {};
 
                 components.forEach(comp => {
-                    const maquinaKey = String(comp.maquina || '0');
+                    // Validar si la línea está vacía para no generar basura
+                    if(!comp.descripcion || !comp.maquina) return;
+
+                    const maquinaKey = String(comp.maquina);
                     if (!ordersByMachine[maquinaKey]) {
                         ordersByMachine[maquinaKey] = {
                             codigo: form.modelo.toUpperCase(),
@@ -433,20 +411,21 @@
                     }
                 });
 
-                setDrafts(Object.values(ordersByMachine));
+                const generated = Object.values(ordersByMachine);
+                if(generated.length === 0) return alert("Agrega al menos un componente válido (con nombre y máquina)");
+                
+                setDrafts(generated);
                 setStep('staging');
             };
 
-            // --- FUNCIÓN DE GUARDADO ACTUALIZADA (DESCUENTA INVENTARIO) ---
             const handleSaveOne = async (finalDraft) => {
-                const batch = db.batch(); // Transacción atómica
+                const batch = db.batch();
                 
                 try {
                     const newId = String(Date.now() + Math.random());
                     const orderRef = db.collection('orders').doc(newId);
                     const displayId = generateSmartID(finalDraft.partida, finalDraft.subPiecesData, finalDraft.maquina);
 
-                    // 1. Guardar la Orden
                     batch.set(orderRef, {
                         ...finalDraft,
                         id: Number(newId),
@@ -456,33 +435,23 @@
                         totalPedido: finalDraft.subPiecesData.reduce((a,b)=>a+Number(b.totalPedido),0)
                     });
 
-                    // 2. Procesar Descuentos de Inventario
                     const totalGramos = finalDraft.subPiecesData.reduce((acc, p) => acc + (Number(p.peso || 0) * Number(p.totalPedido || 0)), 0);
                     
-                    // Recorremos los hilos configurados
                     for (const hilo of (finalDraft.threading || [])) {
                         if (hilo.materialId) {
                             const cantADescontar = Number(((totalGramos * (Number(hilo.porcentaje) / 100)) / 1000).toFixed(2));
-                            
-                            // Referencia al documento del material
-                            // NOTA: Asumimos estructura de documentos individuales.
                             const matRef = db.collection('inventory').doc(hilo.materialId);
                             
-                            // Restar del stock (usamos 'stockActual' o 'stock' según tu DB, aquí usamos increment negativo)
-                            // Si usas 'stock' como string en tu DB, Firebase necesita que sea number para increment. 
-                            // Asumimos que la migración a Numbers se hizo o se maneja.
                             batch.update(matRef, {
                                 stock: firebase.firestore.FieldValue.increment(-cantADescontar),
-                                // Fallback por si el campo se llama stockActual
                                 stockActual: firebase.firestore.FieldValue.increment(-cantADescontar)
                             });
 
-                            // Crear registro en bitácora
                             const moveRef = db.collection('inventory_movements').doc();
                             batch.set(moveRef, {
                                 materialId: hilo.materialId,
                                 type: 'SALIDA_ORDEN',
-                                quantityKg: cantADescontar, // Usamos quantityKg para coincidir con tu app de inventario
+                                quantityKg: cantADescontar,
                                 orderId: displayId,
                                 model: finalDraft.codigo,
                                 partida: finalDraft.partida,
@@ -492,10 +461,8 @@
                         }
                     }
 
-                    // Ejecutar todo junto
                     await batch.commit();
 
-                    // Limpiar UI
                     const remaining = drafts.filter((_, i) => i !== currentDraftIndex);
                     setDrafts(remaining);
                     setStep('staging');
@@ -507,12 +474,10 @@
                     }
                 } catch (e) {
                     console.error("Error batch save:", e);
-                    // Si falla el batch porque el documento no existe (ej. estructura de array 'main'), avisar
-                    alert("Error al guardar. Verifica que los materiales seleccionados existan en la base de datos.");
+                    alert("Error al guardar. Verifica conexión o datos.");
                 }
             };
 
-            // VISTAS DEL MODAL
             if (step === 'editing' && currentDraftIndex !== null) {
                 return (
                     <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
@@ -574,12 +539,11 @@
                 );
             }
 
-            // VISTA INICIAL (GENERADOR)
             const previewRows = (() => {
                 let rows = [];
                 if (!form.totalPrendas) return [];
                 const comp = components[0];
-                if (!comp) return [];
+                if (!comp || !comp.descripcion) return [];
                 const totalPiezasComp = form.totalPrendas * comp.multiplicador;
                 const numPaquetes = comp.piezasPorPaquete > 0 ? Math.ceil(totalPiezasComp / comp.piezasPorPaquete) : 0;
                 for (let i = 1; i <= Math.min(3, numPaquetes); i++) {
@@ -610,7 +574,6 @@
                         </div>
 
                         <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto">
-                            {/* COLUMNA 1: DATOS GENERALES */}
                             <div className="space-y-4">
                                 <h2 className="text-lg font-semibold text-gray-700 border-b pb-1">1. Datos Generales</h2>
                                 <div className="grid grid-cols-2 gap-4">
@@ -639,7 +602,6 @@
                                 </div>
                             </div>
 
-                            {/* COLUMNA 2: COMPONENTES */}
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center border-b pb-1">
                                     <h2 className="text-lg font-semibold text-gray-700">2. Partes de la Prenda</h2>
@@ -682,7 +644,6 @@
                             </div>
                         </div>
 
-                        {/* FOOTER */}
                         <div className="bg-gray-800 text-white p-4 shrink-0 mt-auto">
                             <div className="flex justify-between items-center mb-2">
                                 <h2 className="text-sm font-semibold">Previsualización (Lógica)</h2>
@@ -711,7 +672,6 @@
             );
         };
 
-        // --- COMPONENTE PAPELETA INDIVIDUAL (4x6) ---
         const PackageTicket = ({ order, pkg }) => {
             const canvasRef = useRef(null);
             const pieceInfo = order.subPiecesData?.find(p => p.pieza === pkg.piezaNombre) || {};
@@ -1301,7 +1261,7 @@
                                 <h1 className="text-2xl font-black text-slate-800 flex gap-2 items-center">
                                     <Icon name="layout-dashboard"/> 
                                     <span>{viewMode === 'active' ? 'PLANTA' : 'HISTORIAL'}</span>
-                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.7 INVENTARIO</span>
+                                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">v3.7.1 INVENTARIO FIX</span>
                                 </h1>
                                 <div className="flex gap-2 items-center">
                                     <InstallButton />
