@@ -2,216 +2,186 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JMVN - Galería Exclusiva de Diseños</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>JMVN - Generador de Trazo Pro</title>
     <style>
-        :root {
-            --bg: #0a0a0a;
-            --panel: #161616;
-            --accent: #ff0055;
-            --text: #ffffff;
-            --text-dim: #a0a0a0;
-            --card: #222222;
+        :root { --accent: #ff0055; --bg: #111; --text: #eee; --panel: #222; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0; touch-action: none; }
+        
+        header { text-align: center; margin-bottom: 20px; }
+        h1 { margin: 0; font-size: 2.2rem; letter-spacing: 2px; text-transform: uppercase; }
+        .red-text { color: var(--accent); } .white-text { color: white; }
+
+        .container { background: var(--panel); padding: 25px; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); width: 95%; max-width: 1400px; display: grid; grid-template-columns: 320px 1fr; gap: 25px; }
+        
+        /* Controles */
+        .controls { display: flex; flex-direction: column; gap: 12px; height: fit-content; max-height: 90vh; overflow-y: auto; }
+        .control-group { background: #333; padding: 12px; border-radius: 10px; border: 1px solid #444; }
+        .control-group.project-meta { border-color: var(--accent); background: #2a1a1f; }
+        
+        label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
+        input[type="text"], input[type="file"], input[type="number"], select { width: 100%; padding: 8px; background: #222; border: 1px solid #555; color: white; border-radius: 4px; box-sizing: border-box; }
+        input[type="range"] { width: 100%; cursor: pointer; }
+        
+        button { background: var(--accent); color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; font-size: 0.9rem; }
+        button:hover { filter: brightness(1.2); }
+        button:disabled { background: #555; cursor: not-allowed; opacity: 0.7; }
+        button.edit-mode-btn { background: #2196F3; box-shadow: 0 4px 10px rgba(33, 150, 243, 0.3); }
+
+        .val { float: right; color: var(--accent); font-weight: bold; }
+        .dimensions-display { text-align: center; color: #00E676; font-family: monospace; font-size: 1.1rem; margin-top: 10px; }
+
+        /* Área de SVG / Canvas */
+        #visualWrapper { background: #fff; border-radius: 8px; height: 650px; position: relative; overflow: hidden; box-shadow: inset 0 0 20px rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; }
+        #svgContent { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+        
+        /* --- MODO EDICIÓN (OVERLAY) --- */
+        #editorOverlay { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            background: #1a1a1a; z-index: 100; display: none; flex-direction: column; 
         }
+        #editorCanvas { flex-grow: 1; cursor: grab; background: #e0e0e0; touch-action: none; }
+        #editorCanvas:active { cursor: grabbing; }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
-        body {
-            font-family: 'Segoe UI', Roboto, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            line-height: 1.6;
+        .editor-toolbar {
+            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 30px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.5); pointer-events: auto;
         }
-
-        header {
-            background: #000;
-            padding: 20px;
-            text-align: center;
-            border-bottom: 2px solid var(--accent);
-            position: sticky;
-            top: 0;
-            z-index: 100;
+        .tool-btn {
+            width: 45px; height: 45px; border-radius: 50%; border: 2px solid transparent;
+            background: #333; color: white; font-size: 1.2rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
         }
+        .tool-btn.active { border-color: white; transform: scale(1.1); }
+        .tool-btn.delete.active { background: var(--accent); }
+        .tool-btn.add.active { background: #00E676; color: black; }
+        .tool-btn.move.active { background: #2196F3; }
 
-        .logo {
-            font-size: 1.8rem;
-            font-weight: bold;
-            letter-spacing: 3px;
-            text-transform: uppercase;
+        .editor-actions {
+            position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: center; gap: 20px; pointer-events: none;
         }
+        .editor-actions button { pointer-events: auto; width: 140px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .btn-confirm { background: #00C853; }
+        .btn-discard { background: #D50000; }
 
-        .container {
-            max-width: 1400px;
-            margin: 40px auto;
-            padding: 0 20px;
+        /* Controles de Flechas para MOVER */
+        #dpad {
+            position: absolute; bottom: 90px; right: 20px; width: 120px; height: 120px;
+            display: none; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
+            pointer-events: auto; opacity: 0.8;
         }
+        .d-btn { background: #444; border: 1px solid #666; color: white; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        .d-btn:active { background: #2196F3; }
+        
+        .footer { margin-top: 30px; text-align: center; color: #555; font-size: 0.9rem; border-top: 1px solid #333; padding-top: 20px; width: 100%; }
+        .gemini-tag { color: var(--accent); font-weight: bold; font-size: 0.8rem; letter-spacing: 1px; display: block; margin-top: 5px; }
 
-        /* Barra de herramientas */
-        .toolbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-            flex-wrap: wrap;
-            gap: 20px;
-        }
-
-        .search-box {
-            flex-grow: 1;
-            max-width: 500px;
-            position: relative;
-        }
-
-        .search-box input {
-            width: 100%;
-            padding: 12px 20px;
-            background: var(--panel);
-            border: 1px solid #333;
-            border-radius: 30px;
-            color: white;
-            font-size: 1rem;
-            outline: none;
-            transition: 0.3s;
-        }
-
-        .search-box input:focus {
-            border-color: var(--accent);
-            box-shadow: 0 0 10px rgba(255, 0, 85, 0.2);
-        }
-
-        .stats-summary {
-            background: var(--panel);
-            padding: 10px 25px;
-            border-radius: 15px;
-            border-left: 4px solid var(--accent);
-        }
-
-        /* Cuadrícula de Galería */
-        .gallery-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 25px;
-        }
-
-        .card {
-            background: var(--card);
-            border-radius: 15px;
-            overflow: hidden;
-            border: 1px solid #333;
-            transition: transform 0.3s, border-color 0.3s;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .card:hover {
-            transform: translateY(-10px);
-            border-color: var(--accent);
-        }
-
-        .preview-box {
-            background: white;
-            height: 220px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 15px;
-            position: relative;
-        }
-
-        .preview-box svg {
-            max-width: 100%;
-            max-height: 100%;
-        }
-
-        .card-info {
-            padding: 20px;
-            flex-grow: 1;
-        }
-
-        .card-title {
-            font-size: 1.1rem;
-            font-weight: bold;
-            margin-bottom: 5px;
-            display: block;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .card-meta {
-            font-size: 0.85rem;
-            color: var(--text-dim);
-            margin-bottom: 15px;
-        }
-
-        .card-actions {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            padding: 0 20px 20px;
-        }
-
-        button {
-            padding: 10px;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            transition: 0.2s;
-        }
-
-        .btn-download { background: var(--accent); color: white; }
-        .btn-delete { background: #333; color: #ff4444; }
-        .btn-delete:hover { background: #441111; }
-
-        /* Estados de carga */
-        #loader {
-            text-align: center;
-            padding: 50px;
-            font-size: 1.2rem;
-            color: var(--accent);
-        }
-
-        @media (max-width: 600px) {
-            .toolbar { flex-direction: column; align-items: stretch; }
-            .gallery-grid { grid-template-columns: 1fr; }
-        }
+        /* Responsive */
+        @media (max-width: 900px) { .container { grid-template-columns: 1fr; } #visualWrapper { height: 500px; } }
     </style>
 </head>
 <body>
 
     <header>
-        <div class="logo">
-            <span style="color: var(--accent)">JMVN</span> <span style="color: white">Archivo Digital</span>
-        </div>
+        <h1><span class="red-text">HERRAMIENTAS INTELIGENTES</span> <span class="white-text">JMVN</span></h1>
     </header>
 
     <div class="container">
-        <div class="toolbar">
-            <div class="search-box">
-                <input type="text" id="searchInput" placeholder="Buscar por nombre del diseño..." onkeyup="filterGallery()">
+        <div class="controls">
+            <div class="control-group project-meta">
+                <label style="color:white; font-weight:bold;">NOMBRE DEL PROYECTO *</label>
+                <input type="text" id="projectName" placeholder="Ej: Logo Camisa 01" autocomplete="off">
             </div>
-            <div class="stats-summary" id="statsBox">
-                Cargando historial...
+
+            <div class="control-group">
+                <label>1. Imagen del Logo</label>
+                <input type="file" id="imageInput" accept="image/*">
             </div>
-            <button onclick="refreshData()" style="width: auto; background: #222; color: white; padding: 12px 20px;">
-                🔄 Actualizar
-            </button>
+
+            <div class="control-group">
+                <label>2. Configuración Física</label>
+                <label style="font-size:0.75rem">Ancho Real de Impresión (cm):</label>
+                <input type="number" id="realWidthCm" value="25" step="0.5">
+            </div>
+
+            <div class="control-group">
+                <label>3. Distribución</label>
+                <select id="mode" class="param-input">
+                    <option value="adaptive">Trazo Adaptativo (Curvas)</option>
+                    <option value="honeycomb">Panal Orgánico</option>
+                    <option value="grid">Ladrillo Recto</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Separación Vertical: <span id="yStepVal" class="val">--</span> mm</label>
+                <input type="range" id="yStep" class="param-input" min="2" max="40" value="8">
+            </div>
+
+            <div class="control-group">
+                <label>Densidad Horizontal: <span id="xStepVal" class="val">--</span> mm</label>
+                <input type="range" id="xStep" class="param-input" min="2" max="40" value="8">
+            </div>
+
+            <div class="control-group">
+                <label>Ángulo: <span id="angleVal" class="val">0</span>°</label>
+                <input type="range" id="angle" class="param-input" min="-45" max="45" value="0">
+            </div>
+
+            <div class="control-group">
+                <label>Tamaño Piedra (aprox): <span id="radiusVal" class="val">--</span> mm</label>
+                <input type="range" id="radius" class="param-input" min="1" max="20" step="0.5" value="2.5">
+            </div>
+
+            <button onclick="processImage()">Generar Trama Base</button>
+            <button class="edit-mode-btn" id="btnOpenEditor" onclick="openEditor()" disabled>🛠️ Entrar a Modo Edición</button>
+            <div class="dimensions-display" id="dimDisplay">0 cm x 0 cm</div>
         </div>
 
-        <div id="loader">Conectando con la base de datos...</div>
-        
-        <div class="gallery-grid" id="mainGrid">
+        <div id="visualWrapper">
+            <div id="svgContent">
+                <div style="color:#bbb; text-align:center">Sube imagen y genera trama<br>para habilitar opciones.</div>
             </div>
+
+            <div id="editorOverlay">
+                <div class="editor-toolbar">
+                    <button class="tool-btn delete active" onclick="setTool('delete')" title="Eliminar (Rojo)">🗑️</button>
+                    <button class="tool-btn add" onclick="setTool('add')" title="Agregar (Verde)">➕</button>
+                    <button class="tool-btn move" onclick="setTool('move')" title="Mover (Azul)">✋</button>
+                </div>
+
+                <canvas id="editorCanvas"></canvas>
+                
+                <div id="dpad">
+                    <div></div><button class="d-btn" onclick="nudge(0,-1)">▲</button><div></div>
+                    <button class="d-btn" onclick="nudge(-1,0)">◀</button>
+                    <button class="d-btn" style="background:#2196F3; border:none;">●</button>
+                    <button class="d-btn" onclick="nudge(1,0)">▶</button>
+                    <div></div><button class="d-btn" onclick="nudge(0,1)">▼</button><div></div>
+                </div>
+
+                <div class="editor-actions">
+                    <button class="btn-discard" onclick="discardChanges()">Descartar ❌</button>
+                    <button class="btn-confirm" onclick="confirmChanges()">CONFIRMAR ✅</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="procCanvas" style="display:none;"></canvas>
+
+    <div class="footer">
+        Desarrollado por <strong>JESÚS VALLEJO</strong><br>
+        <span class="gemini-tag">POWERED BY GEMINI 3 PRO</span>
+        <div style="margin-top:10px; font-style:italic; font-size:0.75rem">
+            HERRAMIENTA DE USO EXCLUSIVO PARA EMPLEADOS DE <b>VIVA ROUSS</b> Y <b>MISS ROUSS</b>.
+        </div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-        import { getFirestore, collection, getDocs, deleteDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
 
-        // Misma configuración que tu generador
         const firebaseConfig = {
             apiKey: "AIzaSyCngQL1pdqghv2vbjkPycT1Xf0C46f7jYs",
             authDomain: "cirineo-cec21.firebaseapp.com",
@@ -223,113 +193,491 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
-        
-        let allDesigns = [];
 
-        // Función para cargar los datos
-        async function loadGallery() {
-            const grid = document.getElementById('mainGrid');
-            const loader = document.getElementById('loader');
-            const stats = document.getElementById('statsBox');
-
+        // Exportar función global para guardar
+        window.saveToFirebase = async (points, svgString) => {
+            const name = document.getElementById('projectName').value.trim();
+            if(!name) { alert("⚠️ Se descargará el SVG, pero NO se guardó en Nube porque falta el Nombre del Proyecto."); return; }
+            
             try {
-                const q = query(collection(db, "proyectos_pedreria"), orderBy("fecha", "desc"));
-                const querySnapshot = await getDocs(q);
-                
-                allDesigns = [];
-                grid.innerHTML = "";
-                loader.style.display = "none";
-
-                if (querySnapshot.empty) {
-                    grid.innerHTML = "<p style='grid-column: 1/-1; text-align:center;'>No hay diseños guardados aún.</p>";
-                    stats.innerText = "0 Diseños en total";
-                    return;
-                }
-
-                querySnapshot.forEach((documentSnap) => {
-                    const data = documentSnap.data();
-                    const id = documentSnap.id;
-                    allDesigns.push({ id, ...data });
-                    
-                    renderCard(id, data);
+                await addDoc(collection(db, "proyectos_pedreria"), {
+                    nombre_proyecto: name,
+                    puntos_total: points.length,
+                    svg_generado: svgString,
+                    config: window.getLastConfig(),
+                    fecha: serverTimestamp(),
+                    autor: "JESÚS VALLEJO / STAFF"
                 });
-
-                stats.innerHTML = `<strong>${allDesigns.length}</strong> Diseños en el archivo`;
-
-            } catch (error) {
-                console.error(error);
-                loader.innerHTML = "Error de conexión. Revisa tu internet.";
-            }
-        }
-
-        function renderCard(id, data) {
-            const grid = document.getElementById('mainGrid');
-            const fecha = data.fecha ? new Date(data.fecha.seconds * 1000).toLocaleDateString() : "S/F";
-            
-            const card = document.createElement('div');
-            card.className = 'card';
-            card.setAttribute('data-name', data.nombre.toLowerCase());
-            card.innerHTML = `
-                <div class="preview-box">
-                    ${data.svg}
-                </div>
-                <div class="card-info">
-                    <span class="card-title">${data.nombre || 'Sin nombre'}</span>
-                    <div class="card-meta">
-                        📅 ${fecha}<br>
-                        💎 ${data.puntos || 0} puntos
-                    </div>
-                </div>
-                <div class="card-actions">
-                    <button class="btn-download" onclick="downloadSVG('${id}')">Descargar</button>
-                    <button class="btn-delete" onclick="deleteEntry('${id}')">Eliminar</button>
-                </div>
-            `;
-            grid.appendChild(card);
-        }
-
-        // Exponer funciones al objeto window para que los botones funcionen
-        window.downloadSVG = (id) => {
-            const item = allDesigns.find(d => d.id === id);
-            if(!item) return;
-            
-            const blob = new Blob([item.svg], {type: "image/svg+xml"});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `${item.nombre || 'diseño'}_JMVN.svg`;
-            a.click();
-            URL.revokeObjectURL(url);
-        };
-
-        window.deleteEntry = async (id) => {
-            if(confirm("¿Estás seguro de que quieres eliminar este diseño? Esta acción no se puede deshacer.")) {
-                await deleteDoc(doc(db, "proyectos_pedreria", id));
-                loadGallery(); // Recargar
+                console.log("✅ Guardado en Firebase");
+            } catch(e) {
+                console.error(e);
+                alert("Error de conexión con base de datos.");
             }
         };
-
-        window.refreshData = () => loadGallery();
-
-        // Carga inicial
-        loadGallery();
     </script>
 
     <script>
-        // Lógica de filtrado (Search)
-        function filterGallery() {
-            const query = document.getElementById('searchInput').value.toLowerCase();
-            const cards = document.querySelectorAll('.card');
-            
-            cards.forEach(card => {
-                const name = card.getAttribute('data-name');
-                if(name.includes(query)) {
-                    card.style.display = "flex";
+        // --- ESTADO GLOBAL ---
+        let globalPoints = [];     // Array actual de puntos {x, y}
+        let backupPoints = [];     // Para "Descartar"
+        let canvasWidth = 0;       // Dimensiones internas
+        let canvasHeight = 0;
+        let imgAspectRatio = 1;
+        
+        let manualEditsMade = false; // Flag de seguridad
+
+        // --- ESTADO DEL EDITOR ---
+        let editTool = 'delete'; // delete, add, move
+        let selectedPointIdx = -1; // Para herramienta mover
+        let editorScale = 1;
+        let editorOffsetX = 0;
+        let editorOffsetY = 0;
+        let isDragging = false;
+        let lastMouse = {x:0, y:0};
+        
+        // --- INPUTS UI ---
+        const inputs = document.querySelectorAll('.param-input');
+        inputs.forEach(i => i.addEventListener('input', updateLabels));
+        
+        // Advertencia de seguridad en sliders
+        inputs.forEach(i => i.addEventListener('mousedown', checkManualEditsWarning));
+        inputs.forEach(i => i.addEventListener('touchstart', checkManualEditsWarning));
+
+        function checkManualEditsWarning() {
+            if(manualEditsMade) {
+                const proceed = confirm("⚠️ ¡ADVERTENCIA!\n\nHiciste ediciones manuales (borrar/mover puntos). Si cambias los parámetros ahora, se regenerará todo y PERDERÁS tus ediciones manuales.\n\n¿Deseas continuar y reiniciar el diseño?");
+                if(proceed) {
+                    manualEditsMade = false;
+                    processImage(); // Regenerar
                 } else {
-                    card.style.display = "none";
+                    // Intentar revertir el input (complejo en UI, pero al menos paramos la lógica)
+                    // En este caso simple, el usuario soltará el click y el evento 'change' disparará processImage si no lo detenemos.
+                    // Una solución rápida es recargar la imagen procesada anterior, pero dejaremos que el usuario decida.
                 }
-            });
+            }
         }
+
+        // Detectar cambios en sliders para regenerar (solo si no hay ediciones manuales pendientes)
+        document.getElementById('realWidthCm').addEventListener('input', updateLabels);
+        
+        function updateLabels() {
+            const realW = parseFloat(document.getElementById('realWidthCm').value) || 25;
+            // Asumimos canvasWidth interno de 1000px por defecto al procesar
+            const scaleFactor = canvasWidth > 0 ? (realW * 10) / canvasWidth : 0.025; // mm por pixel
+            
+            document.getElementById('yStepVal').innerText = (document.getElementById('yStep').value * scaleFactor).toFixed(1);
+            document.getElementById('xStepVal').innerText = (document.getElementById('xStep').value * scaleFactor).toFixed(1);
+            document.getElementById('angleVal').innerText = document.getElementById('angle').value;
+            // Radio es radio, diámetro es x2
+            const rPx = parseFloat(document.getElementById('radius').value);
+            document.getElementById('radiusVal').innerText = (rPx * 2 * scaleFactor).toFixed(1);
+
+            // Calcular dimensiones finales
+            if(canvasHeight > 0) {
+                const hCm = (canvasHeight * (realW / canvasWidth)).toFixed(1);
+                document.getElementById('dimDisplay').innerText = `Dimensiones Finales: ${realW} cm x ${hCm} cm`;
+            }
+        }
+
+        window.getLastConfig = () => {
+            return {
+                mode: document.getElementById('mode').value,
+                realWidth: document.getElementById('realWidthCm').value,
+                generatedDate: new Date().toISOString()
+            };
+        }
+
+        // --- PROCESAMIENTO DE IMAGEN ---
+        function processImage() {
+            manualEditsMade = false; 
+            const input = document.getElementById('imageInput');
+            if (!input.files[0]) return alert("Selecciona una imagen primero.");
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const c = document.getElementById('procCanvas');
+                    const ctx = c.getContext('2d', { willReadFrequently: true });
+                    
+                    // Normalizar tamaño a 1000px ancho
+                    const maxW = 1000;
+                    const scale = maxW / img.width;
+                    c.width = maxW;
+                    c.height = img.height * scale;
+                    
+                    canvasWidth = c.width;
+                    canvasHeight = c.height;
+                    imgAspectRatio = c.width / c.height;
+
+                    ctx.fillStyle = "white";
+                    ctx.fillRect(0,0,c.width, c.height);
+                    ctx.drawImage(img, 0, 0, c.width, c.height);
+                    
+                    generatePoints(ctx);
+                    renderSVGPreview();
+                    updateLabels();
+                    document.getElementById('btnOpenEditor').disabled = false;
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+
+        function generatePoints(ctx) {
+            const yStep = parseInt(document.getElementById('yStep').value);
+            const xStep = parseInt(document.getElementById('xStep').value);
+            const angle = parseInt(document.getElementById('angle').value) * (Math.PI / 180);
+            const mode = document.getElementById('mode').value;
+            
+            const w = ctx.canvas.width;
+            const h = ctx.canvas.height;
+            const imgData = ctx.getImageData(0, 0, w, h);
+            
+            globalPoints = [];
+
+            // Algoritmo de barrido rotado
+            for (let y = -h; y < h * 2; y += yStep) {
+                let segment = [];
+                for (let x = -w; x < w * 2; x += 1) {
+                    const rotX = Math.floor(x * Math.cos(angle) - y * Math.sin(angle));
+                    const rotY = Math.floor(x * Math.sin(angle) + y * Math.cos(angle));
+
+                    if (rotX >= 0 && rotX < w && rotY >= 0 && rotY < h) {
+                        const idx = (rotY * w + rotX) * 4;
+                        // Oscuro = Puntos
+                        if (imgData.data[idx] < 150) {
+                            segment.push({x: rotX, y: rotY});
+                        } else if (segment.length > 0) {
+                            addSegment(segment, xStep, mode);
+                            segment = [];
+                        }
+                    }
+                }
+                if (segment.length > 0) addSegment(segment, xStep, mode);
+            }
+        }
+
+        function addSegment(seg, step, mode) {
+            if (seg.length < 2) return;
+            if (mode === 'adaptive') {
+                const count = Math.max(1, Math.round(seg.length / step));
+                for(let i=0; i<count; i++) {
+                    const idx = Math.floor((seg.length / (count+1)) * (i+1));
+                    globalPoints.push(seg[idx]);
+                }
+            } else {
+                for(let i=0; i<seg.length; i+=step) globalPoints.push(seg[i]);
+            }
+        }
+
+        function renderSVGPreview() {
+            const r = parseFloat(document.getElementById('radius').value);
+            let svg = `<svg viewBox="0 0 ${canvasWidth} ${canvasHeight}" style="max-height:100%; max-width:100%;"><g fill="black">`;
+            globalPoints.forEach(p => {
+                svg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" />`;
+            });
+            svg += `</g></svg>`;
+            document.getElementById('svgContent').innerHTML = svg;
+        }
+
+        // --- MODO EDICIÓN (CANVAS INTERACTIVO) ---
+        
+        const editorCanvas = document.getElementById('editorCanvas');
+        const ctxEdit = editorCanvas.getContext('2d');
+        let initialPinchDist = 0;
+
+        function openEditor() {
+            backupPoints = JSON.parse(JSON.stringify(globalPoints)); // Clonar
+            document.getElementById('editorOverlay').style.display = 'flex';
+            
+            // Ajustar canvas al tamaño de pantalla real del usuario
+            const rect = document.getElementById('visualWrapper').getBoundingClientRect();
+            editorCanvas.width = rect.width;
+            editorCanvas.height = rect.height;
+            
+            // Centrar vista
+            editorScale = Math.min(editorCanvas.width / canvasWidth, editorCanvas.height / canvasHeight) * 0.9;
+            editorOffsetX = (editorCanvas.width - canvasWidth * editorScale) / 2;
+            editorOffsetY = (editorCanvas.height - canvasHeight * editorScale) / 2;
+
+            requestAnimationFrame(drawEditorLoop);
+        }
+
+        function setTool(t) {
+            editTool = t;
+            selectedPointIdx = -1; // Reset selección
+            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            document.querySelector(`.tool-btn.${t}`).classList.add('active');
+            
+            document.getElementById('dpad').style.display = (t === 'move') ? 'grid' : 'none';
+            drawEditorLoop();
+        }
+
+        function drawEditorLoop() {
+            ctxEdit.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+            
+            // Fondo
+            ctxEdit.save();
+            ctxEdit.translate(editorOffsetX, editorOffsetY);
+            ctxEdit.scale(editorScale, editorScale);
+            
+            // Dibujar área de trabajo (papel blanco)
+            ctxEdit.fillStyle = "white";
+            ctxEdit.fillRect(0,0, canvasWidth, canvasHeight);
+            
+            const r = parseFloat(document.getElementById('radius').value);
+
+            // Dibujar puntos
+            for(let i=0; i<globalPoints.length; i++) {
+                const p = globalPoints[i];
+                ctxEdit.beginPath();
+                ctxEdit.arc(p.x, p.y, r, 0, Math.PI*2);
+                
+                if (editTool === 'delete') {
+                    // Contorno rojo, relleno negro
+                    ctxEdit.fillStyle = "black";
+                    ctxEdit.fill();
+                    ctxEdit.lineWidth = r/2;
+                    ctxEdit.strokeStyle = "red";
+                    ctxEdit.stroke();
+                } 
+                else if (editTool === 'move' && i === selectedPointIdx) {
+                    // Azul seleccionado
+                    ctxEdit.fillStyle = "#2196F3";
+                    ctxEdit.fill();
+                    // Indicador extra
+                    ctxEdit.strokeStyle = "#2196F3";
+                    ctxEdit.lineWidth = 2;
+                    ctxEdit.beginPath();
+                    ctxEdit.arc(p.x, p.y, r * 2, 0, Math.PI*2);
+                    ctxEdit.stroke();
+                }
+                else {
+                    // Normal
+                    ctxEdit.fillStyle = "black";
+                    ctxEdit.fill();
+                }
+            }
+
+            // Si modo Agregar, dibujar cursor fantasma si hay posición
+            // (Omitido para simplificar touch, se usa click directo)
+
+            ctxEdit.restore();
+        }
+
+        // --- INTERACCIÓN DEL EDITOR ---
+
+        // Transformación de Coordenadas: Pantalla -> Lienzo Interno
+        function screenToWorld(sx, sy) {
+            return {
+                x: (sx - editorOffsetX) / editorScale,
+                y: (sy - editorOffsetY) / editorScale
+            };
+        }
+
+        // Manejo de Mouse / Touch
+        editorCanvas.addEventListener('mousedown', startPan);
+        editorCanvas.addEventListener('mousemove', movePan);
+        editorCanvas.addEventListener('mouseup', endPan);
+        editorCanvas.addEventListener('wheel', handleWheel);
+        
+        // Touch para móviles (Zoom pinza)
+        editorCanvas.addEventListener('touchstart', (e) => {
+            if(e.touches.length === 2) {
+                isDragging = false; // Zoom mode
+                initialPinchDist = Math.hypot(
+                    e.touches[0].pageX - e.touches[1].pageX,
+                    e.touches[0].pageY - e.touches[1].pageY
+                );
+            } else {
+                startPan(e.touches[0]);
+            }
+        });
+        
+        editorCanvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if(e.touches.length === 2) {
+                const dist = Math.hypot(
+                    e.touches[0].pageX - e.touches[1].pageX,
+                    e.touches[0].pageY - e.touches[1].pageY
+                );
+                const delta = dist - initialPinchDist;
+                const zoomFactor = delta * 0.005;
+                
+                // Zoom al centro de los dedos (simplificado: zoom al centro pantalla)
+                const s = 1 + zoomFactor;
+                editorScale *= s;
+                initialPinchDist = dist;
+                drawEditorLoop();
+            } else {
+                movePan(e.touches[0]);
+            }
+        });
+
+        editorCanvas.addEventListener('touchend', (e) => {
+            if(e.touches.length === 0) endPan(e.changedTouches[0]);
+        });
+
+
+        let startClickTime = 0;
+        let didMove = false;
+
+        function startPan(e) {
+            isDragging = true;
+            didMove = false;
+            startClickTime = Date.now();
+            const rect = editorCanvas.getBoundingClientRect();
+            lastMouse = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        }
+
+        function movePan(e) {
+            if (!isDragging) return;
+            const rect = editorCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            const dx = x - lastMouse.x;
+            const dy = y - lastMouse.y;
+
+            if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didMove = true;
+
+            editorOffsetX += dx;
+            editorOffsetY += dy;
+            lastMouse = {x, y};
+            drawEditorLoop();
+        }
+
+        function endPan(e) {
+            isDragging = false;
+            const timeDiff = Date.now() - startClickTime;
+            
+            // Si fue un click rápido y no arrastró mucho -> ACCIÓN DE HERRAMIENTA
+            if (timeDiff < 300 && !didMove) {
+                const rect = editorCanvas.getBoundingClientRect();
+                const clickX = (e.clientX || e.pageX) - rect.left;
+                const clickY = (e.clientY || e.pageY) - rect.top;
+                handleToolClick(clickX, clickY);
+            }
+        }
+
+        function handleWheel(e) {
+            e.preventDefault();
+            const zoomIntensity = 0.1;
+            const delta = e.deltaY < 0 ? 1 : -1;
+            const s = (delta > 0) ? (1 + zoomIntensity) : (1 / (1 + zoomIntensity));
+            
+            // Zoom hacia el mouse
+            const rect = editorCanvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            editorOffsetX = mx - (mx - editorOffsetX) * s;
+            editorOffsetY = my - (my - editorOffsetY) * s;
+            editorScale *= s;
+            drawEditorLoop();
+        }
+
+        function handleToolClick(sx, sy) {
+            const wPos = screenToWorld(sx, sy);
+            const r = parseFloat(document.getElementById('radius').value);
+            const clickTol = r * 3 / editorScale; // Tolerancia visual ajustada al zoom
+
+            // Buscar punto cercano
+            let hitIdx = -1;
+            let minDist = r * 2.5; // Radio de detección generoso
+
+            for(let i=0; i<globalPoints.length; i++) {
+                const p = globalPoints[i];
+                const d = Math.hypot(p.x - wPos.x, p.y - wPos.y);
+                if (d < minDist) {
+                    minDist = d;
+                    hitIdx = i;
+                }
+            }
+
+            // Lógica por herramienta
+            if (editTool === 'delete') {
+                if (hitIdx !== -1) {
+                    globalPoints.splice(hitIdx, 1);
+                    manualEditsMade = true;
+                }
+            }
+            else if (editTool === 'add') {
+                if (hitIdx === -1) { // Solo agregar si no clickeó uno existente
+                    // Verificar colisión (repelente)
+                    let safe = true;
+                    for(let p of globalPoints) {
+                        if(Math.hypot(p.x - wPos.x, p.y - wPos.y) < r * 2.1) {
+                            safe = false; break;
+                        }
+                    }
+                    if(safe) {
+                        globalPoints.push({x: wPos.x, y: wPos.y});
+                        manualEditsMade = true;
+                    }
+                }
+            }
+            else if (editTool === 'move') {
+                if (hitIdx !== -1) {
+                    selectedPointIdx = hitIdx; // Seleccionar
+                } else if (selectedPointIdx !== -1) {
+                    // Si ya hay seleccionado y clickea vacío -> mover ahí (rápido)
+                    globalPoints[selectedPointIdx].x = wPos.x;
+                    globalPoints[selectedPointIdx].y = wPos.y;
+                    manualEditsMade = true;
+                    // Mantenemos selección para ajuste fino
+                }
+            }
+            drawEditorLoop();
+        }
+
+        // Ajuste fino con flechas
+        window.nudge = (dx, dy) => {
+            if (selectedPointIdx !== -1) {
+                globalPoints[selectedPointIdx].x += dx;
+                globalPoints[selectedPointIdx].y += dy;
+                manualEditsMade = true;
+                drawEditorLoop();
+            }
+        };
+
+        // --- CIERRE DE EDICIÓN ---
+
+        window.discardChanges = () => {
+            if(confirm("¿Descartar cambios y volver al original?")) {
+                globalPoints = backupPoints;
+                document.getElementById('editorOverlay').style.display = 'none';
+                manualEditsMade = false;
+                renderSVGPreview();
+            }
+        };
+
+        window.confirmChanges = async () => {
+            // 1. Renderizar SVG final
+            renderSVGPreview();
+            const svgString = document.getElementById('svgContent').innerHTML;
+
+            // 2. Cerrar Editor
+            document.getElementById('editorOverlay').style.display = 'none';
+            
+            // 3. Descargar SVG Local
+            const name = document.getElementById('projectName').value.trim() || "diseño";
+            const blob = new Blob([svgString], {type: "image/svg+xml"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = name + "_JMVN.svg";
+            a.click();
+
+            // 4. Guardar en BD
+            if (window.saveToFirebase) {
+                await window.saveToFirebase(globalPoints, svgString);
+            }
+            
+            alert("✅ Cambios confirmados. Archivo descargado y guardado en la nube.");
+        };
+
     </script>
 </body>
 </html>
